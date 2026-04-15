@@ -1,0 +1,56 @@
+# Zego — .gitignore
+
+# West workspace artefacts
+.west/
+
+# Build directories (any depth)
+build/
+build_*/
+**/build/
+**/build_*/
+
+# CMake / Ninja generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.ninja
+*.ninja_deps
+*.ninja_log
+Makefile
+
+# Binary outputs
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+
+# Generated source (NCS / Kconfig)
+**/include/generated/
+zephyr/.config
+zephyr/include/generated/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*~
+
+# Credentials / overlay files that must NOT be committed
+overlay-wifi-credentials.conf
+overlay-app-memfault-project-info.conf
+
+# Node (web asset toolchain)
+node_modules/
+dist/

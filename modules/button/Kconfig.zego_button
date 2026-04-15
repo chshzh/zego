@@ -1,0 +1,25 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+config ZEGO_BUTTON
+	bool "Zego button module"
+	depends on DK_LIBRARY
+	help
+	  Enable the shared Zego button module. Monitors DK buttons and publishes
+	  press/release events on the zbus BUTTON_CHAN channel.
+
+if ZEGO_BUTTON
+
+module = ZEGO_BUTTON
+module-str = zego_button
+source "subsys/logging/Kconfig.template.log_config"
+
+config ZEGO_BUTTON_DEBOUNCE_MS
+	int "Debounce time in milliseconds"
+	default 50
+	help
+	  Software debounce window applied to raw button state changes.
+
+endif # ZEGO_BUTTON

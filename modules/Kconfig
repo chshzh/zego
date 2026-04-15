@@ -1,0 +1,20 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+# Zego shared modules — root Kconfig.
+# Source this from each application's Kconfig:
+#
+#   osource "$(ZEGO_MODULES_DIR)/Kconfig"
+#
+# The ZEGO_MODULES_DIR CMake variable is converted by west to a Kconfig
+# environment variable automatically when set in CMakeLists.txt.
+#
+
+menu "Zego shared modules"
+
+rsource "button/Kconfig.zego_button"
+rsource "network/Kconfig.zego_network"
+rsource "led/Kconfig.zego_led"
+
+endmenu # Zego shared modules

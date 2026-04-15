@@ -1,0 +1,22 @@
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+# Zego monorepo — single west manifest pinned to NCS v3.2.4.
+# This is the ONLY active west manifest for all applications in zego.
+# Do NOT activate per-app west.yml files; they are archived for reference only.
+
+manifest:
+  version: 0.13
+  defaults:
+    remote: ncs
+  remotes:
+    - name: ncs
+      url-base: https://github.com/nrfconnect
+  projects:
+    - name: sdk-nrf
+      path: nrf
+      revision: v3.2.4
+      import: true
+      remote: ncs
+  self:
+    path: zego
