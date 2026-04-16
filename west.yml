@@ -9,11 +9,18 @@ manifest:
   remotes:
     - name: ncs
       url-base: https://github.com/nrfconnect
+    # - name: chshzh
+    #   url-base: https://github.com/chshzh
   projects:
     - name: sdk-nrf
       path: nrf
       revision: v3.3-branch
       import: true
       remote: ncs
+    # Uncomment to sync personal AI skills into .claude/
+    # - name: charlie-claude
+    #   remote: chshzh
+    #   path: .claude
+    #   revision: main
   self:
     path: zego
