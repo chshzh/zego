@@ -46,7 +46,7 @@ The NCS version is pinned in `west.yml` (for example **v3.3.0**).
 
 ## Workspace setup
 
-### Method 1 — Add to an existing NCS installation
+### Method 1(Preferred) — Add to an existing NCS installation
 
 If you already have a matching NCS version installed,
 reuse it directly — no re-downloading required.
@@ -68,7 +68,7 @@ west update
 
 #### Option A: nRF Connect for VS Code
 
-Follow the [custom repository guide](https://docs.nordicsemi.com/bundle/nrf-connect-vscode/page/guides/extension_custom_repo.html)
+Follow the [custom repository guide](https://docs.nordicsemi.com/bundle/nrf-connect-vscode/page/guides/extension_custom_repo.html).
 
 #### Option B: CLI
 

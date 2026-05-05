@@ -54,3 +54,4 @@ overlay-app-memfault-project-info.conf
 # Node (web asset toolchain)
 node_modules/
 dist/
+.gitnexus
