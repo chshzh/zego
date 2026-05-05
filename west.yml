@@ -1,26 +1,37 @@
 # Copyright (c) 2026 Nordic Semiconductor ASA
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
 
-
 manifest:
-  version: 0.13
+  version: "0.13"
+
   defaults:
     remote: ncs
+
   remotes:
     - name: ncs
       url-base: https://github.com/nrfconnect
-    # - name: chshzh
-    #   url-base: https://github.com/chshzh
+    - name: chshzh
+      url-base: https://github.com/chshzh
+
   projects:
+    # NCS v3.3.0 — imports zephyr, bootloader, modules, nrfxlib, tools, etc.
     - name: sdk-nrf
       path: nrf
-      revision: v3.3-branch
+      revision: v3.3.0
       import: true
       remote: ncs
-    # Uncomment to sync personal AI skills into .claude/
-    # - name: charlie-claude
-    #   remote: chshzh
-    #   path: .claude
-    #   revision: main
+
+    # Application projects — add/remove as needed
+    - name: nordic-wifi-webdash
+      path: nordic-wifi-webdash
+      revision: main
+      remote: chshzh
+
+    - name: nordic-wifi-memfault
+      path: nordic-wifi-memfault
+      revision: main
+      remote: chshzh
+
+
   self:
     path: zego
