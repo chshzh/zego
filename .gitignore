@@ -55,3 +55,6 @@ overlay-app-memfault-project-info.conf
 node_modules/
 dist/
 .gitnexus
+.claude
+AGENTS.md
+CLAUDE.md
