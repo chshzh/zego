@@ -1,0 +1,5 @@
+name: zego_led
+
+build:
+  cmake: .
+  kconfig: Kconfig

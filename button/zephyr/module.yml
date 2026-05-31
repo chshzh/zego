@@ -1,0 +1,5 @@
+name: zego_button
+
+build:
+  cmake: .
+  kconfig: Kconfig

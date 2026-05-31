@@ -1,78 +1,34 @@
-# Zego — Zephyr + Lego
+# Zego — Reusable NCS/Zephyr modules
 
-> **Build applications like Lego: snap reusable modules together.**
+Shared module library for Nordic nRF Connect SDK applications.
+Capabilities are composed by enabling Kconfig symbols — no code copying.
 
-Zego is a shared modules library for Nordic nRF Connect SDK (NCS) Wi-Fi IoT applications.
-Every functional capability — button handling, network management, LED feedback, web serving —
-lives as a self-contained module that any application can opt-in to via Kconfig.
-Applications are composed by enabling modules, not by copying code.
+---
 
-Each application lives in its own standalone repository and pulls `zego` in as a west project.
+## Modules
 
-## Repository layout
+| Module  | Directory              | zbus channels                                       | Spec |
+|---------|------------------------|-----------------------------------------------------|------|
+| button  | `zego/button/`         | `BUTTON_CHAN` (out)                                  | [button-spec.md](button/docs/button-spec.md) |
+| led     | `zego/led/`            | `LED_CMD_CHAN` (in) · `LED_STATE_CHAN` (out)          | [led-spec.md](led/docs/led-spec.md) |
+| network | `zego/modules/network/`| `NETWORK_CHAN` (out)                                 | — |
 
-```
-zego/                           # this repo — common modules + workspace manifest
-├── modules/                    # Shared, reusable functional modules (CONFIG_ZEGO_*)
-│   ├── button/
-│   ├── network/
-│   ├── led/
-│   ├── CMakeLists.txt
-│   └── Kconfig
-├── utils/                      # Lightweight helpers with no app-level state
-├── scripts/                    # Build and CI helper scripts
-├── docs/
-├── west.yml                    # Workspace manifest — pinned to NCS v3.3.0
-└── .github/workflows/ci.yml
-```
+See each spec for the full API, Kconfig reference, and examples.
 
-When the workspace is initialized, the layout becomes:
-
-```
-<workspace>/
-├── nrf/                        # NCS (sdk-nrf v3.3.0)
-├── zephyr/                     # via NCS import
-├── bootloader/, modules/, ...  # via NCS import
-├── zego/                       # this repo
-├── nordic-wifi-webdash/        # application repo
-└── nordic-wifi-memfault/       # application repo
-```
-
-## NCS baseline
-
-The NCS version is pinned in `west.yml` (for example **v3.3.0**).
-`zego/west.yml` is the single workspace manifest; each application repo also carries its own
-`west.yml` for standalone development.
+---
 
 ## Workspace setup
 
-### Method 1(Preferred) — Add to an existing NCS installation
+### Add to an existing NCS installation
 
-If you already have a matching NCS version installed,
-reuse it directly — no re-downloading required.
-
-Under terminal with toolchain:
 ```sh
-cd /opt/nordic/ncs/<ncs-version>   # your existing NCS workspace root
-
+cd /opt/nordic/ncs/<ncs-version>
 git clone https://github.com/chshzh/zego.git
-
-# Switch the workspace manifest from nrf → zego (one-time change)
 west config manifest.path zego
-
-# Sync — NCS repos already present, only new project repos are cloned
 west update
 ```
 
-### Method 2 — Fresh installation as a Workspace Application
-
-#### Option A: nRF Connect for VS Code
-
-Follow the [custom repository guide](https://docs.nordicsemi.com/bundle/nrf-connect-vscode/page/guides/extension_custom_repo.html).
-
-#### Option B: CLI
-
-See the Nordic guide on [Workspace Application Setup](https://docs.nordicsemi.com/bundle/ncs-latest/page/nrf/dev_model_and_contributions/adding_code.html#workflow_4_workspace_application_repository_recommended).
+### Fresh workspace
 
 ```sh
 west init -m https://github.com/chshzh/zego --mr main <workspace-dir>
@@ -80,52 +36,75 @@ cd <workspace-dir>
 west update
 ```
 
-Build an application (run from the workspace root):
+---
 
-```sh
-# webdash — nRF7002 DK
-west build -b nrf7002dk/nrf5340/cpuapp nordic-wifi-webdash -- -DSNIPPET=wifi-p2p
+## Integration
 
-# webdash — nRF54L-M20 DK with nRF7002EB2 shield
-west build -b nrf54lm20dk/nrf54lm20a/cpuapp nordic-wifi-webdash -- -DSNIPPET=wifi-p2p -DSHIELD=nrf7002eb2
-
-# memfault — nRF7002 DK
-west build -b nrf7002dk/nrf5340/cpuapp nordic-wifi-memfault -- -DOVERLAY_CONFIG=overlay-app-memfault-project-info.conf
-```
-
-Flash:
-
-```sh
-west flash
-```
-
-## Module system
-
-Shared modules live under `modules/`. Each module:
-
-- Has its own `CMakeLists.txt` and `Kconfig.<module>` file.
-- Is guarded by a `CONFIG_ZEGO_<MODULE>` Kconfig symbol.
-- Exposes a clean header interface and uses zbus for inter-module messaging.
-
-Applications opt-in explicitly:
+Register modules as first-class Zephyr modules via `EXTRA_ZEPHYR_MODULES`
+in the app's `CMakeLists.txt` **before** `find_package(Zephyr ...)`.
+Kconfig is wired automatically — no `rsource` needed.
 
 ```cmake
-# In the application CMakeLists.txt
-add_subdirectory(${ZEGO_MODULES_DIR}/button button)
+cmake_minimum_required(VERSION 3.20.0)
+
+get_filename_component(ZEGO_BUTTON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../zego/button REALPATH)
+get_filename_component(ZEGO_LED_DIR   ${CMAKE_CURRENT_SOURCE_DIR}/../zego/led    REALPATH)
+list(APPEND EXTRA_ZEPHYR_MODULES ${ZEGO_BUTTON_DIR} ${ZEGO_LED_DIR})
+
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 ```
 
-```kconfig
-# In prj.conf
+`prj.conf`:
+
+```conf
 CONFIG_ZEGO_BUTTON=y
+CONFIG_ZEGO_LED=y
 ```
 
-## Versioning and releases
+`boards/<board>.conf`:
 
-Each application lives in its own repository and is released independently using its own
-`VERSION` file and `vX.Y.Z` tags. `zego` itself is versioned separately and pinned in each
-application's `west.yml`.
+```conf
+# nRF7002DK
+CONFIG_ZEGO_BUTTON_NUM_BUTTONS=2
+CONFIG_ZEGO_LED_NUM_LEDS=2
 
-The repo uses a single `main` branch. Feature and fix branches are short-lived.
+# nRF54LM20DK
+CONFIG_ZEGO_BUTTON_NUM_BUTTONS=3
+CONFIG_ZEGO_LED_NUM_LEDS=4
+```
+
+> **Button indices are 0-based.** Display names ("Button 1", "BUTTON0") are
+> board-specific and belong in the application via its own `app_button_label()` helper.
+
+---
+
+## Consumer applications
+
+| App                  | Board        | Build command |
+|----------------------|--------------|---------------|
+| nordic-wifi-webdash  | nRF7002DK    | `west build -b nrf7002dk/nrf5340/cpuapp nordic-wifi-webdash -- -DSNIPPET=wifi-p2p` |
+| nordic-wifi-webdash  | nRF54LM20DK  | `west build -b nrf54lm20dk/nrf54lm20a/cpuapp nordic-wifi-webdash -- -DSNIPPET=wifi-p2p -DSHIELD=nrf7002eb2` |
+| nordic-wifi-memfault | nRF7002DK    | `west build -b nrf7002dk/nrf5340/cpuapp nordic-wifi-memfault -- -DEXTRA_CONF_FILE=overlay-app-memfault-project-info.conf` |
+| nordic-wifi-memfault | nRF54LM20DK  | `west build -b nrf54lm20dk/nrf54lm20a/cpuapp nordic-wifi-memfault -- -DSHIELD=nrf7002eb2 -DEXTRA_CONF_FILE=overlay-app-memfault-project-info.conf` |
+
+---
+
+## Repository layout
+
+```
+zego/
+├── button/    ← button module (src/, Kconfig, CMakeLists.txt, boards/, docs/, test/, zephyr/module.yml)
+├── led/       ← LED module
+├── modules/   ← aggregation shim + network module
+└── west.yml   ← workspace manifest (NCS v3.3.0)
+```
+
+---
+
+## Versioning
+
+`zego` is versioned with `vX.Y.Z` tags and pinned in each application's `west.yml`.
+Applications are released independently from their own repositories.
 
 ## License
 

@@ -1,0 +1,76 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+config ZEGO_LED
+	bool "Zego LED module"
+	select DK_LIBRARY
+	select ZBUS
+	select SMF
+	help
+	  Enable LED control using an SMF state machine.  Subscribes to
+	  LED_CMD_CHAN (zbus) and drives DK LEDs.  Publishes LED_STATE_CHAN after
+	  every hardware state change.  The module auto-initializes via SYS_INIT.
+
+	  Publish to LED_CMD_CHAN with struct led_msg to command an LED.
+	  See zego/led/docs/led-spec.md for the integration guide.
+
+if ZEGO_LED
+
+config ZEGO_LED_NUM_LEDS
+	int "Number of LEDs to control"
+	default 4
+	range 1 4
+	help
+	  Number of DK LEDs to manage (0-based indices 0 to N-1).
+	  Override this in boards/<board>.conf:
+	    nrf7002dk_nrf5340_cpuapp       → 2
+	    nrf54lm20dk_nrf54lm20a_cpuapp  → 4
+
+config ZEGO_LED_INIT_PRIORITY
+	int "Initialization priority (SYS_INIT APPLICATION level)"
+	default 91
+	help
+	  SYS_INIT priority for the LED module.  Must be greater than the DK
+	  library's own init priority.  Set higher than ZEGO_BUTTON_INIT_PRIORITY
+	  if both modules are enabled.
+
+config ZEGO_LED_BLINK_PERIOD_MS
+	int "Default blink half-period in milliseconds"
+	default 250
+	range 50 10000
+	help
+	  Time the LED stays on (and off) for each blink half-cycle when
+	  LED_COMMAND_BLINK is sent with period_ms = 0.  Full cycle = 2x this value.
+
+config ZEGO_LED_BREATHE_PERIOD_MS
+	int "Default breathe full-cycle period in milliseconds"
+	default 3000
+	range 200 30000
+	help
+	  Full on+off cycle duration when LED_COMMAND_BREATHE is sent with
+	  period_ms = 0.
+
+config ZEGO_LED_BREATHE_ON_PCT
+	int "Breathe on-time percentage (1-99)"
+	default 70
+	range 1 99
+	help
+	  Fraction of the breathe cycle the LED is on, as a percentage.
+	  Default 70 → LED on 70% of the time, off 30%: a slow sustained glow
+	  with a brief dark phase.  Lower values give a short pulse effect.
+
+config ZEGO_LED_MARQUEE_PERIOD_MS
+	int "Default marquee step period in milliseconds"
+	default 300
+	range 50 5000
+	help
+	  Time each LED stays lit during the marquee sweep when
+	  LED_COMMAND_MARQUEE is sent with period_ms = 0.
+
+module = ZEGO_LED
+module-str = zego_led
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # ZEGO_LED

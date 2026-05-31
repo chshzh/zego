@@ -1,0 +1,42 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+config ZEGO_BUTTON
+	bool "Zego button module"
+	select DK_LIBRARY
+	select ZBUS
+	select SMF
+	help
+	  Enable debounced button monitoring using an SMF state machine.
+	  Monitors DK buttons and publishes BUTTON_PRESSED and BUTTON_RELEASED
+	  events on BUTTON_CHAN (zbus).  The module auto-initializes via SYS_INIT.
+
+	  Include <zego/button.h> and use ZBUS_CHAN_ADD_OBS(BUTTON_CHAN, ...) to
+	  subscribe.  See zego/button/docs/button-spec.md for the integration guide.
+
+if ZEGO_BUTTON
+
+config ZEGO_BUTTON_NUM_BUTTONS
+	int "Number of buttons to monitor"
+	default 4
+	range 1 4
+	help
+	  Number of DK buttons to monitor (0-based indices 0 to N-1).
+	  Override this in boards/<board>.conf:
+	    nrf7002dk_nrf5340_cpuapp    → 2
+	    nrf54lm20dk_nrf54lm20a_cpuapp → 3
+
+config ZEGO_BUTTON_INIT_PRIORITY
+	int "Initialization priority (SYS_INIT APPLICATION level)"
+	default 90
+	help
+	  SYS_INIT priority for the button module.  Must be greater than the DK
+	  library's own init priority.
+
+module = ZEGO_BUTTON
+module-str = zego_button
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # ZEGO_BUTTON

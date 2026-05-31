@@ -22,20 +22,25 @@ manifest:
       remote: ncs
 
     # Application projects — add/remove as needed
-    - name: nordic-wifi-webdash
-      path: nordic-wifi-webdash
-      revision: main
-      remote: chshzh
+    # - name: nordic-wifi-webdash
+    #   path: nordic-wifi-webdash
+    #   revision: main
+    #   remote: chshzh
 
-    - name: nordic-wifi-memfault
-      path: nordic-wifi-memfault
-      revision: main
-      remote: chshzh
+    # - name: nordic-wifi-memfault
+    #   path: nordic-wifi-memfault
+    #   revision: main
+    #   remote: chshzh
 
-    - name: nordic-wifi-audio
-      path: nordic-wifi-audio
-      revision: main
-      remote: chshzh
+    # - name: nordic-wifi-audio
+    #   path: nordic-wifi-audio
+    #   revision: main
+    #   remote: chshzh
+
+    # - name: claude
+    #   path: .claude
+    #   revision: main
+    #   remote: chshzh
 
   self:
     path: zego
