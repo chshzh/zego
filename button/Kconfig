@@ -25,8 +25,26 @@ config ZEGO_BUTTON_NUM_BUTTONS
 	help
 	  Number of DK buttons to monitor (0-based indices 0 to N-1).
 	  Override this in boards/<board>.conf:
-	    nrf7002dk_nrf5340_cpuapp    → 2
-	    nrf54lm20dk_nrf54lm20a_cpuapp → 3
+	    nrf7002dk_nrf5340_cpuapp      → 2  (Button 1, Button 2)
+	    nrf54lm20dk_nrf54lm20a_cpuapp → 4  (BUTTON0–BUTTON3)
+	  Note: when nrf54lm20dk is used with -DSHIELD=nrf7002eb2 the shield
+	  occupies BUTTON3; the application should override to 3 in its own
+	  boards/<board>.conf.
+
+config ZEGO_BUTTON_LONG_PRESS_MS
+	int "Long-press threshold (ms)"
+	default 3000
+	help
+	  Press duration (ms) at which a BUTTON_LONG_PRESS event is published.
+	  The event fires while the button is still held.
+
+config ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS
+	int "Double-click detection window (ms)"
+	default 300
+	help
+	  Maximum interval between two presses to detect a BUTTON_DOUBLE_CLICK.
+	  After a press+release the module waits this long for a 2nd press.
+	  If none arrives, BUTTON_SINGLE_CLICK is published instead.
 
 config ZEGO_BUTTON_INIT_PRIORITY
 	int "Initialization priority (SYS_INIT APPLICATION level)"

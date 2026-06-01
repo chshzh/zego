@@ -8,8 +8,14 @@
  * @brief Zego button module — public API and message types.
  *
  * Enable with CONFIG_ZEGO_BUTTON=y.  The module auto-initializes via SYS_INIT,
- * registers a DK button callback, and publishes BUTTON_PRESSED / BUTTON_RELEASED
- * events on BUTTON_CHAN using an SMF state machine.
+ * registers a DK button callback, and classifies physical presses into three
+ * gesture events published on BUTTON_CHAN (zbus):
+ *
+ *  - BUTTON_SINGLE_CLICK  — confirmed single press (no 2nd press within
+ *                            CONFIG_ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS).
+ *  - BUTTON_DOUBLE_CLICK  — two presses within the double-click window.
+ *  - BUTTON_LONG_PRESS    — press held >= CONFIG_ZEGO_BUTTON_LONG_PRESS_MS.
+ *                            Published while the button is still held.
  *
  * Subscribing from an application:
  * @code
@@ -18,7 +24,9 @@
  *   static void my_listener(const struct zbus_channel *chan)
  *   {
  *       const struct button_msg *msg = zbus_chan_const_msg(chan);
- *       if (msg->type == BUTTON_PRESSED && msg->button_number == 0) { ... }
+ *       if (msg->type == BUTTON_SINGLE_CLICK && msg->button_number == 0) { ... }
+ *       if (msg->type == BUTTON_DOUBLE_CLICK && msg->button_number == 0) { ... }
+ *       if (msg->type == BUTTON_LONG_PRESS   && msg->button_number == 0) { ... }
  *   }
  *   ZBUS_LISTENER_DEFINE(my_btn_listener, my_listener);
  *   ZBUS_CHAN_ADD_OBS(BUTTON_CHAN, my_btn_listener, 0);
@@ -39,22 +47,34 @@
 
 /** @brief Button event type. */
 enum button_msg_type {
-	BUTTON_PRESSED,  /**< Initial press detected (after debounce). duration_ms = 0. */
-	BUTTON_RELEASED, /**< Release detected. duration_ms = hold time in ms. */
+	/** Raw press event. Published immediately when the button is pressed.
+	 *  duration_ms = 0. */
+	BUTTON_PRESSED,
+	/** Raw release event. Published immediately when the button is released.
+	 *  duration_ms = hold time in ms. */
+	BUTTON_RELEASED,
+	/** Confirmed single click (after double-click window expired).
+	 *  duration_ms = hold time of the press in ms. */
+	BUTTON_SINGLE_CLICK,
+	/** Double click: two presses within DOUBLE_CLICK_WINDOW_MS.
+	 *  duration_ms = hold time of the 2nd press in ms. */
+	BUTTON_DOUBLE_CLICK,
+	/** Long press: button held >= LONG_PRESS_MS. Published while still held.
+	 *  duration_ms = CONFIG_ZEGO_BUTTON_LONG_PRESS_MS. */
+	BUTTON_LONG_PRESS,
 };
 
 /**
- * @brief Button event message published on BUTTON_CHAN.
+ * @brief Button gesture message published on BUTTON_CHAN.
  *
- * Published on every press and every release.
- * For BUTTON_PRESSED, duration_ms is 0.
- * For BUTTON_RELEASED, duration_ms is the hold time in milliseconds.
+ * One message per detected gesture. See button_msg_type for duration_ms
+ * semantics per event type.
  */
 struct button_msg {
 	enum button_msg_type type;
 	uint8_t button_number; /**< 0-based button index. */
-	uint32_t duration_ms;  /**< Hold duration; 0 for BUTTON_PRESSED. */
-	uint32_t press_count;  /**< Cumulative press count for this button (1-based). */
+	uint32_t duration_ms;  /**< Hold time; semantics depend on type. */
+	uint32_t press_count;  /**< Cumulative physical-press count for this button. */
 	uint32_t timestamp;    /**< k_uptime_get_32() at event time. */
 };
 
@@ -77,16 +97,36 @@ ZBUS_CHAN_DECLARE(BUTTON_CHAN);
 
 #ifdef CONFIG_ZTEST
 /**
- * @brief Inject a synthetic button event (test builds only).
+ * @brief Inject a synthetic button press/release (test builds only).
  *
- * Simulates a raw DK callback for button @p btn_num.  Available when
- * CONFIG_ZTEST=y.  Calls the internal button handler directly; the full SMF
- * and zbus publish path still runs.
+ * Simulates a raw DK callback. The full SMF and zbus publish path runs.
  *
- * @param btn_num  0-based button index (must be < CONFIG_ZEGO_BUTTON_NUM_BUTTONS).
- * @param pressed  true = button pressed, false = button released.
+ * @param btn_num  0-based button index (silently ignored if out of range).
+ * @param pressed  true = press, false = release.
  */
 void zego_button_inject(uint8_t btn_num, bool pressed);
+
+/**
+ * @brief Force the long-press timer to fire immediately (test builds only).
+ *
+ * Cancels the pending delayable work and invokes the callback synchronously.
+ * Call while the button is still "pressed" to trigger BUTTON_LONG_PRESS
+ * without waiting for the real timer.
+ *
+ * @param btn_num  0-based button index (silently ignored if out of range).
+ */
+void zego_button_inject_long_press_timer(uint8_t btn_num);
+
+/**
+ * @brief Force the double-click window timer to fire immediately (test builds only).
+ *
+ * Cancels the pending delayable work and invokes the callback synchronously.
+ * Call after a press+release (in CLICK_WAIT state) to confirm a
+ * BUTTON_SINGLE_CLICK without waiting for the real timer.
+ *
+ * @param btn_num  0-based button index (silently ignored if out of range).
+ */
+void zego_button_inject_double_click_timer(uint8_t btn_num);
 #endif /* CONFIG_ZTEST */
 
 #endif /* ZEGO_BUTTON_H */
