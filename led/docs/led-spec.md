@@ -1,189 +1,199 @@
-# LED Module Spec — `zego/led`
+# LED Module Specification
 
-**Status:** Stable  
-**Spec version:** 2026-05-31  
-**Boards:** nrf7002dk/nrf5340/cpuapp · nrf54lm20dk/nrf54lm20a/cpuapp · native_sim
+## Document Information
 
----
-
-## Purpose
-
-Controls DK LEDs via zbus commands.  Any application module publishes a command
-to `LED_CMD_CHAN`; the LED module subscribes, runs a per-LED SMF, and drives the
-hardware.  State changes are reported on `LED_STATE_CHAN`.
-
-The LED module is a **pure input module** from the application's perspective:
-it consumes commands, produces state notifications.  Policy (which events light
-which LED) lives in the application, not in this module.
+| Field | Value |
+|-------|-------|
+| Module | `zego/led` |
+| Version | 2026-06-01-13-27 |
+| PRD Version | N/A (standalone library module) |
+| Status | Stable |
 
 ---
 
-## zbus Interface
+## Changelog
 
-| Channel         | Direction | Message type          | Description                  |
-|-----------------|-----------|----------------------|------------------------------|
-| `LED_CMD_CHAN`  | **in**    | `struct led_msg`      | Publish here to command an LED |
-| `LED_STATE_CHAN`| **out**   | `struct led_state_msg`| Published after every state change |
+| Version | Summary of changes |
+|---|---|
+| 2026-05-31-00-00 | Initial module spec (ON/OFF/TOGGLE/BLINK/BREATHE/MARQUEE) |
+| 2026-06-01-13-27 | Breathe reworked: linear software-PWM ramp (0%→100%→0%) replaces asymmetric duty cycle; added `BREATHE_PWM_PERIOD_MS`; added sample app; removed test folder; reformatted to match button-spec structure |
+
+---
+
+## Overview
+
+The `zego/led` module controls DK hardware LEDs via zbus commands.  Any application
+module publishes a command to `LED_CMD_CHAN`; the LED module subscribes, drives a
+per-LED SMF for static modes, and runs `k_work_delayable` timers for dynamic effects.
+State changes are reported on `LED_STATE_CHAN`.
+
+The LED module is a **pure command-driven module**: it consumes commands, produces
+state notifications.  Policy (which events light which LED) lives in the application,
+not in this module.
+
+---
+
+## Supported Hardware
+
+| Board | Build target | LEDs available | Notes |
+|-------|-------------|----------------|-------|
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | LED1 (idx 0), LED2 (idx 1) | 2 LEDs |
+| nRF54LM20DK | `nrf54lm20dk/nrf54lm20a/cpuapp` | LED0–LED3 (idx 0–3) | 4 LEDs |
+
+---
+
+## Location
+
+- **Path**: `zego/led/`
+- **Files**: `src/led.c`, `src/led.h`, `Kconfig`, `CMakeLists.txt`,
+  `zephyr/module.yml`, `sample/`, `docs/`
+
+---
+
+## Module Type
+
+- [x] **Application module** — zbus listener for `LED_CMD_CHAN`; per-LED SMF for
+  static ON/OFF state; per-LED `k_work_delayable` for blink/breathe effects;
+  global `k_work_delayable` for marquee.  Auto-initializes via `SYS_INIT`.
+
+---
+
+## Zbus Integration
+
+**Subscribes to**: `LED_CMD_CHAN`
+
+**Publishes to**: `LED_STATE_CHAN`
 
 ```c
-/* Command (publish on LED_CMD_CHAN) */
-struct led_msg {
-    enum led_msg_type type;    /* see below              */
-    uint8_t led_number;        /* 0-based; ignored for MARQUEE */
-    uint16_t period_ms;        /* effect period; 0 = use Kconfig default */
+enum led_msg_type {
+    LED_COMMAND_ON,      /* Static: turn LED on                                          */
+    LED_COMMAND_OFF,     /* Static: turn LED off                                         */
+    LED_COMMAND_TOGGLE,  /* Static: invert current state                                 */
+    LED_COMMAND_BLINK,   /* Effect: 50% duty cycle, toggles every period_ms              */
+    LED_COMMAND_BREATHE, /* Effect: linear fade 0%→100% over period_ms, then 100%→0%    */
+    LED_COMMAND_MARQUEE, /* Effect: one LED lit at a time, cycles at period_ms per step  */
 };
 
-/* Notification (subscribe to LED_STATE_CHAN) */
+struct led_msg {
+    enum led_msg_type type;
+    uint8_t  led_number; /* 0-based LED index; ignored for LED_COMMAND_MARQUEE           */
+    uint16_t period_ms;  /* Effect period in ms; 0 = use Kconfig default                 */
+};
+
 struct led_state_msg {
-    uint8_t led_number;
-    bool    is_on;
+    uint8_t led_number; /* 0-based LED index */
+    bool    is_on;      /* New state after hardware change */
 };
 ```
 
-### Command types
+**`period_ms` semantics per command type:**
 
-| Command                | Effect                                                              |
-|------------------------|---------------------------------------------------------------------|
-| `LED_COMMAND_ON`       | Turn LED on (static)                                                |
-| `LED_COMMAND_OFF`      | Turn LED off (static)                                               |
-| `LED_COMMAND_TOGGLE`   | Toggle between on/off (static)                                      |
-| `LED_COMMAND_BLINK`    | Blink: equal on/off half-cycles at `period_ms`                      |
-| `LED_COMMAND_BREATHE`  | Breathing pulse: on for `BREATHE_ON_PCT`% of `period_ms`, off for the rest |
-| `LED_COMMAND_MARQUEE`  | Cycle all LEDs in sequence, one lit at a time, at `period_ms` per step |
+| Command | `period_ms` meaning | Default Kconfig |
+|---------|---------------------|-----------------|
+| `LED_COMMAND_BLINK` | Toggle half-period (full cycle = 2×) | `CONFIG_ZEGO_LED_BLINK_PERIOD_MS` (250 ms) |
+| `LED_COMMAND_BREATHE` | Ramp duration per direction (full cycle = 2×) | `CONFIG_ZEGO_LED_BREATHE_PERIOD_MS` (3000 ms) |
+| `LED_COMMAND_MARQUEE` | Time each LED stays lit per step | `CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS` (300 ms) |
+| Static commands | Ignored | — |
 
 ---
 
 ## State Machine (per LED)
 
-Static commands (`ON`/`OFF`/`TOGGLE`) use an SMF:
+Static commands (`ON`/`OFF`/`TOGGLE`) drive a two-state SMF.  Dynamic effect
+commands (`BLINK`/`BREATHE`) cancel the SMF and run a per-LED `k_work_delayable`.
+`MARQUEE` cancels all per-LED effects and runs a single global `k_work_delayable`.
+Any static command cancels any active effect and returns the LED to SMF control.
 
-```
-      LED_OFF  ↔  LED_ON
-```
+```mermaid
+stateDiagram-v2
+    [*] --> LED_OFF
 
-Dynamic effects (`BLINK` / `BREATHE`) bypass the SMF and use a
-`k_work_delayable` per LED.  `MARQUEE` uses a single global
-`k_work_delayable` that owns all LEDs.  Any static command cancels an
-active effect and resumes SMF control.
+    LED_OFF --> LED_ON  : ON / TOGGLE\n→ set_led_hw(on)\n→ pub LED_STATE_CHAN
+    LED_ON  --> LED_OFF : OFF / TOGGLE\n→ set_led_hw(off)\n→ pub LED_STATE_CHAN
 
-### Blink
+    LED_OFF --> BLINK   : BLINK
+    LED_ON  --> BLINK   : BLINK
+    BLINK   --> LED_OFF : OFF / ON / TOGGLE
 
-The LED toggles every `period_ms` milliseconds.  Duty cycle is 50%.
+    LED_OFF --> BREATHE : BREATHE
+    LED_ON  --> BREATHE : BREATHE
+    BREATHE --> LED_OFF : OFF / ON / TOGGLE
 
-```c
-struct led_msg cmd = {
-    .type       = LED_COMMAND_BLINK,
-    .led_number = 0,
-    .period_ms  = 500,  /* 0 = CONFIG_ZEGO_LED_BLINK_PERIOD_MS */
-};
-zbus_chan_pub(&LED_CMD_CHAN, &cmd, K_NO_WAIT);
-```
+    note right of BLINK
+        k_work_delayable toggles
+        every period_ms (50% duty)
+    end note
 
-### Breathe
-
-A simulated breathing effect using an asymmetric duty cycle
-(`CONFIG_ZEGO_LED_BREATHE_ON_PCT`% on, rest off).  DK board LEDs are
-GPIO-only (no PWM), so this produces a "slow pulse" rather than a
-smooth fade.  Default: 70% on, 30% off with a 3 s cycle — a sustained
-glow with a brief dark phase.
-
-```c
-struct led_msg cmd = {
-    .type       = LED_COMMAND_BREATHE,
-    .led_number = 1,
-    .period_ms  = 3000,  /* 0 = CONFIG_ZEGO_LED_BREATHE_PERIOD_MS */
-};
-zbus_chan_pub(&LED_CMD_CHAN, &cmd, K_NO_WAIT);
+    note right of BREATHE
+        k_work_delayable steps duty
+        0%→100% over period_ms,
+        then 100%→0% over period_ms
+        (software PWM @ PWM_PERIOD_MS)
+    end note
 ```
 
-To cancel any effect and return to static off:
+**Effect descriptions:**
 
-```c
-struct led_msg stop = { .type = LED_COMMAND_OFF, .led_number = 1 };
-zbus_chan_pub(&LED_CMD_CHAN, &stop, K_NO_WAIT);
-```
-
-### Marquee
-
-Cycles through all LEDs one at a time with one LED lit per step.  Takes
-over all LEDs; any subsequent per-LED command (ON/OFF/BLINK/BREATHE)
-automatically cancels the marquee.
-
-```c
-struct led_msg cmd = {
-    .type      = LED_COMMAND_MARQUEE,
-    .period_ms = 300,  /* 0 = CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS */
-};
-zbus_chan_pub(&LED_CMD_CHAN, &cmd, K_NO_WAIT);
-
-/* Stop marquee — send any per-LED command */
-struct led_msg stop = { .type = LED_COMMAND_OFF, .led_number = 0 };
-zbus_chan_pub(&LED_CMD_CHAN, &stop, K_NO_WAIT);
-```
+| Effect | Mechanism | Behaviour |
+|--------|-----------|-----------|
+| `BLINK` | `k_work_delayable` per LED | Toggles every `period_ms`; 50% duty cycle |
+| `BREATHE` | `k_work_delayable` per LED | Software PWM: duty steps 0%→100% over `period_ms`, then 100%→0%. Steps = `period_ms` / `BREATHE_PWM_PERIOD_MS` |
+| `MARQUEE` | Single global `k_work_delayable` | One LED lit at a time, advances every `period_ms`; pre-empts all per-LED effects |
 
 ---
 
-## Configuration
+## Kconfig Flags
 
-| Kconfig symbol                     | Default | Description                              |
-|------------------------------------|---------|------------------------------------------|
-| `CONFIG_ZEGO_LED`                  | n       | Enable the module                        |
-| `CONFIG_ZEGO_LED_NUM_LEDS`         | 4       | Number of LEDs (board conf overrides)    |
-| `CONFIG_ZEGO_LED_INIT_PRIORITY`    | 91      | SYS_INIT APPLICATION level priority     |
-| `CONFIG_ZEGO_LED_LOG_LEVEL`        | info    | Log verbosity                            |
-| `CONFIG_ZEGO_LED_BLINK_PERIOD_MS`  | 250     | Blink half-period (ms); full cycle = 2x  |
-| `CONFIG_ZEGO_LED_BREATHE_PERIOD_MS`| 3000    | Breathe full on+off cycle (ms)           |
-| `CONFIG_ZEGO_LED_BREATHE_ON_PCT`   | 70      | On-time fraction for breathe effect (%)  |
-| `CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS`| 300     | Marquee step duration per LED (ms)       |
+| Symbol | Type | Default | Description |
+|--------|------|---------|-------------|
+| `CONFIG_ZEGO_LED` | bool | `n` | Enable the module |
+| `CONFIG_ZEGO_LED_NUM_LEDS` | int | `4` | Number of LEDs; board overlays override |
+| `CONFIG_ZEGO_LED_INIT_PRIORITY` | int | `91` | `SYS_INIT` APPLICATION level priority |
+| `CONFIG_ZEGO_LED_LOG_LEVEL` | choice | `info` | Log verbosity |
+| `CONFIG_ZEGO_LED_BLINK_PERIOD_MS` | int | `250` | Blink toggle half-period (ms); full cycle = 2× |
+| `CONFIG_ZEGO_LED_BREATHE_PERIOD_MS` | int | `3000` | Breathe ramp duration per direction (ms); full cycle = 2× |
+| `CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS` | int | `20` | Software-PWM frame size for breathe (ms); steps per ramp = PERIOD/PWM |
+| `CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS` | int | `500` | Time each LED stays lit during marquee (ms) |
 
-Board-specific defaults (set in `boards/<board>.conf`):
+Board-specific defaults (`boards/<board>.conf`):
 
-| Board                          | NUM_LEDS |
-|--------------------------------|----------|
-| nrf7002dk/nrf5340/cpuapp       | 2        |
-| nrf54lm20dk/nrf54lm20a/cpuapp  | 4        |
+| Board | `NUM_LEDS` |
+|-------|-----------|
+| `nrf7002dk/nrf5340/cpuapp` | 2 |
+| `nrf54lm20dk/nrf54lm20a/cpuapp` | 4 |
 
 ---
 
-## Integration
-
-### 1. Register the module (CMakeLists.txt)
-
-Register as a Zephyr module **before** `find_package(Zephyr ...)`.  Kconfig is
-picked up automatically via `zephyr/module.yml` — no `rsource` needed.
-
-```cmake
-get_filename_component(ZEGO_LED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../zego/led REALPATH)
-list(APPEND EXTRA_ZEPHYR_MODULES ${ZEGO_LED_DIR})
-```
-
-### 2. Enable (prj.conf / board overlay)
-
-```
-CONFIG_ZEGO_LED=y
-```
-
-```
-# boards/<board>.conf
-CONFIG_ZEGO_LED_NUM_LEDS=2
-```
-
-### 3. Command LEDs from application code
+## API / Public Interface
 
 ```c
-#include "led.h"  /* path added by CMakeLists.txt */
+/* Declared in src/led.h; available to consumers */
 
-/* Static */
+/* Channel declarations */
+ZBUS_CHAN_DECLARE(LED_CMD_CHAN);    /* publish here to command an LED  */
+ZBUS_CHAN_DECLARE(LED_STATE_CHAN);  /* subscribe to observe LED changes */
+
+/* Query current state (reads SMF internal state, not hardware) */
+int led_get_state(uint8_t led_number, bool *state);
+/* Returns 0 on success, -EINVAL for out-of-range index or NULL pointer */
+```
+
+**Integration pattern:**
+
+```c
+#include "led.h"  /* path added by CMakeLists.txt include */
+
+/* Static ON/OFF */
 struct led_msg on  = { .type = LED_COMMAND_ON,  .led_number = 0 };
 struct led_msg off = { .type = LED_COMMAND_OFF, .led_number = 0 };
 zbus_chan_pub(&LED_CMD_CHAN, &on,  K_NO_WAIT);
 zbus_chan_pub(&LED_CMD_CHAN, &off, K_NO_WAIT);
 
-/* Blink LED 0 at 1 Hz (500 ms on, 500 ms off) */
-struct led_msg blink = { .type = LED_COMMAND_BLINK, .led_number = 0, .period_ms = 500 };
+/* Blink LED 0 at 2 Hz (250 ms on, 250 ms off) */
+struct led_msg blink = { .type = LED_COMMAND_BLINK, .led_number = 0, .period_ms = 250 };
 zbus_chan_pub(&LED_CMD_CHAN, &blink, K_NO_WAIT);
 
-/* Breathe LED 1 with default period */
+/* Breathe LED 1: 3 s ramp up + 3 s ramp down = 6 s full cycle */
 struct led_msg breathe = { .type = LED_COMMAND_BREATHE, .led_number = 1 };
 zbus_chan_pub(&LED_CMD_CHAN, &breathe, K_NO_WAIT);
 
@@ -191,50 +201,79 @@ zbus_chan_pub(&LED_CMD_CHAN, &breathe, K_NO_WAIT);
 struct led_msg marquee = { .type = LED_COMMAND_MARQUEE, .period_ms = 200 };
 zbus_chan_pub(&LED_CMD_CHAN, &marquee, K_NO_WAIT);
 
-/* Read current state */
-bool state;
-led_get_state(0, &state);
+/* Stop any effect */
+struct led_msg stop = { .type = LED_COMMAND_OFF, .led_number = 0 };
+zbus_chan_pub(&LED_CMD_CHAN, &stop, K_NO_WAIT);
+```
+
+Register the module in `CMakeLists.txt` before `find_package(Zephyr ...)`:
+
+```cmake
+get_filename_component(ZEGO_LED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../zego/led REALPATH)
+list(APPEND EXTRA_ZEPHYR_MODULES ${ZEGO_LED_DIR})
+```
+
+Enable in `prj.conf`:
+
+```
+CONFIG_ZEGO_LED=y
 ```
 
 ---
 
-## Migrating from app-inline LED modules
+## Error Handling
 
-Apps that have `src/modules/led/led.c` with their own `ZBUS_CHAN_DEFINE(LED_CMD_CHAN, ...)`:
+| Error Condition | Detection | Response |
+|----------------|-----------|----------|
+| `dk_leds_init` fails | Non-zero return in `led_module_init` | `LOG_ERR`, return error code (boot continues) |
+| `zbus_chan_pub` (LED_STATE_CHAN) fails | Non-zero return in `publish_state` | `LOG_ERR`, notification dropped |
+| Out-of-range LED number in command | `msg->led_number >= NUM_LEDS` | `LOG_WRN`, command silently ignored |
+| Out-of-range `led_get_state` index | `led_number >= NUM_LEDS` | Return `-EINVAL` |
+| NULL `state` pointer in `led_get_state` | `state == NULL` | Return `-EINVAL` |
 
-1. Remove `src/modules/led/` from the app.
-2. Remove `rsource "src/modules/led/Kconfig.led"` from app Kconfig.
-3. Remove `add_subdirectory(src/modules/led)` from app CMakeLists.txt.
-4. Add the integration steps above.
-5. Replace `#include "../led/led.h"` with `#include "led.h"`.
-6. The new `struct led_msg` has an extra `period_ms` field (default 0 = OK for existing
-   ON/OFF/TOGGLE code using named-field initializers).
+---
 
-> `led_get_all_states_json()` is not in this module.  If needed, add it as a
-> thin app-level helper that calls `led_get_state()` in a loop.
+## Memory Estimate
+
+| Resource | Value | Notes |
+|----------|-------|-------|
+| Flash | ~3 KB | Code + effect handlers + read-only state table |
+| RAM (static) | ~`NUM_LEDS × 40` bytes + 12 bytes | Per-LED `led_sm_object` structs + global marquee state |
+| Stack | None | Runs on system work queue (no dedicated thread) |
+
+---
+
+## Test Points
+
+| Scenario | UART log expected | Level |
+|----------|-------------------|-------|
+| Module init | `[zego_led] Initializing zego_led (N LEDs)` | INF |
+| Module init complete | `[zego_led] zego_led initialized` | INF |
+| LED turned on | `[zego_led] LED N ON` | DBG |
+| LED turned off | `[zego_led] LED N OFF` | DBG |
+| Blink started | `[zego_led] LED N BLINK period=X ms` | INF |
+| Breathe started | `[zego_led] LED N BREATHE ramp=X ms (N steps x M ms/step)` | INF |
+| Breathe direction reversal | `[zego_led] LED N BREATHE direction -> UP/DOWN (step X/Y)` | DBG |
+| Marquee started | `[zego_led] Marquee started (period N ms)` | INF |
+| Invalid LED number | `[zego_led] Invalid LED number: N (max M)` | WRN |
+| LED_STATE_CHAN publish error | `[zego_led] Failed to publish LED_STATE_CHAN (led N): E` | ERR |
 
 ---
 
 ## Testing
 
-```bash
-# Automated — no hardware required
-west twister -T zego/led/test -p native_sim/native/64 --inline-logs
+### Hardware (real board)
 
-# Manual build + run
-west build -b native_sim/native/64 zego/led/test
-./build/zephyr/zephyr.exe
-```
+Build and flash `sample/` on a supported board, then follow the step-by-step
+test protocol in [`sample/README.md`](../sample/README.md).
 
-Tests in `test/src/test_led.c`:
+| Step | Effect | LED(s) | Pass condition |
+|------|--------|--------|----------------|
+| T1 | Static ON/OFF | all, in sequence | Each LED on 600 ms then off; no LED stays on longer than ~600 ms |
+| T2 | TOGGLE | LED 0 | 4 blinks at ~400 ms, ends off |
+| T3 | BLINK | LED 0 | Steady 2 Hz (250 ms half-period); visually equal on/off |
+| T4 | BREATHE | LED 0 | Gradually brightens over 3 s, then dims over 3 s; on-pulses visibly grow then shrink |
+| T5 | MARQUEE | all | Exactly one LED lit at a time, advances left-to-right |
 
-| Test                            | Verifies                                            |
-|---------------------------------|-----------------------------------------------------|
-| `test_led_on`                   | ON command → state=true, LED_STATE_CHAN published   |
-| `test_led_off`                  | OFF command → state=false                          |
-| `test_led_toggle_off_to_on`     | TOGGLE from OFF → ON                               |
-| `test_led_toggle_on_to_off`     | TOGGLE from ON → OFF                               |
-| `test_led_on_idempotent`        | Two ON commands → LED remains ON                   |
-| `test_multiple_leds_independent`| LED 0 and LED 1 are independent                    |
-| `test_get_state_invalid_led`    | Out-of-range index → -EINVAL                       |
-| `test_get_state_null_ptr`       | NULL pointer → -EINVAL                             |
+---
+*(Changelog is maintained at the top of this document.)*
