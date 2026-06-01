@@ -5,8 +5,6 @@ get_filename_component(ZEGO_LED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/.. REALPATH)
 list(APPEND EXTRA_ZEPHYR_MODULES ${ZEGO_LED_DIR})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(zego_led_test)
+project(zego_led_sample)
 
-target_sources(app PRIVATE
-    src/test_led.c
-)
+target_sources(app PRIVATE src/main.c)
