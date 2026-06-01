@@ -45,25 +45,29 @@ config ZEGO_LED_BLINK_PERIOD_MS
 	  LED_COMMAND_BLINK is sent with period_ms = 0.  Full cycle = 2x this value.
 
 config ZEGO_LED_BREATHE_PERIOD_MS
-	int "Default breathe full-cycle period in milliseconds"
+	int "Breathe ramp duration per direction in milliseconds"
 	default 3000
 	range 200 30000
 	help
-	  Full on+off cycle duration when LED_COMMAND_BREATHE is sent with
-	  period_ms = 0.
+	  Time for one ramp direction (fade-up or fade-down) when
+	  LED_COMMAND_BREATHE is sent with period_ms = 0.
+	  Full cycle = 2 × this value (default: 3 s up + 3 s down = 6 s total).
+	  Number of PWM steps = this value / CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS.
 
-config ZEGO_LED_BREATHE_ON_PCT
-	int "Breathe on-time percentage (1-99)"
-	default 70
-	range 1 99
+config ZEGO_LED_BREATHE_PWM_PERIOD_MS
+	int "Breathe software-PWM frame duration in milliseconds"
+	default 20
+	range 5 100
 	help
-	  Fraction of the breathe cycle the LED is on, as a percentage.
-	  Default 70 → LED on 70% of the time, off 30%: a slow sustained glow
-	  with a brief dark phase.  Lower values give a short pulse effect.
+	  Duration of one software-PWM cycle used by the breathe effect.
+	  The duty cycle steps linearly across CONFIG_ZEGO_LED_BREATHE_PERIOD_MS /
+	  this value steps per ramp direction.  Lower values give finer brightness
+	  resolution; higher values reduce CPU wake-ups but produce a coarser step.
+	  Default 20 ms (50 Hz) gives 150 steps per 3 s ramp.
 
 config ZEGO_LED_MARQUEE_PERIOD_MS
 	int "Default marquee step period in milliseconds"
-	default 300
+	default 500
 	range 50 5000
 	help
 	  Time each LED stays lit during the marquee sweep when

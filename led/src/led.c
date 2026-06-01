@@ -21,8 +21,7 @@ LOG_MODULE_REGISTER(zego_led, CONFIG_ZEGO_LED_LOG_LEVEL);
  */
 
 /* Input:  publish here to command an LED */
-ZBUS_CHAN_DEFINE(LED_CMD_CHAN, struct led_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY,
-		 ZBUS_MSG_INIT(0));
+ZBUS_CHAN_DEFINE(LED_CMD_CHAN, struct led_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY, ZBUS_MSG_INIT(0));
 
 /* Output: subscribe here to observe LED state changes */
 ZBUS_CHAN_DEFINE(LED_STATE_CHAN, struct led_state_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY,
@@ -44,7 +43,7 @@ static enum smf_state_result led_on_run(void *obj);
 
 static const struct smf_state led_states[] = {
 	[0] = SMF_CREATE_STATE(led_off_entry, led_off_run, NULL, NULL, NULL), /* LED_OFF */
-	[1] = SMF_CREATE_STATE(led_on_entry,  led_on_run,  NULL, NULL, NULL), /* LED_ON  */
+	[1] = SMF_CREATE_STATE(led_on_entry, led_on_run, NULL, NULL, NULL),   /* LED_ON  */
 };
 
 /* Active effect mode for a single LED */
@@ -64,7 +63,11 @@ struct led_sm_object {
 	 * single-core ARM guarantees bool/uint16 reads/writes are atomic. */
 	enum led_effect effect;
 	uint16_t effect_period_ms;
-	bool breathe_high; /* current breathe phase: true = on */
+	/* breathe linear-fade state — valid only while effect == LED_EFFECT_BREATHE */
+	uint16_t breathe_step; /* current PWM step: 0 = fully off, total_steps-1 = near 100% */
+	uint16_t breathe_total_steps; /* steps per ramp direction = period_ms / PWM_PERIOD_MS */
+	bool breathe_ramp_up;         /* true = ramping up, false = ramping down */
+	bool breathe_in_on_phase;     /* currently in the on portion of the current PWM cycle */
 	struct k_work_delayable effect_work;
 };
 
@@ -160,15 +163,43 @@ static enum smf_state_result led_on_run(void *obj)
 }
 
 /* ============================================================================
+ * BREATHE STEP ADVANCE
+ * ============================================================================ */
+
+/* Move to the next duty-cycle step; log when ramp direction reverses. */
+static void breathe_advance_step(struct led_sm_object *sm)
+{
+	bool was_up = sm->breathe_ramp_up;
+
+	if (sm->breathe_ramp_up) {
+		sm->breathe_step++;
+		if (sm->breathe_step >= sm->breathe_total_steps) {
+			sm->breathe_step = sm->breathe_total_steps - 1;
+			sm->breathe_ramp_up = false;
+		}
+	} else {
+		if (sm->breathe_step == 0) {
+			sm->breathe_ramp_up = true; /* bottom reached — reverse */
+		} else {
+			sm->breathe_step--;
+		}
+	}
+
+	if (was_up != sm->breathe_ramp_up) {
+		LOG_DBG("LED %d BREATHE direction -> %s (step %u/%u)", sm->led_number,
+			sm->breathe_ramp_up ? "UP" : "DOWN", sm->breathe_step,
+			sm->breathe_total_steps);
+	}
+}
+
+/* ============================================================================
  * EFFECT WORK HANDLER  (blink / breathe — runs on system work queue)
- * ============================================================================
- */
+ * ============================================================================ */
 
 static void led_effect_work_fn(struct k_work *work)
 {
 	struct led_sm_object *sm =
-		CONTAINER_OF(k_work_delayable_from_work(work),
-			     struct led_sm_object, effect_work);
+		CONTAINER_OF(k_work_delayable_from_work(work), struct led_sm_object, effect_work);
 
 	if (sm->effect == LED_EFFECT_BLINK) {
 		sm->is_on = !sm->is_on;
@@ -177,20 +208,50 @@ static void led_effect_work_fn(struct k_work *work)
 		k_work_schedule(&sm->effect_work, K_MSEC(sm->effect_period_ms));
 
 	} else if (sm->effect == LED_EFFECT_BREATHE) {
-		sm->breathe_high = !sm->breathe_high;
-		sm->is_on = sm->breathe_high;
-		set_led_hw(sm->led_number, sm->is_on);
-		publish_state(sm->led_number, sm->is_on);
+		/*
+		 * Linear-fade breathe using software PWM.
+		 *
+		 * Each step is one PWM frame of CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS.
+		 * Duty cycle = step / total_steps (0% at step 0, ~100% at step max).
+		 * The work item alternates between the on-phase and off-phase of the
+		 * current frame, then advances to the next step at off-phase end.
+		 *
+		 *   on_ms  = step * pwm_ms / total_steps
+		 *   off_ms = (total_steps - step) * pwm_ms / total_steps
+		 *
+		 * Steps with on_ms == 0 (fully off) skip the on phase and wait the
+		 * full pwm period.  Steps with off_ms == 0 (fully on) clamp to 1 ms.
+		 */
+		uint32_t pwm_ms = CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS;
+		uint16_t steps = sm->breathe_total_steps;
+		uint32_t on_ms = (uint32_t)sm->breathe_step * pwm_ms / steps;
+		uint32_t off_ms = (uint32_t)(steps - sm->breathe_step) * pwm_ms / steps;
 
-		uint32_t on_ms  = (uint32_t)sm->effect_period_ms *
-				  CONFIG_ZEGO_LED_BREATHE_ON_PCT / 100U;
-		uint32_t off_ms = sm->effect_period_ms - on_ms;
+		if (sm->breathe_in_on_phase) {
+			/* End of on phase — turn off and schedule off duration */
+			sm->is_on = false;
+			set_led_hw(sm->led_number, false);
+			publish_state(sm->led_number, false);
+			sm->breathe_in_on_phase = false;
+			k_work_schedule(&sm->effect_work, K_MSEC(off_ms > 0 ? off_ms : 1));
+		} else {
+			/* End of off phase — advance step, then start next on or skip */
+			breathe_advance_step(sm);
+			on_ms = (uint32_t)sm->breathe_step * pwm_ms / steps;
+			off_ms = (uint32_t)(steps - sm->breathe_step) * pwm_ms / steps;
 
-		if (on_ms  == 0) { on_ms  = 1; }
-		if (off_ms == 0) { off_ms = 1; }
-
-		k_work_schedule(&sm->effect_work,
-				K_MSEC(sm->breathe_high ? on_ms : off_ms));
+			if (on_ms > 0) {
+				sm->is_on = true;
+				set_led_hw(sm->led_number, true);
+				publish_state(sm->led_number, true);
+				sm->breathe_in_on_phase = true;
+				k_work_schedule(&sm->effect_work, K_MSEC(on_ms));
+			} else {
+				/* 0% duty — wait the off period before next advance */
+				k_work_schedule(&sm->effect_work,
+						K_MSEC(off_ms > 0 ? off_ms : pwm_ms));
+			}
+		}
 	}
 	/* If effect was set to STATIC before this fire, do nothing — the
 	 * mode was changed before cancel so this fire is a benign straggler. */
@@ -232,7 +293,8 @@ static void marquee_work_fn(struct k_work *work)
 static void cancel_led_effect(struct led_sm_object *sm)
 {
 	if (sm->effect != LED_EFFECT_STATIC) {
-		sm->effect = LED_EFFECT_STATIC; /* set before cancel so straggler fires exit early */
+		sm->effect =
+			LED_EFFECT_STATIC; /* set before cancel so straggler fires exit early */
 		k_work_cancel_delayable(&sm->effect_work);
 	}
 }
@@ -274,10 +336,10 @@ static void led_cmd_listener(const struct zbus_channel *chan)
 	/* ---- MARQUEE: global effect — takes over all LEDs ---- */
 	if (msg->type == LED_COMMAND_MARQUEE) {
 		cancel_all_effects();
-		marquee.period_ms = msg->period_ms > 0 ? msg->period_ms
-						        : CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS;
-		marquee.current   = 0;
-		marquee.active    = true;
+		marquee.period_ms =
+			msg->period_ms > 0 ? msg->period_ms : CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS;
+		marquee.current = 0;
+		marquee.active = true;
 		set_led_hw(0, true);
 		publish_state(0, true);
 		led_sm[0].is_on = true;
@@ -301,39 +363,45 @@ static void led_cmd_listener(const struct zbus_channel *chan)
 	switch (msg->type) {
 	case LED_COMMAND_BLINK: {
 		cancel_led_effect(sm);
-		sm->effect           = LED_EFFECT_BLINK;
-		sm->effect_period_ms = msg->period_ms > 0 ? msg->period_ms
-							   : CONFIG_ZEGO_LED_BLINK_PERIOD_MS;
+		sm->effect = LED_EFFECT_BLINK;
+		sm->effect_period_ms =
+			msg->period_ms > 0 ? msg->period_ms : CONFIG_ZEGO_LED_BLINK_PERIOD_MS;
 		sm->is_on = false;
 		set_led_hw(sm->led_number, false);
 		smf_set_initial(SMF_CTX(sm), &led_states[0]);
 		k_work_schedule(&sm->effect_work, K_MSEC(sm->effect_period_ms));
-		LOG_INF("LED %d BLINK period=%u ms",
-			sm->led_number, (unsigned)sm->effect_period_ms);
+		LOG_INF("LED %d BLINK period=%u ms", sm->led_number,
+			(unsigned)sm->effect_period_ms);
 		break;
 	}
 	case LED_COMMAND_BREATHE: {
 		cancel_led_effect(sm);
-		sm->effect           = LED_EFFECT_BREATHE;
-		sm->effect_period_ms = msg->period_ms > 0 ? msg->period_ms
-							   : CONFIG_ZEGO_LED_BREATHE_PERIOD_MS;
-		sm->breathe_high = false; /* start from off */
-		sm->is_on        = false;
+		sm->effect = LED_EFFECT_BREATHE;
+		sm->effect_period_ms =
+			msg->period_ms > 0 ? msg->period_ms : CONFIG_ZEGO_LED_BREATHE_PERIOD_MS;
+		uint32_t pwm_ms = CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS;
+		uint16_t steps = (uint16_t)(sm->effect_period_ms / pwm_ms);
+
+		if (steps < 2) {
+			steps = 2;
+		}
+		sm->breathe_step = 0;
+		sm->breathe_total_steps = steps;
+		sm->breathe_ramp_up = true;
+		sm->breathe_in_on_phase = false;
+		sm->is_on = false;
 		set_led_hw(sm->led_number, false);
 		smf_set_initial(SMF_CTX(sm), &led_states[0]);
-		uint32_t off_ms = (uint32_t)sm->effect_period_ms *
-				  (100U - CONFIG_ZEGO_LED_BREATHE_ON_PCT) / 100U;
-
-		if (off_ms == 0) { off_ms = 1; }
-		k_work_schedule(&sm->effect_work, K_MSEC(off_ms));
-		LOG_INF("LED %d BREATHE period=%u ms",
-			sm->led_number, (unsigned)sm->effect_period_ms);
+		/* Step 0 = 0% duty: wait one full PWM period before first advance */
+		k_work_schedule(&sm->effect_work, K_MSEC(pwm_ms));
+		LOG_INF("LED %d BREATHE ramp=%u ms (%u steps x %u ms/step)", sm->led_number,
+			(unsigned)sm->effect_period_ms, steps, (unsigned)pwm_ms);
 		break;
 	}
 	default: {
 		/* ON / OFF / TOGGLE — cancel any active effect and run SMF */
 		cancel_led_effect(sm);
-		sm->pending_command     = msg->type;
+		sm->pending_command = msg->type;
 		sm->has_pending_command = true;
 		int ret = smf_run_state(SMF_CTX(sm));
 
@@ -380,17 +448,17 @@ static int led_module_init(void)
 	}
 
 	for (int i = 0; i < NUM_LEDS; i++) {
-		led_sm[i].led_number         = (uint8_t)i;
-		led_sm[i].is_on              = false;
+		led_sm[i].led_number = (uint8_t)i;
+		led_sm[i].is_on = false;
 		led_sm[i].has_pending_command = false;
-		led_sm[i].effect             = LED_EFFECT_STATIC;
+		led_sm[i].effect = LED_EFFECT_STATIC;
 		k_work_init_delayable(&led_sm[i].effect_work, led_effect_work_fn);
 		smf_set_initial(SMF_CTX(&led_sm[i]), &led_states[0]);
 		smf_run_state(SMF_CTX(&led_sm[i])); /* run entry to init hardware */
 	}
 
 	k_work_init_delayable(&marquee.work, marquee_work_fn);
-	marquee.active  = false;
+	marquee.active = false;
 	marquee.current = 0;
 
 	LOG_INF("zego_led initialized");

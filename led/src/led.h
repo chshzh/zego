@@ -49,7 +49,7 @@ enum led_msg_type {
 	LED_COMMAND_OFF,     /**< Turn LED off. */
 	LED_COMMAND_TOGGLE,  /**< Toggle LED state. */
 	LED_COMMAND_BLINK,   /**< Blink: equal on/off at period_ms each. */
-	LED_COMMAND_BREATHE, /**< Breathing pulse: short on-flash, long off (duty set by CONFIG_ZEGO_LED_BREATHE_ON_PCT). */
+	LED_COMMAND_BREATHE, /**< Linear fade: ramps from 0% to 100% brightness over period_ms, then 100% back to 0% over period_ms. Full cycle = 2 × period_ms. */
 	LED_COMMAND_MARQUEE, /**< Cycle all LEDs in sequence at period_ms per step. led_number ignored. */
 };
 
