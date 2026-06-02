@@ -231,6 +231,9 @@ functional and independent. Buttons to test per board:
 
 # Faster long-press trigger:
 CONFIG_ZEGO_BUTTON_LONG_PRESS_MS=1500           # default 3000
+
+# Enable long-press repeat (re-fires BUTTON_LONG_PRESS every 500 ms while held):
+CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS=500     # default 0 = disabled
 ```
 
 Edit `prj.conf`, rebuild (`-p` for pristine), reflash. The boot banner shows

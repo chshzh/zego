@@ -65,11 +65,22 @@ CONFIG_ZEGO_LED=y
 ```conf
 # nRF7002DK
 CONFIG_ZEGO_BUTTON_NUM_BUTTONS=2
+CONFIG_ZEGO_BUTTON_BACKEND_DK=y
 CONFIG_ZEGO_LED_NUM_LEDS=2
+CONFIG_ZEGO_LED_BACKEND_DK=y
 
 # nRF54LM20DK
 CONFIG_ZEGO_BUTTON_NUM_BUTTONS=4
+CONFIG_ZEGO_BUTTON_BACKEND_DK=y
 CONFIG_ZEGO_LED_NUM_LEDS=4
+CONFIG_ZEGO_LED_BACKEND_DK=y
+```
+
+To use the portable Zephyr backends instead (requires `gpio-leds` / `gpio-keys` DTS nodes):
+
+```conf
+CONFIG_ZEGO_BUTTON_BACKEND_GPIO=y
+CONFIG_ZEGO_LED_BACKEND_ZEPHYR=y
 ```
 
 > **Button and LED indices are 0-based.** Display names ("Button 1", "LED1") are
@@ -81,8 +92,20 @@ CONFIG_ZEGO_LED_NUM_LEDS=4
 
 ```
 zego/
-├── button/    ← button module (src/, Kconfig, CMakeLists.txt, boards/, docs/, sample/, zephyr/module.yml)
-├── led/       ← LED module   (src/, Kconfig, CMakeLists.txt, boards/, docs/, sample/, zephyr/module.yml)
+├── button/
+│   ├── src/
+│   │   ├── button.c / button.h      ← FSM + zbus core
+│   │   ├── button_hw.h              ← HAL interface
+│   │   ├── button_hw_dk.c           ← backend: dk_buttons_and_leds
+│   │   └── button_hw_gpio.c         ← backend: Zephyr Input / gpio-keys
+│   ├── Kconfig / CMakeLists.txt / boards/ / docs/ / sample/ / zephyr/module.yml
+├── led/
+│   ├── src/
+│   │   ├── led.c / led.h            ← effects engine + zbus core
+│   │   ├── led_hw.h                 ← HAL interface
+│   │   ├── led_hw_dk.c              ← backend: dk_buttons_and_leds
+│   │   └── led_hw_zephyr.c          ← backend: Zephyr gpio-leds / pwm-leds
+│   ├── Kconfig / CMakeLists.txt / boards/ / docs/ / sample/ / zephyr/module.yml
 └── west.yml   ← workspace manifest (NCS v3.3.0)
 ```
 

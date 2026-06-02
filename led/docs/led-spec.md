@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/led` |
-| Version | 2026-06-01-13-27 |
+| Version | 2026-06-02-11-38 |
 | PRD Version | N/A (standalone library module) |
 | Status | Stable |
 
@@ -17,12 +17,13 @@
 |---|---|
 | 2026-05-31-00-00 | Initial module spec (ON/OFF/TOGGLE/BLINK/BREATHE/MARQUEE) |
 | 2026-06-01-13-27 | Breathe reworked: linear software-PWM ramp (0%→100%→0%) replaces asymmetric duty cycle; added `BREATHE_PWM_PERIOD_MS`; added sample app; removed test folder; reformatted to match button-spec structure |
+| 2026-06-02-11-38 | Hardware abstraction layer (`led_hw.h` + DK / Zephyr-LED backends); hardware-PWM breathe path for boards with PWM LEDs (`CONFIG_ZEGO_LED_USE_PWM`); `LED_STATE_CHAN` now publishes once per effect start, not per toggle; added `command` field to `led_state_msg`; thread-safe `atomic_t` effect state; T6 HW-PWM breathe test step in sample |
 
 ---
 
 ## Overview
 
-The `zego/led` module controls DK hardware LEDs via zbus commands.  Any application
+The `zego/led` module controls hardware LEDs via zbus commands.  Any application
 module publishes a command to `LED_CMD_CHAN`; the LED module subscribes, drives a
 per-LED SMF for static modes, and runs `k_work_delayable` timers for dynamic effects.
 State changes are reported on `LED_STATE_CHAN`.
@@ -30,6 +31,19 @@ State changes are reported on `LED_STATE_CHAN`.
 The LED module is a **pure command-driven module**: it consumes commands, produces
 state notifications.  Policy (which events light which LED) lives in the application,
 not in this module.
+
+A **hardware abstraction layer** (`led_hw.h`) decouples the effects engine from the
+physical LED driver.  Choose a backend via Kconfig:
+
+| Backend | Kconfig symbol | Description |
+|---------|----------------|-------------|
+| DK library (default) | `CONFIG_ZEGO_LED_BACKEND_DK=y` | Uses `dk_buttons_and_leds`; works out-of-the-box on nRF7002DK and nRF54LM20DK |
+| Zephyr LED (portable) | `CONFIG_ZEGO_LED_BACKEND_ZEPHYR=y` | Uses Zephyr `gpio-leds` + optional `pwm-leds` drivers; portable to any board with a `gpio-leds` DTS node |
+
+When `CONFIG_ZEGO_LED_BACKEND_ZEPHYR=y` is combined with `CONFIG_ZEGO_LED_USE_PWM=y`,
+the breathe effect uses hardware PWM for LEDs that have a corresponding `pwm-leds`
+child node (configured per-LED with `CONFIG_ZEGO_LED_n_PWM_INDEX`), and falls back to
+software PWM for LEDs without a PWM channel.
 
 ---
 
@@ -45,8 +59,9 @@ not in this module.
 ## Location
 
 - **Path**: `zego/led/`
-- **Files**: `src/led.c`, `src/led.h`, `Kconfig`, `CMakeLists.txt`,
-  `zephyr/module.yml`, `sample/`, `docs/`
+- **Files**: `src/led.c`, `src/led.h`, `src/led_hw.h` (HAL interface),
+  `src/led_hw_dk.c` (DK backend), `src/led_hw_zephyr.c` (Zephyr LED backend),
+  `Kconfig`, `CMakeLists.txt`, `zephyr/module.yml`, `sample/`, `docs/`
 
 ---
 
@@ -54,7 +69,8 @@ not in this module.
 
 - [x] **Application module** — zbus listener for `LED_CMD_CHAN`; per-LED SMF for
   static ON/OFF state; per-LED `k_work_delayable` for blink/breathe effects;
-  global `k_work_delayable` for marquee.  Auto-initializes via `SYS_INIT`.
+  global `k_work_delayable` for marquee.  Hardware calls routed through `led_hw.h`
+  HAL (DK or Zephyr LED driver backend).  Auto-initializes via `SYS_INIT`.
 
 ---
 
@@ -81,10 +97,26 @@ struct led_msg {
 };
 
 struct led_state_msg {
-    uint8_t led_number; /* 0-based LED index */
-    bool    is_on;      /* New state after hardware change */
+    uint8_t          led_number; /* 0-based LED index (MARQUEE: first lit LED)    */
+    bool             is_on;      /* true = on / effect running; false = off        */
+    enum led_msg_type command;   /* Command that triggered this notification       */
 };
 ```
+
+**`LED_STATE_CHAN` publish policy:**
+
+| Event | Published when | `is_on` | `command` |
+|-------|---------------|---------|-----------|
+| `LED_COMMAND_ON` | LED turned on | `true` | `LED_COMMAND_ON` |
+| `LED_COMMAND_OFF` | LED turned off | `false` | `LED_COMMAND_OFF` |
+| `LED_COMMAND_TOGGLE` | LED state changes | reflects new state | `LED_COMMAND_TOGGLE` |
+| `LED_COMMAND_BLINK` | Effect **starts** (once) | `false` (LED off before first toggle) | `LED_COMMAND_BLINK` |
+| `LED_COMMAND_BREATHE` | Effect **starts** (once) | `false` (LED off; ramps up from 0%) | `LED_COMMAND_BREATHE` |
+| `LED_COMMAND_MARQUEE` | Effect **starts** (once) | `true` (first LED immediately lit) | `LED_COMMAND_MARQUEE` |
+
+> **Note:** Dynamic effects (BLINK, BREATHE, MARQUEE) publish to `LED_STATE_CHAN` only
+> once when the effect begins, **not** on every hardware toggle.  This prevents the
+> channel from flooding subscribers with hundreds of events during a breathe cycle.
 
 **`period_ms` semantics per command type:**
 
@@ -137,7 +169,7 @@ stateDiagram-v2
 | Effect | Mechanism | Behaviour |
 |--------|-----------|-----------|
 | `BLINK` | `k_work_delayable` per LED | Toggles every `period_ms`; 50% duty cycle |
-| `BREATHE` | `k_work_delayable` per LED | Software PWM: duty steps 0%→100% over `period_ms`, then 100%→0%. Steps = `period_ms` / `BREATHE_PWM_PERIOD_MS` |
+| `BREATHE` | `k_work_delayable` per LED | Duty steps 0%→100% over `period_ms`, then 100%→0%. Uses hardware PWM (`led_hw_set_brightness`) when the LED has a PWM channel; falls back to software PWM otherwise. Steps = `period_ms` / `BREATHE_PWM_PERIOD_MS` |
 | `MARQUEE` | Single global `k_work_delayable` | One LED lit at a time, advances every `period_ms`; pre-empts all per-LED effects |
 
 ---
@@ -147,7 +179,14 @@ stateDiagram-v2
 | Symbol | Type | Default | Description |
 |--------|------|---------|-------------|
 | `CONFIG_ZEGO_LED` | bool | `n` | Enable the module |
-| `CONFIG_ZEGO_LED_NUM_LEDS` | int | `4` | Number of LEDs; board overlays override |
+| `CONFIG_ZEGO_LED_BACKEND_DK` | bool | `y` | Hardware backend: `dk_buttons_and_leds` (default) |
+| `CONFIG_ZEGO_LED_BACKEND_ZEPHYR` | bool | `n` | Hardware backend: Zephyr `gpio-leds` / `pwm-leds` (portable) |
+| `CONFIG_ZEGO_LED_USE_PWM` | bool | `n` | Enable hardware-PWM breathe (requires `BACKEND_ZEPHYR`) |
+| `CONFIG_ZEGO_LED_0_PWM_INDEX` | int | `-1` | `pwm-leds` child index for LED 0; `-1` = SW PWM fallback |
+| `CONFIG_ZEGO_LED_1_PWM_INDEX` | int | `-1` | `pwm-leds` child index for LED 1; `-1` = SW PWM fallback |
+| `CONFIG_ZEGO_LED_2_PWM_INDEX` | int | `-1` | `pwm-leds` child index for LED 2; `-1` = SW PWM fallback |
+| `CONFIG_ZEGO_LED_3_PWM_INDEX` | int | `-1` | `pwm-leds` child index for LED 3; `-1` = SW PWM fallback |
+| `CONFIG_ZEGO_LED_NUM_LEDS` | int | `4` | Number of LEDs; board conf overrides |
 | `CONFIG_ZEGO_LED_INIT_PRIORITY` | int | `91` | `SYS_INIT` APPLICATION level priority |
 | `CONFIG_ZEGO_LED_LOG_LEVEL` | choice | `info` | Log verbosity |
 | `CONFIG_ZEGO_LED_BLINK_PERIOD_MS` | int | `250` | Blink toggle half-period (ms); full cycle = 2× |
@@ -225,7 +264,7 @@ CONFIG_ZEGO_LED=y
 
 | Error Condition | Detection | Response |
 |----------------|-----------|----------|
-| `dk_leds_init` fails | Non-zero return in `led_module_init` | `LOG_ERR`, return error code (boot continues) |
+| `led_hw_init` fails | Non-zero return in `led_module_init` | `LOG_ERR`, return error code (boot continues) |
 | `zbus_chan_pub` (LED_STATE_CHAN) fails | Non-zero return in `publish_state` | `LOG_ERR`, notification dropped |
 | Out-of-range LED number in command | `msg->led_number >= NUM_LEDS` | `LOG_WRN`, command silently ignored |
 | Out-of-range `led_get_state` index | `led_number >= NUM_LEDS` | Return `-EINVAL` |
@@ -252,7 +291,8 @@ CONFIG_ZEGO_LED=y
 | LED turned on | `[zego_led] LED N ON` | DBG |
 | LED turned off | `[zego_led] LED N OFF` | DBG |
 | Blink started | `[zego_led] LED N BLINK period=X ms` | INF |
-| Breathe started | `[zego_led] LED N BREATHE ramp=X ms (N steps x M ms/step)` | INF |
+| Breathe started (SW PWM) | `[zego_led] LED N BREATHE (SW PWM) ramp=X ms (N steps x M ms/step)` | INF |
+| Breathe started (HW PWM) | `[zego_led] LED N BREATHE (HW PWM) ramp=X ms (N steps x M ms/step)` | INF |
 | Breathe direction reversal | `[zego_led] LED N BREATHE direction -> UP/DOWN (step X/Y)` | DBG |
 | Marquee started | `[zego_led] Marquee started (period N ms)` | INF |
 | Invalid LED number | `[zego_led] Invalid LED number: N (max M)` | WRN |
@@ -272,8 +312,9 @@ test protocol in [`sample/README.md`](../sample/README.md).
 | T1 | Static ON/OFF | all, in sequence | Each LED on 600 ms then off; no LED stays on longer than ~600 ms |
 | T2 | TOGGLE | LED 0 | 4 blinks at ~400 ms, ends off |
 | T3 | BLINK | LED 0 | Steady 2 Hz (250 ms half-period); visually equal on/off |
-| T4 | BREATHE | LED 0 | Gradually brightens over 3 s, then dims over 3 s; on-pulses visibly grow then shrink |
+| T4 | BREATHE | LED 0 | Gradually brightens over 3 s (SW PWM by default), then dims; on-pulses visibly grow then shrink |
 | T5 | MARQUEE | all | Exactly one LED lit at a time, advances left-to-right |
+| T6 | BREATHE (HW PWM) | each LED in sequence | Requires `CONFIG_ZEGO_LED_USE_PWM=y`; module log shows `(HW PWM)` for LEDs with `PWM_INDEX >= 0` and `(SW PWM)` fallback for others. HW PWM LEDs show true analogue fade; SW fallback shows rapid toggling |
 
 ---
 *(Changelog is maintained at the top of this document.)*
