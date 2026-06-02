@@ -24,11 +24,20 @@
  *   static void my_state_listener(const struct zbus_channel *chan)
  *   {
  *       const struct led_state_msg *s = zbus_chan_const_msg(chan);
- *       // s->led_number, s->is_on
+ *       // s->command tells you what caused the change:
+ *       //   LED_COMMAND_ON / OFF / TOGGLE  — static state change; s->is_on is the new state.
+ *       //   LED_COMMAND_BLINK / BREATHE    — effect started; no per-toggle updates follow.
+ *       //   LED_COMMAND_MARQUEE            — marquee started; s->led_number = first lit LED.
  *   }
  *   ZBUS_LISTENER_DEFINE(my_state_lst, my_state_listener);
  *   ZBUS_CHAN_ADD_OBS(LED_STATE_CHAN, my_state_lst, 0);
  * @endcode
+ *
+ * State-channel publish policy:
+ *  - Static commands (ON / OFF / TOGGLE): one publish per command.
+ *  - Effect commands (BLINK / BREATHE / MARQUEE): one publish when the effect
+ *    starts; no per-toggle publishes during execution.  When an effect is
+ *    replaced by a static command, the static command generates its own publish.
  */
 
 #ifndef ZEGO_LED_H
@@ -67,11 +76,14 @@ struct led_msg {
 /**
  * @brief LED state notification, published on LED_STATE_CHAN.
  *
- * The LED module publishes this after every hardware state change.
+ * Published once when a command takes effect.  During blink, breathe, or
+ * marquee effects the channel is silent — only the effect-start publish is
+ * sent (see module-level docstring for the full policy).
  */
 struct led_state_msg {
-	uint8_t led_number; /**< 0-based LED index. */
-	bool is_on;         /**< New LED state after the change. */
+	uint8_t led_number;        /**< 0-based LED index (for MARQUEE: first lit LED). */
+	bool is_on;                /**< New state: true = on/effect running, false = off. */
+	enum led_msg_type command; /**< Command that triggered this notification. */
 };
 
 /* ==========================================================================

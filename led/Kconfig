@@ -5,25 +5,108 @@
 
 config ZEGO_LED
 	bool "Zego LED module"
-	select DK_LIBRARY
 	select ZBUS
 	select SMF
 	help
 	  Enable LED control using an SMF state machine.  Subscribes to
-	  LED_CMD_CHAN (zbus) and drives DK LEDs.  Publishes LED_STATE_CHAN after
-	  every hardware state change.  The module auto-initializes via SYS_INIT.
+	  LED_CMD_CHAN (zbus) and drives LEDs.  Publishes LED_STATE_CHAN once
+	  when a command takes effect (no per-toggle publishes during effects).
+	  The module auto-initializes via SYS_INIT.
 
 	  Publish to LED_CMD_CHAN with struct led_msg to command an LED.
 	  See zego/led/docs/led-spec.md for the integration guide.
 
+	  Select a hardware backend below (ZEGO_LED_BACKEND_DK or _ZEPHYR).
+
 if ZEGO_LED
+
+# ---------------------------------------------------------------------------
+# Hardware backend
+# ---------------------------------------------------------------------------
+
+choice ZEGO_LED_BACKEND
+	prompt "LED hardware backend"
+	default ZEGO_LED_BACKEND_DK
+	help
+	  Select how the LED module drives the physical LEDs.
+
+config ZEGO_LED_BACKEND_DK
+	bool "Nordic DK library (dk_buttons_and_leds)"
+	select DK_LIBRARY
+	help
+	  Use the Nordic DK convenience library.  Works out-of-the-box on
+	  nRF7002DK and nRF54LM20DK.  Always uses software PWM for the breathe
+	  effect (no hardware PWM support in this backend).
+
+config ZEGO_LED_BACKEND_ZEPHYR
+	bool "Zephyr LED driver API (gpio-leds / pwm-leds)"
+	select LED
+	help
+	  Use the Zephyr LED driver API.  Requires a gpio-leds DTS node to be
+	  present and enabled on the board.  Optionally supports hardware PWM
+	  for the breathe effect — see CONFIG_ZEGO_LED_USE_PWM.
+
+endchoice # ZEGO_LED_BACKEND
+
+# ---------------------------------------------------------------------------
+# Hardware PWM (Zephyr backend only)
+# ---------------------------------------------------------------------------
+
+config ZEGO_LED_USE_PWM
+	bool "Use hardware PWM for the breathe effect where available"
+	depends on ZEGO_LED_BACKEND_ZEPHYR
+	select LED_PWM
+	help
+	  When enabled, LEDs that have a corresponding pwm-leds device entry
+	  will use hardware PWM for the breathe effect.  This offloads the PWM
+	  signal to dedicated hardware, eliminating the per-frame CPU wake-ups
+	  of the software-PWM fallback and producing a smoother fade.
+
+	  Configure which LED maps to which pwm-leds child index via
+	  ZEGO_LED_n_PWM_INDEX (n = 0..3).  Set to -1 for LEDs that have no
+	  PWM channel; those LEDs fall back to software PWM automatically.
+
+	  Board examples:
+	    nrf7002dk:   LED0 → pwm-leds index 0  (only LED0 has HW PWM)
+	    nrf54lm20dk: LED1 → pwm-leds index 0  (only LED1 has HW PWM)
+
+if ZEGO_LED_USE_PWM
+
+config ZEGO_LED_0_PWM_INDEX
+	int "pwm-leds child index for LED 0 (-1 = software PWM fallback)"
+	default -1
+	range -1 8
+	help
+	  Index of this LED within the board's pwm-leds device.
+	  Set to -1 to use software PWM for LED 0.
+
+config ZEGO_LED_1_PWM_INDEX
+	int "pwm-leds child index for LED 1 (-1 = software PWM fallback)"
+	default -1
+	range -1 8
+
+config ZEGO_LED_2_PWM_INDEX
+	int "pwm-leds child index for LED 2 (-1 = software PWM fallback)"
+	default -1
+	range -1 8
+
+config ZEGO_LED_3_PWM_INDEX
+	int "pwm-leds child index for LED 3 (-1 = software PWM fallback)"
+	default -1
+	range -1 8
+
+endif # ZEGO_LED_USE_PWM
+
+# ---------------------------------------------------------------------------
+# LED count and effect timings
+# ---------------------------------------------------------------------------
 
 config ZEGO_LED_NUM_LEDS
 	int "Number of LEDs to control"
 	default 4
 	range 1 4
 	help
-	  Number of DK LEDs to manage (0-based indices 0 to N-1).
+	  Number of LEDs to manage (0-based indices 0 to N-1).
 	  Override this in boards/<board>.conf:
 	    nrf7002dk_nrf5340_cpuapp       → 2
 	    nrf54lm20dk_nrf54lm20a_cpuapp  → 4
@@ -32,9 +115,9 @@ config ZEGO_LED_INIT_PRIORITY
 	int "Initialization priority (SYS_INIT APPLICATION level)"
 	default 91
 	help
-	  SYS_INIT priority for the LED module.  Must be greater than the DK
-	  library's own init priority.  Set higher than ZEGO_BUTTON_INIT_PRIORITY
-	  if both modules are enabled.
+	  SYS_INIT priority for the LED module.  Must be greater than the
+	  chosen backend's own init priority.  Set higher than
+	  ZEGO_BUTTON_INIT_PRIORITY if both modules are enabled.
 
 config ZEGO_LED_BLINK_PERIOD_MS
 	int "Default blink half-period in milliseconds"
@@ -55,15 +138,17 @@ config ZEGO_LED_BREATHE_PERIOD_MS
 	  Number of PWM steps = this value / CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS.
 
 config ZEGO_LED_BREATHE_PWM_PERIOD_MS
-	int "Breathe software-PWM frame duration in milliseconds"
+	int "Breathe PWM frame duration in milliseconds"
 	default 20
 	range 5 100
 	help
-	  Duration of one software-PWM cycle used by the breathe effect.
-	  The duty cycle steps linearly across CONFIG_ZEGO_LED_BREATHE_PERIOD_MS /
-	  this value steps per ramp direction.  Lower values give finer brightness
-	  resolution; higher values reduce CPU wake-ups but produce a coarser step.
+	  For software-PWM breathe: duration of one PWM cycle.  Lower values
+	  give finer brightness resolution; higher values reduce CPU wake-ups.
 	  Default 20 ms (50 Hz) gives 150 steps per 3 s ramp.
+
+	  For hardware-PWM breathe (CONFIG_ZEGO_LED_USE_PWM=y): this is the
+	  ramp step interval — time between successive brightness updates sent
+	  to the PWM peripheral.
 
 config ZEGO_LED_MARQUEE_PERIOD_MS
 	int "Default marquee step period in milliseconds"

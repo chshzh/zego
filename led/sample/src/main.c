@@ -23,11 +23,32 @@ LOG_MODULE_REGISTER(led_sample, LOG_LEVEL_DBG);
  * LED_STATE_CHAN subscriber — echoes every hardware state change
  * -------------------------------------------------------------------------- */
 
+static const char *cmd_name(enum led_msg_type cmd)
+{
+	switch (cmd) {
+	case LED_COMMAND_ON:
+		return "ON";
+	case LED_COMMAND_OFF:
+		return "OFF";
+	case LED_COMMAND_TOGGLE:
+		return "TOGGLE";
+	case LED_COMMAND_BLINK:
+		return "BLINK";
+	case LED_COMMAND_BREATHE:
+		return "BREATHE";
+	case LED_COMMAND_MARQUEE:
+		return "MARQUEE";
+	default:
+		return "?";
+	}
+}
+
 static void on_led_state(const struct zbus_channel *chan)
 {
 	const struct led_state_msg *s = zbus_chan_const_msg(chan);
 
-	LOG_DBG("  state: LED%d -> %s", s->led_number, s->is_on ? "ON" : "OFF");
+	LOG_DBG("  state: LED%d -> %s  (cmd=%s)", s->led_number, s->is_on ? "ON" : "OFF",
+		cmd_name(s->command));
 }
 
 ZBUS_LISTENER_DEFINE(led_sample_listener, on_led_state);
@@ -109,6 +130,37 @@ static void step_marquee(void)
 	k_sleep(K_MSEC(300));
 }
 
+#if defined(CONFIG_ZEGO_LED_USE_PWM)
+/*
+ * T6 — HW PWM breathe.
+ *
+ * Breathes each LED in turn.  For LEDs with CONFIG_ZEGO_LED_n_PWM_INDEX >= 0
+ * the module uses hardware PWM (true analogue dimming); for others it falls
+ * back to software PWM (rapid toggling).  The module log line says
+ * "(HW PWM)" or "(SW PWM)" for each LED so you can confirm which path ran.
+ *
+ * Requires building with:
+ *   CONFIG_ZEGO_LED_BACKEND_ZEPHYR=y
+ *   CONFIG_ZEGO_LED_USE_PWM=y
+ *   CONFIG_ZEGO_LED_n_PWM_INDEX=<pwm-leds child index>  (for each LED with HW PWM)
+ */
+static void step_breathe_hw_pwm(void)
+{
+	LOG_INF("=== T6: BREATHE (HW PWM) -- each LED, ramp=%d ms/dir ===",
+		CONFIG_ZEGO_LED_BREATHE_PERIOD_MS);
+	LOG_INF("    Module log: '(HW PWM)' = hardware PWM path");
+	LOG_INF("                '(SW PWM)' = software PWM fallback");
+
+	for (uint8_t i = 0; i < CONFIG_ZEGO_LED_NUM_LEDS; i++) {
+		LOG_INF("  LED%d BREATHE", i);
+		led_cmd(i, LED_COMMAND_BREATHE, 0);
+		k_sleep(K_MSEC((uint32_t)CONFIG_ZEGO_LED_BREATHE_PERIOD_MS * 2));
+		led_cmd(i, LED_COMMAND_OFF, 0);
+		k_sleep(K_MSEC(300));
+	}
+}
+#endif
+
 /* --------------------------------------------------------------------------
  * Entry point
  * -------------------------------------------------------------------------- */
@@ -124,6 +176,11 @@ int main(void)
 		CONFIG_ZEGO_LED_BREATHE_PERIOD_MS, CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS);
 	LOG_INF("  Marquee step      : %d ms  (MARQUEE_PERIOD_MS)",
 		CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS);
+#if defined(CONFIG_ZEGO_LED_USE_PWM)
+	LOG_INF("  HW PWM breathe    : enabled  (T6 will run)");
+#else
+	LOG_INF("  HW PWM breathe    : disabled (T6 skipped; all breathe = SW PWM)");
+#endif
 	LOG_INF("------------------------------------------");
 	LOG_INF("  nRF7002DK  : LED1=idx0  LED2=idx1");
 	LOG_INF("  nRF54LM20DK: LED0=idx0 ... LED3=idx3");
@@ -135,6 +192,9 @@ int main(void)
 		step_blink();
 		step_breathe();
 		step_marquee();
+#if defined(CONFIG_ZEGO_LED_USE_PWM)
+		step_breathe_hw_pwm();
+#endif
 		LOG_INF("--- sequence complete, restarting in 2 s ---");
 		all_off();
 		k_sleep(K_SECONDS(2));

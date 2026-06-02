@@ -13,5 +13,12 @@
 if(CONFIG_ZEGO_LED)
     zephyr_library()
     zephyr_library_sources(src/led.c)
+
+    if(CONFIG_ZEGO_LED_BACKEND_DK)
+        zephyr_library_sources(src/led_hw_dk.c)
+    elseif(CONFIG_ZEGO_LED_BACKEND_ZEPHYR)
+        zephyr_library_sources(src/led_hw_zephyr.c)
+    endif()
+
     zephyr_include_directories(src)
 endif()
