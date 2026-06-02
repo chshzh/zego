@@ -5,30 +5,64 @@
 
 config ZEGO_BUTTON
 	bool "Zego button module"
-	select DK_LIBRARY
 	select ZBUS
 	select SMF
 	help
 	  Enable debounced button monitoring using an SMF state machine.
-	  Monitors DK buttons and publishes BUTTON_PRESSED and BUTTON_RELEASED
-	  events on BUTTON_CHAN (zbus).  The module auto-initializes via SYS_INIT.
+	  Monitors buttons and publishes gesture events on BUTTON_CHAN (zbus).
+	  The module auto-initializes via SYS_INIT.
 
 	  Include <zego/button.h> and use ZBUS_CHAN_ADD_OBS(BUTTON_CHAN, ...) to
 	  subscribe.  See zego/button/docs/button-spec.md for the integration guide.
 
+	  Select a hardware backend below (ZEGO_BUTTON_BACKEND_DK or _GPIO).
+
 if ZEGO_BUTTON
+
+# ---------------------------------------------------------------------------
+# Hardware backend
+# ---------------------------------------------------------------------------
+
+choice ZEGO_BUTTON_BACKEND
+	prompt "Button hardware backend"
+	default ZEGO_BUTTON_BACKEND_DK
+	help
+	  Select how the button module reads physical button state.
+
+config ZEGO_BUTTON_BACKEND_DK
+	bool "Nordic DK library (dk_buttons_and_leds)"
+	select DK_LIBRARY
+	help
+	  Use the Nordic DK convenience library.  Works out-of-the-box on
+	  nRF7002DK and nRF54LM20DK.
+
+config ZEGO_BUTTON_BACKEND_GPIO
+	bool "Zephyr Input subsystem (gpio-keys)"
+	select INPUT
+	help
+	  Use the Zephyr Input subsystem with the gpio-keys driver.
+	  Board DTS gpio-keys button nodes must assign consecutive linux,code
+	  values starting from 0 (0 = button 0, 1 = button 1, …).  Provide
+	  a DTS overlay in zego/button/boards/<board>.overlay if the upstream
+	  board DTS uses different values.
+
+endchoice # ZEGO_BUTTON_BACKEND
+
+# ---------------------------------------------------------------------------
+# Button count and timing
+# ---------------------------------------------------------------------------
 
 config ZEGO_BUTTON_NUM_BUTTONS
 	int "Number of buttons to monitor"
 	default 4
 	range 1 4
 	help
-	  Number of DK buttons to monitor (0-based indices 0 to N-1).
+	  Number of buttons to monitor (0-based indices 0 to N-1).
 	  Override this in boards/<board>.conf:
 	    nrf7002dk_nrf5340_cpuapp      → 2  (Button 1, Button 2)
 	    nrf54lm20dk_nrf54lm20a_cpuapp → 4  (BUTTON0–BUTTON3)
 	  Note: when nrf54lm20dk is used with -DSHIELD=nrf7002eb2 the shield
-	  occupies BUTTON3; the application should override to 3 in its own
+	  occupies BUTTON3; override to 3 in the application's own
 	  boards/<board>.conf.
 
 config ZEGO_BUTTON_LONG_PRESS_MS
@@ -46,12 +80,22 @@ config ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS
 	  After a press+release the module waits this long for a 2nd press.
 	  If none arrives, BUTTON_SINGLE_CLICK is published instead.
 
+config ZEGO_BUTTON_LONG_PRESS_REPEAT_MS
+	int "Long-press repeat interval (ms, 0 = disabled)"
+	default 0
+	range 0 10000
+	help
+	  When non-zero, BUTTON_LONG_PRESS is re-published at this interval
+	  while the button remains held after the initial long-press threshold.
+	  Useful for actions like volume ramping or hold-to-confirm sequences.
+	  Set to 0 (default) to publish only once at the threshold.
+
 config ZEGO_BUTTON_INIT_PRIORITY
 	int "Initialization priority (SYS_INIT APPLICATION level)"
 	default 90
 	help
-	  SYS_INIT priority for the button module.  Must be greater than the DK
-	  library's own init priority.
+	  SYS_INIT priority for the button module.  Must be greater than the
+	  chosen backend's own init priority.
 
 module = ZEGO_BUTTON
 module-str = zego_button

@@ -4,11 +4,11 @@
  */
 
 #include "button.h"
+#include "button_hw.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(zego_button, CONFIG_ZEGO_BUTTON_LOG_LEVEL);
 
-#include <dk_buttons_and_leds.h>
 #include <zephyr/kernel.h>
 #include <zephyr/smf.h>
 #include <zephyr/zbus/zbus.h>
@@ -36,17 +36,21 @@ ZBUS_CHAN_DEFINE(BUTTON_CHAN, struct button_msg, NULL, NULL, ZBUS_OBSERVERS_EMPT
  *   PRESSED2 → IDLE (on release → publish BUTTON_DOUBLE_CLICK)
  *   LONG_PRESS_HELD → IDLE (on release)
  *
+ * Design note: PRESSED2 does not start a long-press timer.  Holding the
+ * second press simply fires BUTTON_DOUBLE_CLICK on release.  This keeps the
+ * double-click gesture simple and avoids ambiguity with hold-after-double.
+ *
  * Timer events are delivered by k_work_delayable callbacks that set a flag
  * and call smf_run_state(); all execution is on the system work queue so no
  * additional locking is needed.
  * ============================================================================
  */
 
-#define BTN_S_IDLE           0
-#define BTN_S_PRESSED        1
-#define BTN_S_CLICK_WAIT     2
-#define BTN_S_PRESSED2       3
-#define BTN_S_LONG_PRESS     4
+#define BTN_S_IDLE       0
+#define BTN_S_PRESSED    1
+#define BTN_S_CLICK_WAIT 2
+#define BTN_S_PRESSED2   3
+#define BTN_S_LONG_PRESS 4
 
 static enum smf_state_result idle_run(void *obj);
 static void pressed_entry(void *obj);
@@ -58,27 +62,32 @@ static void pressed2_entry(void *obj);
 static enum smf_state_result pressed2_run(void *obj);
 static void long_press_entry(void *obj);
 static enum smf_state_result long_press_run(void *obj);
+static void long_press_exit(void *obj);
 
 static const struct smf_state button_states[] = {
-	[BTN_S_IDLE]       = SMF_CREATE_STATE(NULL, idle_run, NULL, NULL, NULL),
-	[BTN_S_PRESSED]    = SMF_CREATE_STATE(pressed_entry, pressed_run, pressed_exit, NULL, NULL),
+	[BTN_S_IDLE] = SMF_CREATE_STATE(NULL, idle_run, NULL, NULL, NULL),
+	[BTN_S_PRESSED] = SMF_CREATE_STATE(pressed_entry, pressed_run, pressed_exit, NULL, NULL),
 	[BTN_S_CLICK_WAIT] = SMF_CREATE_STATE(click_wait_entry, click_wait_run, NULL, NULL, NULL),
-	[BTN_S_PRESSED2]   = SMF_CREATE_STATE(pressed2_entry, pressed2_run, NULL, NULL, NULL),
-	[BTN_S_LONG_PRESS] = SMF_CREATE_STATE(long_press_entry, long_press_run, NULL, NULL, NULL),
+	[BTN_S_PRESSED2] = SMF_CREATE_STATE(pressed2_entry, pressed2_run, NULL, NULL, NULL),
+	[BTN_S_LONG_PRESS] =
+		SMF_CREATE_STATE(long_press_entry, long_press_run, long_press_exit, NULL, NULL),
 };
 
 struct button_sm_object {
 	struct smf_ctx ctx;
 	uint8_t button_number;
 	uint32_t press_count;
-	int64_t press_timestamp_ms;    /**< Time of most recent press. */
-	int64_t release_timestamp_ms;  /**< Time of most recent release (set in pressed_exit). */
+	int64_t press_timestamp_ms;   /**< Time of most recent press. */
+	int64_t release_timestamp_ms; /**< Time of most recent release (set in pressed_exit). */
 	bool current_state;
 	bool previous_state;
-	bool long_press_fired;         /**< Set by long_press_work, checked in pressed_run. */
-	bool click_timeout;            /**< Set by double_click_work, checked in click_wait_run. */
+	bool long_press_fired; /**< Set by long_press_work, checked in pressed_run. */
+	bool click_timeout;    /**< Set by double_click_work, checked in click_wait_run. */
 	struct k_work_delayable long_press_work;
 	struct k_work_delayable double_click_work;
+#if CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS > 0
+	struct k_work_delayable repeat_work; /**< Re-fires BUTTON_LONG_PRESS while held. */
+#endif
 };
 
 static struct button_sm_object button_sm[NUM_BUTTONS];
@@ -89,7 +98,7 @@ static struct button_sm_object button_sm[NUM_BUTTONS];
  */
 
 static void publish_event(struct button_sm_object *sm, enum button_msg_type type,
-			   uint32_t duration_ms)
+			  uint32_t duration_ms)
 {
 	struct button_msg msg = {
 		.type = type,
@@ -102,8 +111,8 @@ static void publish_event(struct button_sm_object *sm, enum button_msg_type type
 	int ret = zbus_chan_pub(&BUTTON_CHAN, &msg, K_MSEC(100));
 
 	if (ret < 0) {
-		LOG_ERR("Failed to publish btn event %d (btn %d): %d", (int)type,
-			sm->button_number, ret);
+		LOG_ERR("Failed to publish btn event %d (btn %d): %d", (int)type, sm->button_number,
+			ret);
 	}
 }
 
@@ -114,9 +123,8 @@ static void publish_event(struct button_sm_object *sm, enum button_msg_type type
 
 static void long_press_work_fn(struct k_work *work)
 {
-	struct button_sm_object *sm =
-		CONTAINER_OF(k_work_delayable_from_work(work), struct button_sm_object,
-			     long_press_work);
+	struct button_sm_object *sm = CONTAINER_OF(k_work_delayable_from_work(work),
+						   struct button_sm_object, long_press_work);
 
 	sm->long_press_fired = true;
 	int ret = smf_run_state(SMF_CTX(sm));
@@ -128,9 +136,8 @@ static void long_press_work_fn(struct k_work *work)
 
 static void double_click_work_fn(struct k_work *work)
 {
-	struct button_sm_object *sm =
-		CONTAINER_OF(k_work_delayable_from_work(work), struct button_sm_object,
-			     double_click_work);
+	struct button_sm_object *sm = CONTAINER_OF(k_work_delayable_from_work(work),
+						   struct button_sm_object, double_click_work);
 
 	sm->click_timeout = true;
 	int ret = smf_run_state(SMF_CTX(sm));
@@ -197,8 +204,7 @@ static void click_wait_entry(void *obj)
 {
 	struct button_sm_object *sm = (struct button_sm_object *)obj;
 
-	k_work_schedule(&sm->double_click_work,
-			K_MSEC(CONFIG_ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS));
+	k_work_schedule(&sm->double_click_work, K_MSEC(CONFIG_ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS));
 }
 
 static enum smf_state_result click_wait_run(void *obj)
@@ -246,12 +252,27 @@ static enum smf_state_result pressed2_run(void *obj)
 	return SMF_EVENT_HANDLED;
 }
 
+#if CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS > 0
+static void repeat_work_fn(struct k_work *work)
+{
+	struct button_sm_object *sm = CONTAINER_OF(k_work_delayable_from_work(work),
+						   struct button_sm_object, repeat_work);
+
+	publish_event(sm, BUTTON_LONG_PRESS, CONFIG_ZEGO_BUTTON_LONG_PRESS_MS);
+	LOG_DBG("Button %d long press repeat", sm->button_number);
+	k_work_schedule(&sm->repeat_work, K_MSEC(CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS));
+}
+#endif /* CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS > 0 */
+
 static void long_press_entry(void *obj)
 {
 	struct button_sm_object *sm = (struct button_sm_object *)obj;
 
 	publish_event(sm, BUTTON_LONG_PRESS, CONFIG_ZEGO_BUTTON_LONG_PRESS_MS);
 	LOG_INF("Button %d long press", sm->button_number);
+#if CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS > 0
+	k_work_schedule(&sm->repeat_work, K_MSEC(CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS));
+#endif
 }
 
 static enum smf_state_result long_press_run(void *obj)
@@ -265,6 +286,17 @@ static enum smf_state_result long_press_run(void *obj)
 	}
 	sm->previous_state = sm->current_state;
 	return SMF_EVENT_HANDLED;
+}
+
+static void long_press_exit(void *obj)
+{
+#if CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS > 0
+	struct button_sm_object *sm = (struct button_sm_object *)obj;
+
+	k_work_cancel_delayable(&sm->repeat_work);
+#else
+	ARG_UNUSED(obj);
+#endif
 }
 
 /* ============================================================================
@@ -312,8 +344,7 @@ void zego_button_inject(uint8_t btn_num, bool pressed)
 void zego_button_inject_long_press_timer(uint8_t btn_num)
 {
 	if (btn_num >= NUM_BUTTONS) {
-		LOG_WRN("zego_button_inject_long_press_timer: btn_num %d out of range",
-			btn_num);
+		LOG_WRN("zego_button_inject_long_press_timer: btn_num %d out of range", btn_num);
 		return;
 	}
 	k_work_cancel_delayable(&button_sm[btn_num].long_press_work);
@@ -323,13 +354,26 @@ void zego_button_inject_long_press_timer(uint8_t btn_num)
 void zego_button_inject_double_click_timer(uint8_t btn_num)
 {
 	if (btn_num >= NUM_BUTTONS) {
-		LOG_WRN("zego_button_inject_double_click_timer: btn_num %d out of range",
-			btn_num);
+		LOG_WRN("zego_button_inject_double_click_timer: btn_num %d out of range", btn_num);
 		return;
 	}
 	k_work_cancel_delayable(&button_sm[btn_num].double_click_work);
 	double_click_work_fn(&button_sm[btn_num].double_click_work.work);
 }
+
+#if CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS > 0
+void zego_button_inject_long_press_repeat_timer(uint8_t btn_num)
+{
+	if (btn_num >= NUM_BUTTONS) {
+		LOG_WRN("zego_button_inject_long_press_repeat_timer: btn_num %d out of range",
+			btn_num);
+		return;
+	}
+	k_work_cancel_delayable(&button_sm[btn_num].repeat_work);
+	repeat_work_fn(&button_sm[btn_num].repeat_work.work);
+}
+#endif /* CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS > 0 */
+
 #endif /* CONFIG_ZTEST */
 
 /* ============================================================================
@@ -343,12 +387,6 @@ static int button_module_init(void)
 
 	LOG_INF("Initializing zego_button (%d buttons)", NUM_BUTTONS);
 
-	ret = dk_buttons_init(button_handler);
-	if (ret) {
-		LOG_ERR("dk_buttons_init failed: %d", ret);
-		return ret;
-	}
-
 	for (int i = 0; i < NUM_BUTTONS; i++) {
 		button_sm[i].button_number = (uint8_t)i;
 		button_sm[i].press_count = 0;
@@ -360,7 +398,16 @@ static int button_module_init(void)
 		button_sm[i].click_timeout = false;
 		k_work_init_delayable(&button_sm[i].long_press_work, long_press_work_fn);
 		k_work_init_delayable(&button_sm[i].double_click_work, double_click_work_fn);
+#if CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS > 0
+		k_work_init_delayable(&button_sm[i].repeat_work, repeat_work_fn);
+#endif
 		smf_set_initial(SMF_CTX(&button_sm[i]), &button_states[BTN_S_IDLE]);
+	}
+
+	ret = button_hw_init(button_handler);
+	if (ret) {
+		LOG_ERR("button_hw_init failed: %d", ret);
+		return ret;
 	}
 
 	LOG_INF("zego_button initialized");

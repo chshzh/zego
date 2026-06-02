@@ -18,5 +18,12 @@
 if(CONFIG_ZEGO_BUTTON)
     zephyr_library()
     zephyr_library_sources(src/button.c)
+
+    if(CONFIG_ZEGO_BUTTON_BACKEND_DK)
+        zephyr_library_sources(src/button_hw_dk.c)
+    elseif(CONFIG_ZEGO_BUTTON_BACKEND_GPIO)
+        zephyr_library_sources(src/button_hw_gpio.c)
+    endif()
+
     zephyr_include_directories(src)
 endif()
