@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/button` |
-| Version | 2026-06-02-11-38 |
+| Version | 2026-06-03-00-00 |
 | PRD Version | N/A (standalone library module) |
 | Status | Stable |
 
@@ -17,10 +17,7 @@
 |---|---|
 | 2026-05-31-00-00 | Initial module spec (3-state FSM: IDLE/PRESSED/RELEASED) |
 | 2026-06-01-08-54 | 5-state FSM: added BUTTON_SINGLE_CLICK, BUTTON_DOUBLE_CLICK, BUTTON_LONG_PRESS gesture classification; BUTTON_PRESSED / BUTTON_RELEASED raw events retained; long-press default 3000 ms |
-| 2026-06-01-12-10 | Removed duplicate second half of spec; removed Migrating section; DOUBLE_CLICK_WINDOW_MS default changed to 300 ms |
-| 2026-06-01-11-04 | Added Supported Hardware section (nRF7002DK, nRF54LM20DK); corrected nRF54LM20DK default NUM_BUTTONS to 4; documented shield/application constraint for BUTTON3; fixed LONG_PRESS_MS default in Configuration table (3000 ms) |
-| 2026-06-01-13-27 | Removed test folder; updated Location and Testing sections accordingly |
-| 2026-06-02-11-38 | Hardware abstraction layer (`button_hw.h` + DK / gpio-keys backends); long-press repeat (`CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS`); documented PRESSED2 no-long-press design; added `long_press_exit` to state table; updated test-shim API |
+| 2026-06-03-00-00 | Added HAL backend section (DK / GPIO-keys); added BACKEND Kconfig symbols to table; fixed nRF54LM20DK NUM_BUTTONS default (4, not 3); removed stale duplicate spec block |
 
 ---
 
@@ -30,7 +27,7 @@ The `zego/button` module monitors hardware buttons using a per-button Zephyr SMF
 state machine.  It publishes two layers of events on `BUTTON_CHAN` (zbus):
 
 - **Raw events** (`BUTTON_PRESSED`, `BUTTON_RELEASED`) — fired immediately on every
-  physical press and release.
+  physical press and release, identical to the previous behavior.
 - **Gesture events** (`BUTTON_SINGLE_CLICK`, `BUTTON_DOUBLE_CLICK`, `BUTTON_LONG_PRESS`)
   — fired after the FSM classifies the press sequence using configurable timers.
 
@@ -38,22 +35,12 @@ Subscribers may listen to either layer, or both.  The module does **not** drive 
 manage connectivity state, or contain any application-specific logic.
 
 A **hardware abstraction layer** (`button_hw.h`) decouples the FSM from the physical
-button driver.  Choose a backend via Kconfig:
+driver.  Choose a backend via Kconfig:
 
 | Backend | Kconfig symbol | Description |
 |---------|----------------|-------------|
 | DK library (default) | `CONFIG_ZEGO_BUTTON_BACKEND_DK=y` | Uses `dk_buttons_and_leds`; works out-of-the-box on nRF7002DK and nRF54LM20DK |
-| Zephyr Input | `CONFIG_ZEGO_BUTTON_BACKEND_GPIO=y` | Uses `gpio-keys` + Zephyr Input subsystem; portable to any board with a `gpio-keys` DTS node |
-
----
-
-## Supported Hardware
-
-| Board | Build target | Buttons available | Notes |
-|-------|-------------|-------------------|-------|
-| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | Button 1 (idx 0), Button 2 (idx 1) | 2 buttons |
-| nRF54LM20DK (standalone) | `nrf54lm20dk/nrf54lm20a/cpuapp` | BUTTON0–BUTTON3 (idx 0–3) | 4 buttons |
-| nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-DSHIELD=nrf7002eb2` | BUTTON0–BUTTON2 (idx 0–2) | BUTTON3 pin conflicts with the shield — **application constraint**, not a module limitation. The module itself always supports 4 buttons; override `CONFIG_ZEGO_BUTTON_NUM_BUTTONS=3` in the application's `boards/nrf54lm20dk_nrf54lm20a_cpuapp.conf` when building with the shield. |
+| Zephyr Input (portable) | `CONFIG_ZEGO_BUTTON_BACKEND_GPIO=y` | Uses the Zephyr Input subsystem with `gpio-keys`; portable to any board with a `gpio-keys` DTS node; requires consecutive `linux,code` values starting from 0 |
 
 ---
 
@@ -61,14 +48,26 @@ button driver.  Choose a backend via Kconfig:
 
 - **Path**: `zego/button/`
 - **Files**: `src/button.c`, `src/button.h`, `src/button_hw.h` (HAL interface),
-  `src/button_hw_dk.c` (DK backend), `src/button_hw_gpio.c` (gpio-keys backend),
+  `src/button_hw_dk.c` (DK backend), `src/button_hw_gpio.c` (GPIO/Input backend),
   `Kconfig`, `CMakeLists.txt`, `zephyr/module.yml`, `sample/`, `docs/`
 
 ---
 
 ## Module Type
 
-- [x] **Application module** — SMF per-button state machine, driven by hardware backend callback on the system work queue; publishes to `BUTTON_CHAN` (zbus).
+- [x] **Application module** — SMF per-button state machine, driven by the selected
+  hardware backend callback on the system work queue; publishes to `BUTTON_CHAN` (zbus).
+  Hardware input is abstracted via `button_hw.h`; the DK and GPIO/Input backends share
+  the same FSM logic in `button.c`.
+
+---
+
+## Supported Hardware
+
+| Board | Build target | Buttons available | Notes |
+|-------|-------------|-------------------|-------|
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | BUTTON1 (idx 0), BUTTON2 (idx 1) | 2 buttons |
+| nRF54LM20DK | `nrf54lm20dk/nrf54lm20a/cpuapp` | BUTTON0–BUTTON3 (idx 0–3) | 4 buttons; when built with `-DSHIELD=nrf7002eb2` BUTTON3 pin is occupied by the shield — the application overrides `CONFIG_ZEGO_BUTTON_NUM_BUTTONS=3` in its own board conf |
 
 ---
 
@@ -104,7 +103,7 @@ struct button_msg {
 | `BUTTON_DOUBLE_CLICK`| Hold time of the 2nd press                          |
 | `BUTTON_LONG_PRESS`  | `CONFIG_ZEGO_BUTTON_LONG_PRESS_MS`                   |
 
-**Subscribes to**: nothing — driven entirely by the hardware backend (`button_hw_init` callback).
+**Subscribes to**: nothing — driven entirely by `dk_buttons_init` hardware callback.
 
 ---
 
@@ -143,8 +142,6 @@ stateDiagram-v2
 
     note right of LONG_PRESS
         entry: pub BUTTON_LONG_PRESS
-               (if REPEAT_MS > 0) schedule repeat_work
-        exit:  cancel repeat_work
     end note
 ```
 
@@ -155,8 +152,8 @@ stateDiagram-v2
 | `IDLE` | Waiting for a press | — | — |
 | `PRESSED` | Button held; awaiting release or long-press timer | `press_count++`, record `press_timestamp`, schedule `long_press_work`, pub `BUTTON_PRESSED` | Cancel `long_press_work`, record `release_timestamp` |
 | `CLICK_WAIT` | First release detected; waiting for 2nd press or timeout | Schedule `double_click_work` | — |
-| `PRESSED2` | Second press detected within window. **Note:** holding the 2nd press does not trigger `BUTTON_LONG_PRESS` — the PRESSED2 state has no long-press timer by design. | `press_count++`, record `press_timestamp`, pub `BUTTON_PRESSED` | — |
-| `LONG_PRESS` | Button held past long-press threshold | Pub `BUTTON_LONG_PRESS`; if `REPEAT_MS > 0`, schedule `repeat_work` | Cancel `repeat_work` |
+| `PRESSED2` | Second press detected within window | `press_count++`, record `press_timestamp`, pub `BUTTON_PRESSED` | — |
+| `LONG_PRESS` | Button held past long-press threshold | Pub `BUTTON_LONG_PRESS` | — |
 
 **Timer summary:**
 
@@ -164,7 +161,6 @@ stateDiagram-v2
 |-------|-------------|-------------|--------|
 | `long_press_work` | `PRESSED` entry | `CONFIG_ZEGO_BUTTON_LONG_PRESS_MS` | Sets `long_press_fired`; runs SMF |
 | `double_click_work` | `CLICK_WAIT` entry | `CONFIG_ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS` | Sets `click_timeout`; runs SMF |
-| `repeat_work` | `LONG_PRESS` entry (only when `REPEAT_MS > 0`) | `CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS` | Re-publishes `BUTTON_LONG_PRESS`; reschedules itself |
 
 ---
 
@@ -174,20 +170,19 @@ stateDiagram-v2
 |--------|------|---------|-------------|
 | `CONFIG_ZEGO_BUTTON` | bool | `n` | Enable the module |
 | `CONFIG_ZEGO_BUTTON_BACKEND_DK` | bool | `y` | Hardware backend: `dk_buttons_and_leds` (default) |
-| `CONFIG_ZEGO_BUTTON_BACKEND_GPIO` | bool | `n` | Hardware backend: Zephyr Input / `gpio-keys` (portable) |
-| `CONFIG_ZEGO_BUTTON_NUM_BUTTONS` | int | `4` | Number of buttons; board conf overrides |
+| `CONFIG_ZEGO_BUTTON_BACKEND_GPIO` | bool | `n` | Hardware backend: Zephyr Input subsystem / `gpio-keys` (portable) |
+| `CONFIG_ZEGO_BUTTON_NUM_BUTTONS` | int | `4` | Number of buttons; board overlays override |
 | `CONFIG_ZEGO_BUTTON_LONG_PRESS_MS` | int | `3000` | Hold time (ms) that triggers `BUTTON_LONG_PRESS` |
-| `CONFIG_ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS` | int | `300` | Max gap (ms) between two presses for double-click |
-| `CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS` | int | `0` | Re-fire `BUTTON_LONG_PRESS` every N ms while held; `0` = disabled |
+| `CONFIG_ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS` | int | `400` | Max gap (ms) between two presses for double-click |
 | `CONFIG_ZEGO_BUTTON_INIT_PRIORITY` | int | `90` | `SYS_INIT` APPLICATION level priority |
 | `CONFIG_ZEGO_BUTTON_LOG_LEVEL` | choice | `info` | Log verbosity |
 
 Board-specific defaults (`boards/<board>.conf`):
 
-| Board | `NUM_BUTTONS` | Notes |
-|-------|--------------|-------|
-| `nrf7002dk/nrf5340/cpuapp` | 2 | Button 1, Button 2 |
-| `nrf54lm20dk/nrf54lm20a/cpuapp` | 4 | BUTTON0–BUTTON3; override to 3 in the application when building with `-DSHIELD=nrf7002eb2` |
+| Board | `NUM_BUTTONS` |
+|-------|--------------|
+| `nrf7002dk/nrf5340/cpuapp` | 2 |
+| `nrf54lm20dk/nrf54lm20a/cpuapp` | 4 (3 when `-DSHIELD=nrf7002eb2` — app overrides in its own board conf) |
 
 ---
 
@@ -202,7 +197,6 @@ ZBUS_CHAN_DECLARE(BUTTON_CHAN);
 /* Test builds only (CONFIG_ZTEST) */
 void zego_button_inject(uint8_t btn_num, bool pressed);
 void zego_button_inject_long_press_timer(uint8_t btn_num);
-void zego_button_inject_long_press_repeat_timer(uint8_t btn_num);
 void zego_button_inject_double_click_timer(uint8_t btn_num);
 ```
 
@@ -253,7 +247,7 @@ CONFIG_ZEGO_BUTTON=y
 
 | Error Condition | Detection | Response |
 |----------------|-----------|----------|
-| `button_hw_init` fails | Non-zero return in `button_module_init` | `LOG_ERR`, return error code (boot continues) |
+| `dk_buttons_init` fails | Non-zero return in `button_module_init` | `LOG_ERR`, return error code (boot continues) |
 | `zbus_chan_pub` fails | Non-zero return in `publish_event` | `LOG_ERR`, event dropped |
 | SMF `smf_run_state` fails | Non-zero return in `button_handler` or timer callbacks | `LOG_ERR`, FSM left in current state |
 | Out-of-range button inject | `btn_num >= NUM_BUTTONS` in test shim | `LOG_WRN`, silently ignored |
@@ -286,19 +280,44 @@ CONFIG_ZEGO_BUTTON=y
 
 ## Testing
 
-### Hardware (real board)
+```bash
+# Automated — no hardware required
+west twister -T zego/button/test -p native_sim/native/64 --inline-logs
 
-Build and flash `sample/` on a supported board, then follow the step-by-step
-test protocol in [`sample/README.md`](../sample/README.md).
+# Manual
+west build -b native_sim/native/64 zego/button/test
+./build/zephyr/zephyr.exe
+```
 
-| Step | Action | nRF7002DK button | nRF54LM20DK button | Expected event |
-|------|--------|------------------|--------------------|----------------|
-| T1 × 3 | Single click | Button 1 | BUTTON0 | `SINGLE_CLICK`, count+1 each |
-| T2 × 3 | Double click | Button 1 | BUTTON0 | `DOUBLE_CLICK`, count+2 each |
-| T3 × 1 | Long press > 3 s | Button 1 | BUTTON0 | `LONG_PRESS` while held; `RELEASED` on release; no click |
-| T4 × 1 each | Single click | **Button 2** | **BUTTON1, BUTTON2, BUTTON3**¹ | `SINGLE_CLICK`, `button_number`=idx |
+Tests in `test/src/test_button.c`:
 
-¹ With nRF7002EB2 shield: BUTTON1 and BUTTON2 only.
+| Test | Verifies |
+|------|----------|
+| `test_single_click` | press+release+timer → `BUTTON_SINGLE_CLICK` |
+| `test_double_click` | 2× press+release → `BUTTON_DOUBLE_CLICK` |
+| `test_long_press` | press+long-press timer → `BUTTON_LONG_PRESS` while held; release does not publish a click |
+| `test_press_count_increments` | `press_count` increments once per single-click cycle |
+| `test_press_count_double_click` | `press_count` increments twice (two physical presses) |
+| `test_multiple_buttons_independent` | Per-button FSMs are independent |
+| `test_inject_out_of_range_ignored` | Out-of-range inject is silently dropped |
 
 ---
+
+## Migrating from BUTTON_PRESSED / BUTTON_RELEASED only
+
+Apps that previously checked `duration_ms` on `BUTTON_RELEASED` to detect long press:
+
+1. Raw events are still published — existing listeners that check `BUTTON_PRESSED` / `BUTTON_RELEASED` continue to work unchanged.
+2. To use gesture events instead, replace the `duration_ms` threshold check with a direct check on `msg->type == BUTTON_LONG_PRESS` / `BUTTON_SINGLE_CLICK`.
+3. Remove any app-level `CONFIG_APP_BUTTON_LONG_PRESS_MS` Kconfig symbol — the threshold is now `CONFIG_ZEGO_BUTTON_LONG_PRESS_MS` in the module.
+4. `BUTTON_LONG_PRESS` fires **while the button is still held** — a `BUTTON_RELEASED` follows when the user releases.
+
+---
+
+## Open Issues / TBD
+
+- [ ] Double-click is not classified for the 2nd press of a long-press sequence (by design; document if this becomes a user question).
+
+---
+
 *(Changelog is maintained at the top of this document.)*

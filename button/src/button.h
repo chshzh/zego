@@ -57,12 +57,7 @@ enum button_msg_type {
 	 *  duration_ms = hold time of the press in ms. */
 	BUTTON_SINGLE_CLICK,
 	/** Double click: two presses within DOUBLE_CLICK_WINDOW_MS.
-	 *  duration_ms = hold time of the 2nd press in ms.
-	 *
-	 *  Note: holding the 2nd press does not trigger BUTTON_LONG_PRESS.
-	 *  The PRESSED2 state only waits for release; it does not start a
-	 *  long-press timer.  This is intentional — double-click-then-hold
-	 *  is not a distinct gesture in this module's UX model. */
+	 *  duration_ms = hold time of the 2nd press in ms. */
 	BUTTON_DOUBLE_CLICK,
 	/** Long press: button held >= LONG_PRESS_MS. Published while still held.
 	 *  duration_ms = CONFIG_ZEGO_BUTTON_LONG_PRESS_MS. */
@@ -132,20 +127,6 @@ void zego_button_inject_long_press_timer(uint8_t btn_num);
  * @param btn_num  0-based button index (silently ignored if out of range).
  */
 void zego_button_inject_double_click_timer(uint8_t btn_num);
-
-#if CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS > 0
-/**
- * @brief Force the long-press repeat timer to fire immediately (test builds only).
- *
- * Only available when CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS > 0.
- * Cancels the pending repeat work and invokes the callback synchronously.
- * Call while the button is still "held" (in LONG_PRESS state).
- *
- * @param btn_num  0-based button index (silently ignored if out of range).
- */
-void zego_button_inject_long_press_repeat_timer(uint8_t btn_num);
-#endif /* CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS > 0 */
-
 #endif /* CONFIG_ZTEST */
 
 #endif /* ZEGO_BUTTON_H */
