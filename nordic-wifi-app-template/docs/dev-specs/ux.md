@@ -123,8 +123,4 @@ Defined in `src/modules/network/net_event_app.c`. Declared in `src/modules/messa
 
 ## 8. Known Limitations
 
-| Limitation | Notes |
-|------------|-------|
-| SoftAP LED starts on first client (not on AP-enable) | `zego/network` only calls the weak hook on first station join. A `zego_network_on_softap_ready()` hook would fix this. |
-| Double-click does not toggle BLE advertising | Requires `zego_wifi_ble_prov_advertise(bool)` API in `zego/modules/wifi_ble_prov`. |
-| P2P_GO treated same as SoftAP for LED | Both show BLINK on first peer join. Separate handling possible if needed. |
+No open issues.

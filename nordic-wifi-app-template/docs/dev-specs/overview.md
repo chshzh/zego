@@ -86,7 +86,4 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 
 ## 5. Open Issues
 
-| # | Description | Spec |
-|---|---|---|
-| UX-1 | SoftAP LED transition fires on first client join, not on AP enable. Needs `zego_network_on_softap_ready()` weak hook in `zego/network`. | [ux.md](ux.md) |
-| UX-2 | Double-click does not toggle BLE advertising — blocked on `zego_wifi_ble_prov_advertise(bool)` API. | [ux.md](ux.md) |
+No open issues.
