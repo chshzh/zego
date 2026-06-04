@@ -143,6 +143,8 @@ For button events, subscribe to `BUTTON_CHAN`. For LED control, publish to `LED_
 | PRD | [docs/pm-prd/PRD.md](docs/pm-prd/PRD.md) |
 | Engineering specs overview | [docs/dev-specs/overview.md](docs/dev-specs/overview.md) |
 | Architecture | [docs/dev-specs/architecture.md](docs/dev-specs/architecture.md) |
-| Wi-Fi mode selector (zego/wifi) | [zego/wifi/docs/wifi-spec.md](../wifi/docs/wifi-spec.md) |
-| Button module (zego/button) | [zego/button/docs/button-spec.md](../button/docs/button-spec.md) |
-| LED module (zego/led) | [zego/led/docs/led-spec.md](../led/docs/led-spec.md) |
+| Wi-Fi mode selector (zego/wifi) | [zego/modules/wifi/docs/wifi-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi/docs/wifi-spec.md) |
+| Network module (zego/network) | [zego/modules/network/docs/network-spec.md](https://github.com/chshzh/zego/blob/main/modules/network/docs/network-spec.md) |
+| BLE provisioning (zego/wifi_ble_prov) | [zego/modules/wifi_ble_prov/docs/wifi-ble-prov-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi_ble_prov/docs/wifi-ble-prov-spec.md) |
+| Button module (zego/button) | [zego/modules/button/docs/button-spec.md](https://github.com/chshzh/zego/blob/main/modules/button/docs/button-spec.md) |
+| LED module (zego/led) | [zego/modules/led/docs/led-spec.md](https://github.com/chshzh/zego/blob/main/modules/led/docs/led-spec.md) |

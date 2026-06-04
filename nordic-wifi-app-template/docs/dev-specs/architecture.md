@@ -122,7 +122,7 @@ Modules initialise in priority order. Lower numbers run first.
 
 ## 5. Wi-Fi Mode Selector
 
-Implemented entirely in `zego/wifi`. See [zego/wifi — wifi-spec.md](../../wifi/docs/wifi-spec.md) for full details.
+Implemented entirely in `zego/wifi`. See [zego/wifi — wifi-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi/docs/wifi-spec.md) for full details.
 
 **Summary:**
 - NVS settings key: `"app/app_wifi_mode"` (uint8_t)
@@ -195,7 +195,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 ```
 
 When copying the template to a standalone project outside `zego/`, update the paths to point at the
-actual zego directory (e.g. `../../zego/button`).
+actual zego directory (e.g. `../../zego/modules/button`).
 
 ---
 

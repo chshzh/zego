@@ -9,10 +9,21 @@ Capabilities are composed by enabling Kconfig symbols — no code copying.
 
 | Module | Directory | zbus channels | Spec |
 |--------|-----------|---------------|------|
-| button | `zego/button/` | `BUTTON_CHAN` (out) | [button-spec.md](button/docs/button-spec.md) |
-| led | `zego/led/` | `LED_CMD_CHAN` (in) · `LED_STATE_CHAN` (out) | [led-spec.md](led/docs/led-spec.md) |
+| button | `zego/modules/button/` | `BUTTON_CHAN` (out) | [button-spec.md](modules/button/docs/button-spec.md) |
+| led | `zego/modules/led/` | `LED_CMD_CHAN` (in) · `LED_STATE_CHAN` (out) | [led-spec.md](modules/led/docs/led-spec.md) |
+| wifi | `zego/modules/wifi/` | `WIFI_MODE_CHAN` (out) | [wifi-spec.md](modules/wifi/docs/wifi-spec.md) |
+| network | `zego/modules/network/` | — (weak-hook API) | [network-spec.md](modules/network/docs/network-spec.md) |
+| wifi_ble_prov | `zego/modules/wifi_ble_prov/` | — | [wifi-ble-prov-spec.md](modules/wifi_ble_prov/docs/wifi-ble-prov-spec.md) |
 
 See each spec for the full API, Kconfig reference, and hardware test guide.
+
+---
+
+## Example application
+
+| App | Directory | Description |
+|-----|-----------|-------------|
+| nordic-wifi-app-template | `zego/nordic-wifi-app-template/` | NCS Wi-Fi app template using all five modules (STA / SoftAP / P2P + BLE provisioning) |
 
 ---
 
@@ -46,8 +57,8 @@ Kconfig is wired automatically — no `rsource` needed.
 ```cmake
 cmake_minimum_required(VERSION 3.20.0)
 
-get_filename_component(ZEGO_BUTTON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../zego/button REALPATH)
-get_filename_component(ZEGO_LED_DIR   ${CMAKE_CURRENT_SOURCE_DIR}/../zego/led    REALPATH)
+get_filename_component(ZEGO_BUTTON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../zego/modules/button REALPATH)
+get_filename_component(ZEGO_LED_DIR   ${CMAKE_CURRENT_SOURCE_DIR}/../zego/modules/led    REALPATH)
 list(APPEND EXTRA_ZEPHYR_MODULES ${ZEGO_BUTTON_DIR} ${ZEGO_LED_DIR})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
@@ -92,20 +103,13 @@ CONFIG_ZEGO_LED_BACKEND_ZEPHYR=y
 
 ```
 zego/
-├── button/
-│   ├── src/
-│   │   ├── button.c / button.h      ← FSM + zbus core
-│   │   ├── button_hw.h              ← HAL interface
-│   │   ├── button_hw_dk.c           ← backend: dk_buttons_and_leds
-│   │   └── button_hw_gpio.c         ← backend: Zephyr Input / gpio-keys
-│   ├── Kconfig / CMakeLists.txt / boards/ / docs/ / sample/ / zephyr/module.yml
-├── led/
-│   ├── src/
-│   │   ├── led.c / led.h            ← effects engine + zbus core
-│   │   ├── led_hw.h                 ← HAL interface
-│   │   ├── led_hw_dk.c              ← backend: dk_buttons_and_leds
-│   │   └── led_hw_zephyr.c          ← backend: Zephyr gpio-leds / pwm-leds
-│   ├── Kconfig / CMakeLists.txt / boards/ / docs/ / sample/ / zephyr/module.yml
+├── modules/
+│   ├── button/        ← GPIO button driver, gesture detection, BUTTON_CHAN publisher
+│   ├── led/           ← per-LED state machine, LED_CMD_CHAN subscriber
+│   ├── wifi/          ← Wi-Fi mode selector + NVS persistence
+│   ├── network/       ← Wi-Fi event management, DHCP, weak-hook API
+│   └── wifi_ble_prov/ ← BLE GATT provisioning service
+├── nordic-wifi-app-template/  ← example app (STA / SoftAP / P2P + BLE prov)
 └── west.yml   ← workspace manifest (NCS v3.3.0)
 ```
 
