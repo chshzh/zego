@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-04-17-09 |
-| PRD Version | 2026-06-04-17-09 |
+| Version | 2026-06-04-18-00 |
+| PRD Version | 2026-06-04-18-00 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2 |
 | Status | Current |
@@ -17,6 +17,7 @@
 
 | Version | Summary of changes |
 |---|---|
+| 2026-06-04-18-00 | Added UX module spec (ux.md); updated spec index and PRD mapping for FR-104/105/106; noted APP_WIFI_STATE_CHAN in architecture summary |
 | 2026-06-04-17-09 | Initial overview — template extracted from nordic-wifi-webdash; webserver removed; all four Wi-Fi modes + three STA provisioning paths; architecture.md added |
 
 ---
@@ -40,6 +41,7 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | [zego/wifi_ble_prov — wifi-ble-prov-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi_ble_prov/docs/wifi-ble-prov-spec.md) | BLE provisioning (nRF Wi-Fi Provisioner), `WIFI_CHAN` owner, rotating credential reconnect | FR-004 |
 | [zego/button — button-spec.md](https://github.com/chshzh/zego/blob/main/modules/button/docs/button-spec.md) | Gesture detection (click, double-click, long press), `BUTTON_CHAN` | FR-101 |
 | [zego/led — led-spec.md](https://github.com/chshzh/zego/blob/main/modules/led/docs/led-spec.md) | Per-LED state machine (static, blink, breathe, marquee), `LED_CMD_CHAN` | FR-102 |
+| [ux.md](ux.md) | Button 0 gesture map, LED 0 Wi-Fi state machine, `APP_WIFI_STATE_CHAN` definition, BLE prov toggle | FR-104, FR-105, FR-106 |
 
 ---
 
@@ -56,7 +58,8 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | STA provisioning | Three parallel options (shell, cred, BLE) | Supports all use cases without requiring build-time choice |
 | BLE prov on nRF7002DK | Disabled (`CONFIG_ZEGO_WIFI_BLE_PROV=n`) | BLE host stack + large app exceeds 1 MB flash; re-enable if flash allows |
 | Default mode | P2P_GO | Enables out-of-box demo with no network infrastructure |
-| All modules from zego | No in-tree application modules except `net_event_app.c` | Template stays minimal; feature modules are shared across all zego apps |
+| All modules from zego | No in-tree application modules except `net_event_app.c` and `ux.c` | Template stays minimal; feature modules are shared across all zego apps |
+| `APP_WIFI_STATE_CHAN` | Defined in `net_event_app.c`; declared in `messages.h` | Decouples network events from LED/UX logic without making the UX module depend on `zego/network` internals |
 
 ---
 
@@ -75,9 +78,15 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | FR-101 Button events | [button-spec.md](../../button/docs/button-spec.md) | Specified |
 | FR-102 LED control | [led-spec.md](../../led/docs/led-spec.md) | Specified |
 | FR-103 Heap monitor | [architecture.md](architecture.md) | Specified |
+| FR-104 Button 0 mode cycle | [ux.md](ux.md) | Specified |
+| FR-105 LED Wi-Fi state feedback | [ux.md](ux.md) | Specified |
+| FR-106 BLE prov double-click | [ux.md](ux.md) | Specified |
 
 ---
 
 ## 5. Open Issues
 
-No open issues.
+| # | Description | Spec |
+|---|---|---|
+| UX-1 | SoftAP LED transition fires on first client join, not on AP enable. Needs `zego_network_on_softap_ready()` weak hook in `zego/network`. | [ux.md](ux.md) |
+| UX-2 | Double-click does not toggle BLE advertising — blocked on `zego_wifi_ble_prov_advertise(bool)` API. | [ux.md](ux.md) |

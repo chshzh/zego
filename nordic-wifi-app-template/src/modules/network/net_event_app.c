@@ -16,66 +16,58 @@
  * zego/network) to react to network events — e.g. publish a zbus channel,
  * start an MQTT client, or kick off an HTTP request.
  *
+ * APP_WIFI_STATE_CHAN is published here so app_ux can drive LED 0.
+ * Add your own zbus channels following the same ZBUS_CHAN_DEFINE pattern.
+ *
  * ── How to extend ────────────────────────────────────────────────────────────
  *
- * 1. Define your app message type and zbus channel in src/modules/messages.h:
- *
- *      struct my_wifi_msg {
- *          enum zego_wifi_mode mode;
- *          char ip[16];
- *          char mac[18];
- *          char ssid[33];
- *          bool connected;
- *      };
- *      ZBUS_CHAN_DECLARE(MY_WIFI_CHAN);
- *
- * 2. Own the channel in one .c file (exactly one translation unit):
- *
- *      ZBUS_CHAN_DEFINE(MY_WIFI_CHAN, struct my_wifi_msg, NULL, NULL,
- *                       ZBUS_OBSERVERS_EMPTY, ZBUS_MSG_INIT(.connected = false));
- *
- * 3. Replace the LOG_INF calls below with a zbus_chan_pub():
- *
- *      struct my_wifi_msg msg = {
- *          .mode = mode, .connected = true,
- *      };
- *      strncpy(msg.ip,   ip_addr,  sizeof(msg.ip)   - 1);
- *      strncpy(msg.mac,  mac_addr, sizeof(msg.mac)  - 1);
- *      strncpy(msg.ssid, ssid,     sizeof(msg.ssid) - 1);
- *      zbus_chan_pub(&MY_WIFI_CHAN, &msg, K_NO_WAIT);
- *
+ * 1. Add your app message type and channel declaration to messages.h.
+ * 2. Define the channel in this file with ZBUS_CHAN_DEFINE.
+ * 3. Publish inside the callbacks below.
  * 4. Subscribe in any module with ZBUS_SUBSCRIBER_DEFINE / ZBUS_LISTENER_DEFINE.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 #include <net_event_mgmt.h>
+#include "../messages.h"
 
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(net_event_app, LOG_LEVEL_INF);
 
+/* Define APP_WIFI_STATE_CHAN here — declared in messages.h. */
+ZBUS_CHAN_DEFINE(APP_WIFI_STATE_CHAN, struct app_wifi_state_msg, NULL, NULL,
+		 ZBUS_OBSERVERS_EMPTY,
+		 ZBUS_MSG_INIT(.state = APP_WIFI_STATE_CONNECTING,
+			       .mode = ZEGO_WIFI_MODE_STA));
+
 void zego_network_on_wifi_connected(enum zego_wifi_mode mode, const char *ip_addr,
 				    const char *mac_addr, const char *ssid)
 {
-	LOG_INF("Wi-Fi connected: mode=%d ip=%s mac=%s ssid=%s", mode, ip_addr, mac_addr, ssid);
+	LOG_INF("Wi-Fi connected: mode=%s ip=%s mac=%s ssid=%s",
+		(mode == ZEGO_WIFI_MODE_STA)        ? "sta" :
+		(mode == ZEGO_WIFI_MODE_SOFTAP)     ? "softap" :
+		(mode == ZEGO_WIFI_MODE_P2P_GO)     ? "p2p_go" : "p2p_client",
+		ip_addr, mac_addr, ssid);
 
-	/*
-	 * TODO: publish your app zbus channel here, e.g.:
-	 *
-	 *   struct my_wifi_msg msg = { .connected = true, .mode = mode };
-	 *   strncpy(msg.ip, ip_addr, sizeof(msg.ip) - 1);
-	 *   zbus_chan_pub(&MY_WIFI_CHAN, &msg, K_NO_WAIT);
-	 */
+	struct app_wifi_state_msg msg = {
+		.mode = mode,
+		.state = (mode == ZEGO_WIFI_MODE_SOFTAP || mode == ZEGO_WIFI_MODE_P2P_GO)
+				 ? APP_WIFI_STATE_SOFTAP
+				 : APP_WIFI_STATE_CONNECTED,
+	};
+
+	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 }
 
 void zego_network_on_wifi_disconnected(void)
 {
 	LOG_INF("Wi-Fi disconnected");
 
-	/*
-	 * TODO: publish your app zbus channel here, e.g.:
-	 *
-	 *   struct my_wifi_msg msg = { .connected = false };
-	 *   zbus_chan_pub(&MY_WIFI_CHAN, &msg, K_NO_WAIT);
-	 */
+	struct app_wifi_state_msg msg = {
+		.state = APP_WIFI_STATE_ERROR,
+		.mode = ZEGO_WIFI_MODE_STA,
+	};
+
+	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 }

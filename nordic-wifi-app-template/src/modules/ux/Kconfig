@@ -1,0 +1,35 @@
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+
+config APP_UX_MODULE
+	bool "Application UX module (button gestures + LED Wi-Fi feedback)"
+	depends on ZEGO_BUTTON && ZEGO_LED && ZEGO_WIFI && REBOOT && SETTINGS
+	default n
+	help
+	  Provides out-of-box UX for Button 0 and LED 0.
+
+	  Button 0 gestures:
+	    Single click  — print current Wi-Fi mode to UART log
+	    Double-click  — toggle BLE provisioning LED (nRF54LM20DK only;
+	                    full BLE prov toggle requires CONFIG_ZEGO_WIFI_BLE_PROV=y)
+	    Long press    — cycle Wi-Fi mode (STA → SoftAP → P2P_GO → STA),
+	                    save to NVS, reboot
+
+	  LED 0 Wi-Fi state:
+	    Boot / connecting → MARQUEE
+	    STA/P2P connected → Solid ON
+	    SoftAP active     → Slow BLINK (500 ms half-period)
+	    BLE prov active   → BREATHE (triggered by double-click)
+	    Error / disconn.  → Fast BLINK (100 ms half-period)
+
+if APP_UX_MODULE
+
+config APP_UX_INIT_PRIORITY
+	int "UX module SYS_INIT priority"
+	default 95
+	help
+	  Must be higher (later) than ZEGO_LED_INIT_PRIORITY (91) and
+	  ZEGO_BUTTON_INIT_PRIORITY (90) so LED and button are ready before
+	  the UX module starts MARQUEE and registers observers.
+
+endif # APP_UX_MODULE
