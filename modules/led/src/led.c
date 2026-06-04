@@ -11,7 +11,6 @@ LOG_MODULE_REGISTER(zego_led, CONFIG_ZEGO_LED_LOG_LEVEL);
 
 #include <zephyr/kernel.h>
 #include <zephyr/smf.h>
-#include <zephyr/sys/atomic.h>
 #include <zephyr/zbus/zbus.h>
 
 #define NUM_LEDS CONFIG_ZEGO_LED_NUM_LEDS
@@ -29,62 +28,77 @@ ZBUS_CHAN_DEFINE(LED_STATE_CHAN, struct led_state_msg, NULL, NULL, ZBUS_OBSERVER
 		 ZBUS_MSG_INIT(0));
 
 /* ============================================================================
- * PER-LED STATE MACHINE  (static modes: OFF / ON)
+ * PER-LED STATE MACHINE — four proper SMF states: OFF, ON, BLINK, BREATHE
  *
- * Dynamic effects (BLINK / BREATHE) bypass the SMF and run via k_work_delayable.
- * The SMF is used for ON/OFF/TOGGLE; its state is reset to LED_OFF when an
- * effect starts so that the next static command starts from a known state.
+ * All four states are Zephyr SMF states with entry/run/exit actions.
+ * BLINK and BREATHE no longer bypass the SMF — they use it.
+ *
+ * Events delivered to the run handler via sm->event:
+ *   LED_EVENT_CMD   a new command arrived (sm->cmd holds the message)
+ *   LED_EVENT_TICK  the per-LED effect_work timer fired
+ *
+ * Thread safety:
+ *   All smf_run_state() calls happen on the system workqueue:
+ *   - led_cmd_work_fn (CMD events) runs on sysworkq
+ *   - effect_work_fn  (TICK events) runs on sysworkq
+ *   Therefore k_work_cancel_delayable (in exit actions) and
+ *   k_work_schedule (in entry/run actions) are always on the same thread —
+ *   no timeout dlist race, no BUS FAULTs.
  * ============================================================================
  */
 
-static void led_off_entry(void *obj);
-static enum smf_state_result led_off_run(void *obj);
-static void led_on_entry(void *obj);
-static enum smf_state_result led_on_run(void *obj);
-
-static const struct smf_state led_states[] = {
-	[0] = SMF_CREATE_STATE(led_off_entry, led_off_run, NULL, NULL, NULL), /* LED_OFF */
-	[1] = SMF_CREATE_STATE(led_on_entry, led_on_run, NULL, NULL, NULL),   /* LED_ON  */
+enum led_event {
+	LED_EVENT_NONE,
+	LED_EVENT_CMD,
+	LED_EVENT_TICK,
 };
 
-/* Active effect mode for a single LED.
- *
- * Thread-safety: `effect` is written by the zbus listener (publisher's thread)
- * and read by the work queue handler.  It is stored as atomic_t so that the
- * "set STATIC before cancel" pattern is visible across both execution contexts
- * without relying on architecture-specific atomicity guarantees.
- *
- * Other per-LED fields (effect_period_ms, breathe_*) are only written in the
- * listener BEFORE k_work_schedule(), and only read in the work handler AFTER
- * the first fire.  On single-core targets the work-queue scheduling point
- * provides the required memory ordering; no additional locking is needed.
- */
-enum led_effect {
-	LED_EFFECT_STATIC,  /* ON or OFF — driven by SMF */
-	LED_EFFECT_BLINK,   /* periodic toggle via work item */
-	LED_EFFECT_BREATHE, /* asymmetric duty-cycle pulse via work item */
+static void s_off_entry(void *obj);
+static enum smf_state_result s_off_run(void *obj);
+static void s_on_entry(void *obj);
+static enum smf_state_result s_on_run(void *obj);
+static void s_blink_entry(void *obj);
+static enum smf_state_result s_blink_run(void *obj);
+static void s_blink_exit(void *obj);
+static void s_breathe_entry(void *obj);
+static enum smf_state_result s_breathe_run(void *obj);
+static void s_breathe_exit(void *obj);
+
+enum led_state_idx {
+	LED_S_OFF = 0,
+	LED_S_ON,
+	LED_S_BLINK,
+	LED_S_BREATHE,
+};
+
+static const struct smf_state led_states[] = {
+	[LED_S_OFF]     = SMF_CREATE_STATE(s_off_entry,     s_off_run,     NULL,         NULL, NULL),
+	[LED_S_ON]      = SMF_CREATE_STATE(s_on_entry,      s_on_run,      NULL,         NULL, NULL),
+	[LED_S_BLINK]   = SMF_CREATE_STATE(s_blink_entry,   s_blink_run,   s_blink_exit, NULL, NULL),
+	[LED_S_BREATHE] = SMF_CREATE_STATE(s_breathe_entry, s_breathe_run, s_breathe_exit, NULL, NULL),
 };
 
 struct led_sm_object {
 	struct smf_ctx ctx;
 	uint8_t led_number;
 	bool is_on;
-	enum led_msg_type pending_command;
-	bool has_pending_command;
-	atomic_t effect; /* enum led_effect — see thread-safety note above */
+	enum led_event event;
+	struct led_msg cmd; /* valid when event == LED_EVENT_CMD */
+	/* Effect parameters — written in entry, read in run / effect_work_fn */
 	uint16_t effect_period_ms;
-	/* breathe linear-fade state — valid only while effect == LED_EFFECT_BREATHE */
-	uint16_t breathe_step;        /* current step: 0 = fully off, total_steps-1 = full on */
-	uint16_t breathe_total_steps; /* steps per ramp direction = period_ms / PWM_PERIOD_MS */
-	bool breathe_ramp_up;         /* true = ramping up, false = ramping down */
-	bool breathe_in_on_phase;     /* SW-PWM only: currently in the on portion of the frame */
+	/* Breathe state */
+	uint16_t breathe_step;
+	uint16_t breathe_total_steps;
+	bool breathe_ramp_up;
+	bool breathe_in_on_phase;
+	/* Per-LED effect timer */
 	struct k_work_delayable effect_work;
 };
 
 static struct led_sm_object led_sm[NUM_LEDS];
 
 /* ============================================================================
- * MARQUEE — global mode that cycles one LED at a time across all LEDs
+ * MARQUEE — module-level global effect
  * ============================================================================
  */
 
@@ -109,63 +123,6 @@ static void publish_state(uint8_t n, bool on, enum led_msg_type cmd)
 		LOG_ERR("Failed to publish LED_STATE_CHAN (led %d): %d", n, ret);
 	}
 }
-
-/* ============================================================================
- * STATIC STATE MACHINE IMPLEMENTATIONS
- * ============================================================================
- */
-
-static void led_off_entry(void *obj)
-{
-	struct led_sm_object *sm = obj;
-
-	led_hw_set(sm->led_number, false);
-	sm->is_on = false;
-	LOG_DBG("LED %d OFF", sm->led_number);
-	publish_state(sm->led_number, false, sm->pending_command);
-}
-
-static enum smf_state_result led_off_run(void *obj)
-{
-	struct led_sm_object *sm = obj;
-
-	if (sm->has_pending_command) {
-		sm->has_pending_command = false;
-		if (sm->pending_command == LED_COMMAND_ON ||
-		    sm->pending_command == LED_COMMAND_TOGGLE) {
-			smf_set_state(SMF_CTX(sm), &led_states[1]);
-		}
-	}
-	return SMF_EVENT_HANDLED;
-}
-
-static void led_on_entry(void *obj)
-{
-	struct led_sm_object *sm = obj;
-
-	led_hw_set(sm->led_number, true);
-	sm->is_on = true;
-	LOG_DBG("LED %d ON", sm->led_number);
-	publish_state(sm->led_number, true, sm->pending_command);
-}
-
-static enum smf_state_result led_on_run(void *obj)
-{
-	struct led_sm_object *sm = obj;
-
-	if (sm->has_pending_command) {
-		sm->has_pending_command = false;
-		if (sm->pending_command == LED_COMMAND_OFF ||
-		    sm->pending_command == LED_COMMAND_TOGGLE) {
-			smf_set_state(SMF_CTX(sm), &led_states[0]);
-		}
-	}
-	return SMF_EVENT_HANDLED;
-}
-
-/* ============================================================================
- * BREATHE STEP ADVANCE
- * ============================================================================ */
 
 static void breathe_advance_step(struct led_sm_object *sm)
 {
@@ -193,36 +150,245 @@ static void breathe_advance_step(struct led_sm_object *sm)
 }
 
 /* ============================================================================
- * EFFECT WORK HANDLER  (blink / breathe — runs on system work queue)
- * ============================================================================ */
+ * EFFECT WORK HANDLER — blink / breathe (runs on system workqueue)
+ *
+ * Sets LED_EVENT_TICK and calls smf_run_state(), which invokes the current
+ * state's run handler.  The run handler toggles/steps the LED and reschedules.
+ * ============================================================================
+ */
 
-static void led_effect_work_fn(struct k_work *work)
+static void effect_work_fn(struct k_work *work)
 {
 	struct led_sm_object *sm =
 		CONTAINER_OF(k_work_delayable_from_work(work), struct led_sm_object, effect_work);
 
-	enum led_effect eff = (enum led_effect)atomic_get(&sm->effect);
+	sm->event = LED_EVENT_TICK;
+	int ret = smf_run_state(SMF_CTX(sm));
 
-	/* If the effect was cancelled before this fire, exit without touching HW. */
-	if (eff == LED_EFFECT_STATIC) {
+	if (ret < 0) {
+		LOG_ERR("LED %d effect tick SM error: %d", sm->led_number, ret);
+	}
+}
+
+/* ============================================================================
+ * MARQUEE WORK HANDLER (runs on system workqueue)
+ * ============================================================================
+ */
+
+static void marquee_work_fn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	if (!marquee.active) {
 		return;
 	}
 
-	if (eff == LED_EFFECT_BLINK) {
+	led_hw_set(marquee.current, false);
+	led_sm[marquee.current].is_on = false;
+
+	marquee.current = (uint8_t)((marquee.current + 1) % NUM_LEDS);
+
+	led_hw_set(marquee.current, true);
+	led_sm[marquee.current].is_on = true;
+
+	k_work_schedule(&marquee.work, K_MSEC(marquee.period_ms));
+}
+
+/* ============================================================================
+ * STATE IMPLEMENTATIONS — OFF
+ * ============================================================================
+ */
+
+static void s_off_entry(void *obj)
+{
+	struct led_sm_object *sm = obj;
+
+	led_hw_set(sm->led_number, false);
+	sm->is_on = false;
+	enum led_msg_type cause = (sm->event == LED_EVENT_CMD) ? sm->cmd.type : LED_COMMAND_OFF;
+
+	publish_state(sm->led_number, false, cause);
+	LOG_DBG("LED %d OFF", sm->led_number);
+}
+
+static enum smf_state_result s_off_run(void *obj)
+{
+	struct led_sm_object *sm = obj;
+
+	if (sm->event != LED_EVENT_CMD) {
+		return SMF_EVENT_HANDLED;
+	}
+	switch (sm->cmd.type) {
+	case LED_COMMAND_ON:
+	case LED_COMMAND_TOGGLE:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_ON]);
+		break;
+	case LED_COMMAND_BLINK:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_BLINK]);
+		break;
+	case LED_COMMAND_BREATHE:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_BREATHE]);
+		break;
+	default:
+		break;
+	}
+	return SMF_EVENT_HANDLED;
+}
+
+/* ============================================================================
+ * STATE IMPLEMENTATIONS — ON
+ * ============================================================================
+ */
+
+static void s_on_entry(void *obj)
+{
+	struct led_sm_object *sm = obj;
+
+	led_hw_set(sm->led_number, true);
+	sm->is_on = true;
+	enum led_msg_type cause = (sm->event == LED_EVENT_CMD) ? sm->cmd.type : LED_COMMAND_ON;
+
+	publish_state(sm->led_number, true, cause);
+	LOG_DBG("LED %d ON", sm->led_number);
+}
+
+static enum smf_state_result s_on_run(void *obj)
+{
+	struct led_sm_object *sm = obj;
+
+	if (sm->event != LED_EVENT_CMD) {
+		return SMF_EVENT_HANDLED;
+	}
+	switch (sm->cmd.type) {
+	case LED_COMMAND_OFF:
+	case LED_COMMAND_TOGGLE:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_OFF]);
+		break;
+	case LED_COMMAND_BLINK:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_BLINK]);
+		break;
+	case LED_COMMAND_BREATHE:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_BREATHE]);
+		break;
+	default:
+		break;
+	}
+	return SMF_EVENT_HANDLED;
+}
+
+/* ============================================================================
+ * STATE IMPLEMENTATIONS — BLINK
+ * ============================================================================
+ */
+
+static void s_blink_entry(void *obj)
+{
+	struct led_sm_object *sm = obj;
+
+	sm->effect_period_ms =
+		(sm->cmd.period_ms > 0) ? sm->cmd.period_ms : CONFIG_ZEGO_LED_BLINK_PERIOD_MS;
+	sm->is_on = false;
+	led_hw_set(sm->led_number, false);
+	publish_state(sm->led_number, false, LED_COMMAND_BLINK);
+	k_work_schedule(&sm->effect_work, K_MSEC(sm->effect_period_ms));
+	LOG_INF("LED %d BLINK period=%u ms", sm->led_number, (unsigned)sm->effect_period_ms);
+}
+
+static enum smf_state_result s_blink_run(void *obj)
+{
+	struct led_sm_object *sm = obj;
+
+	if (sm->event == LED_EVENT_TICK) {
 		sm->is_on = !sm->is_on;
 		led_hw_set(sm->led_number, sm->is_on);
-		/* No LED_STATE_CHAN publish — blink is an active effect. */
 		k_work_schedule(&sm->effect_work, K_MSEC(sm->effect_period_ms));
+		return SMF_EVENT_HANDLED;
+	}
 
-	} else if (eff == LED_EFFECT_BREATHE) {
+	if (sm->event != LED_EVENT_CMD) {
+		return SMF_EVENT_HANDLED;
+	}
 
+	switch (sm->cmd.type) {
+	case LED_COMMAND_OFF:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_OFF]);
+		break;
+	case LED_COMMAND_ON:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_ON]);
+		break;
+	case LED_COMMAND_TOGGLE:
+		smf_set_state(SMF_CTX(sm),
+			      sm->is_on ? &led_states[LED_S_OFF] : &led_states[LED_S_ON]);
+		break;
+	case LED_COMMAND_BLINK:
+		/* Restart blink with (possibly new) period — cancel and reschedule */
+		k_work_cancel_delayable(&sm->effect_work);
+		sm->effect_period_ms = (sm->cmd.period_ms > 0) ? sm->cmd.period_ms
+							        : CONFIG_ZEGO_LED_BLINK_PERIOD_MS;
+		k_work_schedule(&sm->effect_work, K_MSEC(sm->effect_period_ms));
+		break;
+	case LED_COMMAND_BREATHE:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_BREATHE]);
+		break;
+	default:
+		break;
+	}
+	return SMF_EVENT_HANDLED;
+}
+
+static void s_blink_exit(void *obj)
+{
+	struct led_sm_object *sm = obj;
+
+	k_work_cancel_delayable(&sm->effect_work);
+	LOG_DBG("LED %d BLINK exit", sm->led_number);
+}
+
+/* ============================================================================
+ * STATE IMPLEMENTATIONS — BREATHE
+ * ============================================================================
+ */
+
+static void s_breathe_entry(void *obj)
+{
+	struct led_sm_object *sm = obj;
+
+	sm->effect_period_ms =
+		(sm->cmd.period_ms > 0) ? sm->cmd.period_ms : CONFIG_ZEGO_LED_BREATHE_PERIOD_MS;
+	uint32_t pwm_ms = CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS;
+	uint16_t steps = (uint16_t)(sm->effect_period_ms / pwm_ms);
+
+	if (steps < 2) {
+		steps = 2;
+	}
+	sm->breathe_step = 0;
+	sm->breathe_total_steps = steps;
+	sm->breathe_ramp_up = true;
+	sm->breathe_in_on_phase = false;
+	sm->is_on = false;
+	led_hw_set(sm->led_number, false);
+	publish_state(sm->led_number, false, LED_COMMAND_BREATHE);
+
+	if (led_hw_has_brightness(sm->led_number)) {
+		k_work_schedule(&sm->effect_work, K_MSEC(CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS));
+		LOG_INF("LED %d BREATHE (HW PWM) ramp=%u ms (%u steps x %u ms/step)",
+			sm->led_number, (unsigned)sm->effect_period_ms, steps,
+			(unsigned)pwm_ms);
+	} else {
+		k_work_schedule(&sm->effect_work, K_MSEC(CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS));
+		LOG_INF("LED %d BREATHE (SW PWM) ramp=%u ms (%u steps x %u ms/step)",
+			sm->led_number, (unsigned)sm->effect_period_ms, steps,
+			(unsigned)pwm_ms);
+	}
+}
+
+static enum smf_state_result s_breathe_run(void *obj)
+{
+	struct led_sm_object *sm = obj;
+
+	if (sm->event == LED_EVENT_TICK) {
 		if (led_hw_has_brightness(sm->led_number)) {
-			/*
-			 * Hardware-PWM breathe path.
-			 *
-			 * One work-queue wake per ramp step; hardware handles the
-			 * actual PWM signal.  Brightness = step/max * 100 %.
-			 */
+			/* Hardware-PWM breathe path */
 			uint16_t denom =
 				sm->breathe_total_steps > 1 ? sm->breathe_total_steps - 1 : 1;
 			uint8_t brightness = (uint8_t)((uint32_t)sm->breathe_step * 100U / denom);
@@ -232,19 +398,8 @@ static void led_effect_work_fn(struct k_work *work)
 			breathe_advance_step(sm);
 			k_work_schedule(&sm->effect_work,
 					K_MSEC(CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS));
-
 		} else {
-			/*
-			 * Software-PWM breathe path.
-			 *
-			 * Each step is one PWM frame of CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS.
-			 * Duty cycle = step / total_steps (0% at step 0, ~100% at step max).
-			 * The work item alternates between the on-phase and off-phase of the
-			 * current frame, then advances to the next step at off-phase end.
-			 *
-			 *   on_ms  = step * pwm_ms / total_steps
-			 *   off_ms = (total_steps - step) * pwm_ms / total_steps
-			 */
+			/* Software-PWM breathe path */
 			uint32_t pwm_ms = CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS;
 			uint16_t steps = sm->breathe_total_steps;
 			uint32_t on_ms = (uint32_t)sm->breathe_step * pwm_ms / steps;
@@ -271,59 +426,64 @@ static void led_effect_work_fn(struct k_work *work)
 				}
 			}
 		}
-		/* No LED_STATE_CHAN publish during breathe — effect-start already published. */
-	}
-}
-
-/* ============================================================================
- * MARQUEE WORK HANDLER  (runs on system work queue)
- * ============================================================================
- */
-
-static void marquee_work_fn(struct k_work *work)
-{
-	ARG_UNUSED(work);
-
-	if (!marquee.active) {
-		return;
+		return SMF_EVENT_HANDLED;
 	}
 
-	led_hw_set(marquee.current, false);
-	led_sm[marquee.current].is_on = false;
+	if (sm->event != LED_EVENT_CMD) {
+		return SMF_EVENT_HANDLED;
+	}
 
-	marquee.current = (uint8_t)((marquee.current + 1) % NUM_LEDS);
-
-	led_hw_set(marquee.current, true);
-	led_sm[marquee.current].is_on = true;
-
-	/* No LED_STATE_CHAN publish per step — marquee-start already published. */
-	k_work_schedule(&marquee.work, K_MSEC(marquee.period_ms));
-}
-
-/* ============================================================================
- * EFFECT MANAGEMENT HELPERS
- * ============================================================================
- */
-
-static void cancel_led_effect(struct led_sm_object *sm)
-{
-	/* Set STATIC before cancel so any in-flight work-queue fire exits early. */
-	if ((enum led_effect)atomic_get(&sm->effect) != LED_EFFECT_STATIC) {
-		atomic_set(&sm->effect, LED_EFFECT_STATIC);
+	switch (sm->cmd.type) {
+	case LED_COMMAND_OFF:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_OFF]);
+		break;
+	case LED_COMMAND_ON:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_ON]);
+		break;
+	case LED_COMMAND_TOGGLE:
+		smf_set_state(SMF_CTX(sm),
+			      sm->is_on ? &led_states[LED_S_OFF] : &led_states[LED_S_ON]);
+		break;
+	case LED_COMMAND_BLINK:
+		smf_set_state(SMF_CTX(sm), &led_states[LED_S_BLINK]);
+		break;
+	case LED_COMMAND_BREATHE:
+		/* Restart breathe with (possibly new) period */
 		k_work_cancel_delayable(&sm->effect_work);
+		sm->effect_period_ms = (sm->cmd.period_ms > 0) ? sm->cmd.period_ms
+							        : CONFIG_ZEGO_LED_BREATHE_PERIOD_MS;
+		{
+			uint32_t pwm_ms = CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS;
+			uint16_t steps = (uint16_t)(sm->effect_period_ms / pwm_ms);
+
+			if (steps < 2) {
+				steps = 2;
+			}
+			sm->breathe_step = 0;
+			sm->breathe_total_steps = steps;
+			sm->breathe_ramp_up = true;
+			sm->breathe_in_on_phase = false;
+		}
+		k_work_schedule(&sm->effect_work, K_MSEC(CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS));
+		break;
+	default:
+		break;
 	}
+	return SMF_EVENT_HANDLED;
 }
 
-static void cancel_all_effects(void)
+static void s_breathe_exit(void *obj)
 {
-	for (int i = 0; i < NUM_LEDS; i++) {
-		atomic_set(&led_sm[i].effect, LED_EFFECT_STATIC);
-		k_work_cancel_delayable(&led_sm[i].effect_work);
-		led_hw_set(i, false);
-		led_sm[i].is_on = false;
-		smf_set_initial(SMF_CTX(&led_sm[i]), &led_states[0]);
-	}
+	struct led_sm_object *sm = obj;
+
+	k_work_cancel_delayable(&sm->effect_work);
+	LOG_DBG("LED %d BREATHE exit", sm->led_number);
 }
+
+/* ============================================================================
+ * MARQUEE HELPERS
+ * ============================================================================
+ */
 
 static void marquee_stop(void)
 {
@@ -334,28 +494,33 @@ static void marquee_stop(void)
 	k_work_cancel_delayable(&marquee.work);
 	led_hw_set(marquee.current, false);
 	led_sm[marquee.current].is_on = false;
-	/* No LED_STATE_CHAN publish — the incoming command will publish its own state. */
+}
+
+/* Cancel all per-LED effect timers without changing SMF state. */
+static void cancel_all_effect_timers(void)
+{
+	for (int i = 0; i < NUM_LEDS; i++) {
+		k_work_cancel_delayable(&led_sm[i].effect_work);
+		led_hw_set(i, false);
+		led_sm[i].is_on = false;
+	}
 }
 
 /* ============================================================================
- * ZBUS LISTENER  (runs synchronously in the publisher's thread)
+ * COMMAND PROCESSING — runs on system workqueue via led_cmd_work_fn
  * ============================================================================
  */
 
-static void led_cmd_listener(const struct zbus_channel *chan)
+static void process_led_command(const struct led_msg *msg)
 {
-	const struct led_msg *msg = zbus_chan_const_msg(chan);
-
-	/* ---- MARQUEE: global effect — takes over all LEDs ---- */
 	if (msg->type == LED_COMMAND_MARQUEE) {
-		cancel_all_effects();
+		cancel_all_effect_timers();
 		marquee.period_ms =
 			msg->period_ms > 0 ? msg->period_ms : CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS;
 		marquee.current = 0;
 		marquee.active = true;
 		led_hw_set(0, true);
 		led_sm[0].is_on = true;
-		/* One publish for the whole marquee start. */
 		publish_state(0, true, LED_COMMAND_MARQUEE);
 		k_work_schedule(&marquee.work, K_MSEC(marquee.period_ms));
 		LOG_INF("Marquee started (period %u ms)", (unsigned)marquee.period_ms);
@@ -373,72 +538,56 @@ static void led_cmd_listener(const struct zbus_channel *chan)
 
 	struct led_sm_object *sm = &led_sm[msg->led_number];
 
-	switch (msg->type) {
-	case LED_COMMAND_BLINK: {
-		cancel_led_effect(sm);
-		atomic_set(&sm->effect, LED_EFFECT_BLINK);
-		sm->effect_period_ms =
-			msg->period_ms > 0 ? msg->period_ms : CONFIG_ZEGO_LED_BLINK_PERIOD_MS;
-		sm->is_on = false;
-		led_hw_set(sm->led_number, false);
-		smf_set_initial(SMF_CTX(sm), &led_states[0]);
-		/* Publish effect start — no per-toggle publishes will follow. */
-		publish_state(sm->led_number, false, LED_COMMAND_BLINK);
-		k_work_schedule(&sm->effect_work, K_MSEC(sm->effect_period_ms));
-		LOG_INF("LED %d BLINK period=%u ms", sm->led_number,
-			(unsigned)sm->effect_period_ms);
-		break;
-	}
-	case LED_COMMAND_BREATHE: {
-		cancel_led_effect(sm);
-		atomic_set(&sm->effect, LED_EFFECT_BREATHE);
-		sm->effect_period_ms =
-			msg->period_ms > 0 ? msg->period_ms : CONFIG_ZEGO_LED_BREATHE_PERIOD_MS;
-		uint32_t pwm_ms = CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS;
-		uint16_t steps = (uint16_t)(sm->effect_period_ms / pwm_ms);
+	sm->event = LED_EVENT_CMD;
+	sm->cmd = *msg;
 
-		if (steps < 2) {
-			steps = 2;
-		}
-		sm->breathe_step = 0;
-		sm->breathe_total_steps = steps;
-		sm->breathe_ramp_up = true;
-		sm->breathe_in_on_phase = false;
-		sm->is_on = false;
-		led_hw_set(sm->led_number, false);
-		smf_set_initial(SMF_CTX(sm), &led_states[0]);
-		/* Publish effect start — no per-step publishes will follow. */
-		publish_state(sm->led_number, false, LED_COMMAND_BREATHE);
-		if (led_hw_has_brightness(sm->led_number)) {
-			/* HW PWM: first tick fires after one step period. */
-			k_work_schedule(&sm->effect_work,
-					K_MSEC(CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS));
-			LOG_INF("LED %d BREATHE (HW PWM) ramp=%u ms (%u steps x %u ms/step)",
-				sm->led_number, (unsigned)sm->effect_period_ms, steps,
-				(unsigned)pwm_ms);
-		} else {
-			/* SW PWM: step 0 = 0% duty; wait one full PWM frame first. */
-			k_work_schedule(&sm->effect_work, K_MSEC(pwm_ms));
-			LOG_INF("LED %d BREATHE (SW PWM) ramp=%u ms (%u steps x %u ms/step)",
-				sm->led_number, (unsigned)sm->effect_period_ms, steps,
-				(unsigned)pwm_ms);
-		}
-		break;
-	}
-	default: {
-		/* ON / OFF / TOGGLE — cancel any active effect and run SMF.
-		 * led_on_entry / led_off_entry will publish via pending_command. */
-		cancel_led_effect(sm);
-		sm->pending_command = msg->type;
-		sm->has_pending_command = true;
-		int ret = smf_run_state(SMF_CTX(sm));
+	int ret = smf_run_state(SMF_CTX(sm));
 
-		if (ret < 0) {
-			LOG_ERR("LED %d SM error: %d", sm->led_number, ret);
-		}
-		break;
+	if (ret < 0) {
+		LOG_ERR("LED %d command SM error: %d", msg->led_number, ret);
 	}
+}
+
+/* ============================================================================
+ * COMMAND QUEUE — decouples zbus listener from system workqueue
+ *
+ * The zbus listener runs synchronously in the publisher's thread (which may
+ * be the net_mgmt thread or any other Zephyr thread).  If it called
+ * k_work_cancel_delayable directly, it would race with the effect_work /
+ * marquee.work callbacks on the system workqueue, corrupting the kernel
+ * timeout dlist.
+ *
+ * Instead: listener enqueues to led_cmd_queue (non-blocking, drops if full)
+ * and submits led_cmd_work.  led_cmd_work_fn drains the queue on the system
+ * workqueue, serialised with all effect timers.
+ * ============================================================================
+ */
+
+K_MSGQ_DEFINE(led_cmd_queue, sizeof(struct led_msg),
+		     CONFIG_ZEGO_LED_CMD_QUEUE_DEPTH, 4);
+
+static void led_cmd_work_fn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	struct led_msg msg;
+
+	while (k_msgq_get(&led_cmd_queue, &msg, K_NO_WAIT) == 0) {
+		process_led_command(&msg);
 	}
+}
+
+static K_WORK_DEFINE(led_cmd_work, led_cmd_work_fn);
+
+static void led_cmd_listener(const struct zbus_channel *chan)
+{
+	const struct led_msg *msg = zbus_chan_const_msg(chan);
+	int ret = k_msgq_put(&led_cmd_queue, msg, K_NO_WAIT);
+
+	if (ret < 0) {
+		LOG_WRN("LED command queue full — command dropped (type %d, led %d)",
+			(int)msg->type, msg->led_number);
+	}
+	k_work_submit(&led_cmd_work);
 }
 
 ZBUS_LISTENER_DEFINE(led_cmd_listener_def, led_cmd_listener);
@@ -478,12 +627,16 @@ static int led_module_init(void)
 	for (int i = 0; i < NUM_LEDS; i++) {
 		led_sm[i].led_number = (uint8_t)i;
 		led_sm[i].is_on = false;
-		led_sm[i].has_pending_command = false;
-		led_sm[i].pending_command = LED_COMMAND_OFF;
-		atomic_set(&led_sm[i].effect, LED_EFFECT_STATIC);
-		k_work_init_delayable(&led_sm[i].effect_work, led_effect_work_fn);
-		smf_set_initial(SMF_CTX(&led_sm[i]), &led_states[0]);
-		smf_run_state(SMF_CTX(&led_sm[i])); /* run entry to init hardware */
+		led_sm[i].event = LED_EVENT_NONE;
+		led_sm[i].cmd = (struct led_msg){0};
+		led_sm[i].effect_period_ms = 0;
+		led_sm[i].breathe_step = 0;
+		led_sm[i].breathe_total_steps = 0;
+		led_sm[i].breathe_ramp_up = true;
+		led_sm[i].breathe_in_on_phase = false;
+		k_work_init_delayable(&led_sm[i].effect_work, effect_work_fn);
+		/* smf_set_initial calls s_off_entry which turns the LED off */
+		smf_set_initial(SMF_CTX(&led_sm[i]), &led_states[LED_S_OFF]);
 	}
 
 	k_work_init_delayable(&marquee.work, marquee_work_fn);
@@ -495,3 +648,4 @@ static int led_module_init(void)
 }
 
 SYS_INIT(led_module_init, APPLICATION, CONFIG_ZEGO_LED_INIT_PRIORITY);
+

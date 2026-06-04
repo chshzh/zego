@@ -37,13 +37,10 @@
 LOG_MODULE_REGISTER(net_event_app, LOG_LEVEL_INF);
 
 /* Define APP_WIFI_STATE_CHAN here — declared in messages.h. */
-ZBUS_CHAN_DEFINE(APP_WIFI_STATE_CHAN, struct app_wifi_state_msg, NULL, NULL,
-		 ZBUS_OBSERVERS_EMPTY,
-		 ZBUS_MSG_INIT(.state = APP_WIFI_STATE_CONNECTING,
-			       .mode = ZEGO_WIFI_MODE_STA));
+ZBUS_CHAN_DEFINE(APP_WIFI_STATE_CHAN, struct app_wifi_state_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY,
+		 ZBUS_MSG_INIT(.state = APP_WIFI_STATE_CONNECTING, .mode = ZEGO_WIFI_MODE_STA));
 
-void zego_network_on_softap_ready(enum zego_wifi_mode mode, const char *ip_addr,
-				  const char *ssid)
+void zego_network_on_softap_ready(enum zego_wifi_mode mode, const char *ip_addr, const char *ssid)
 {
 	LOG_INF("SoftAP ready: mode=%s ip=%s ssid=%s",
 		mode == ZEGO_WIFI_MODE_P2P_GO ? "p2p_go" : "softap", ip_addr, ssid);
@@ -60,9 +57,10 @@ void zego_network_on_wifi_connected(enum zego_wifi_mode mode, const char *ip_add
 				    const char *mac_addr, const char *ssid)
 {
 	LOG_INF("Wi-Fi connected: mode=%s ip=%s mac=%s ssid=%s",
-		(mode == ZEGO_WIFI_MODE_STA)        ? "sta" :
-		(mode == ZEGO_WIFI_MODE_SOFTAP)     ? "softap" :
-		(mode == ZEGO_WIFI_MODE_P2P_GO)     ? "p2p_go" : "p2p_client",
+		(mode == ZEGO_WIFI_MODE_STA)      ? "sta"
+		: (mode == ZEGO_WIFI_MODE_SOFTAP) ? "softap"
+		: (mode == ZEGO_WIFI_MODE_P2P_GO) ? "p2p_go"
+						  : "p2p_client",
 		ip_addr, mac_addr, ssid);
 
 	struct app_wifi_state_msg msg = {

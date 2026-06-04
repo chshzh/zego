@@ -79,8 +79,7 @@ static void do_mode_cycle(void)
 		}
 	}
 
-	LOG_INF("Mode cycle: %s → %s — saving and rebooting",
-		mode_name(cur), mode_name(next));
+	LOG_INF("Mode cycle: %s → %s — saving and rebooting", mode_name(cur), mode_name(next));
 
 	/* Acknowledge the long press with a brief LED-off before reboot. */
 	struct led_msg ack = {.type = LED_COMMAND_OFF, .led_number = 0};
@@ -133,6 +132,43 @@ static void apply_wifi_state_led(enum app_wifi_state state)
 
 static enum app_wifi_state last_wifi_state = APP_WIFI_STATE_CONNECTING;
 static bool ble_prov_led_active;
+
+/*
+ * Deferred LED work — runs on the system workqueue.
+ *
+ * led_cmd_listener() (called via zbus_chan_pub) runs synchronously in the
+ * caller's thread.  If it runs in the net_mgmt thread it can race with
+ * marquee_work_fn (system workqueue) on the kernel timeout dlist, causing a
+ * BUS FAULT in sys_clock_announce.  Submitting the LED command through this
+ * work item ensures led_cmd_listener runs on the system workqueue, where it
+ * is serialised with marquee_work_fn.
+ */
+static enum app_wifi_state pending_wifi_state;
+
+/*
+ * Ready flag: set to 1 in app_ux_init() once the LED module (SYS_INIT
+ * priority 91) is fully initialised.  The net_mgmt thread can submit
+ * app_ux_led_work before SYS_INIT reaches the LED module; if the work runs
+ * on the sysworkq before k_work_init_delayable() has been called for
+ * led_sm[n].effect_work, k_work_schedule() inserts a garbage timeout node
+ * into the kernel timeout list and the RTC ISR later crashes with a NULL
+ * dereference in sys_dlist_remove.  Gating on this flag prevents that race.
+ */
+static atomic_t app_ux_ready = ATOMIC_INIT(0);
+
+static void app_ux_led_work_fn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	if (!atomic_get(&app_ux_ready)) {
+		/* LED module not yet initialised — will be replayed in app_ux_init */
+		return;
+	}
+	if (!ble_prov_led_active) {
+		apply_wifi_state_led(pending_wifi_state);
+	}
+}
+
+static K_WORK_DEFINE(app_ux_led_work, app_ux_led_work_fn);
 
 /* ── Button 0 listener ─────────────────────────────────────────────────── */
 
@@ -191,7 +227,14 @@ static void wifi_state_listener_cb(const struct zbus_channel *chan)
 		return;
 	}
 
-	apply_wifi_state_led(msg->state);
+	/*
+	 * Defer the LED command to the system workqueue (see app_ux_led_work_fn).
+	 * Do not call apply_wifi_state_led() directly here — it would invoke
+	 * led_cmd_listener synchronously in this thread (net_mgmt event thread),
+	 * which races with marquee_work_fn on the kernel timeout dlist.
+	 */
+	pending_wifi_state = msg->state;
+	k_work_submit(&app_ux_led_work);
 }
 
 ZBUS_LISTENER_DEFINE(app_wifi_state_listener, wifi_state_listener_cb);
@@ -201,7 +244,20 @@ ZBUS_CHAN_ADD_OBS(APP_WIFI_STATE_CHAN, app_wifi_state_listener, 0);
 
 static int app_ux_init(void)
 {
+	/* Start boot animation.  led_module_init (priority 91) has already run
+	 * because this function runs at a higher priority number (>91). */
 	led_set(LED_COMMAND_MARQUEE, 0);
+
+	/* Unblock app_ux_led_work_fn — LED module is now fully initialised. */
+	atomic_set(&app_ux_ready, 1);
+
+	/* Replay any wifi-state transition that arrived before init completed.
+	 * k_work_submit is a no-op if app_ux_led_work is still pending. */
+	if (last_wifi_state != APP_WIFI_STATE_CONNECTING) {
+		pending_wifi_state = last_wifi_state;
+		k_work_submit(&app_ux_led_work);
+	}
+
 	return 0;
 }
 

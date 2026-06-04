@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/button` |
-| Version | 2026-06-03-00-00 |
+| Version | 2026-06-04-00-00 |
 | PRD Version | N/A (standalone library module) |
 | Status | Stable |
 
@@ -18,6 +18,7 @@
 | 2026-05-31-00-00 | Initial module spec (3-state FSM: IDLE/PRESSED/RELEASED) |
 | 2026-06-01-08-54 | 5-state FSM: added BUTTON_SINGLE_CLICK, BUTTON_DOUBLE_CLICK, BUTTON_LONG_PRESS gesture classification; BUTTON_PRESSED / BUTTON_RELEASED raw events retained; long-press default 3000 ms |
 | 2026-06-03-00-00 | Added HAL backend section (DK / GPIO-keys); added BACKEND Kconfig symbols to table; fixed nRF54LM20DK NUM_BUTTONS default (4, not 3); removed stale duplicate spec block |
+| 2026-06-04-00-00 | Expanded state machine section: clarified execution context (all SMF runs on system workqueue); added Entry/Exit/Timer action tables; added timing diagram |
 
 ---
 
@@ -161,6 +162,29 @@ stateDiagram-v2
 |-------|-------------|-------------|--------|
 | `long_press_work` | `PRESSED` entry | `CONFIG_ZEGO_BUTTON_LONG_PRESS_MS` | Sets `long_press_fired`; runs SMF |
 | `double_click_work` | `CLICK_WAIT` entry | `CONFIG_ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS` | Sets `click_timeout`; runs SMF |
+
+### Execution Context
+
+All SMF execution happens on the **system workqueue**.  No additional locking is needed.
+
+```mermaid
+sequenceDiagram
+    participant HW as GPIO / DK HW
+    participant CB as button_handler callback (sysworkq)
+    participant SM as Per-button SMF (sysworkq)
+    participant WQ as long_press_work / double_click_work (sysworkq)
+    participant ZB as BUTTON_CHAN (zbus)
+
+    HW->>CB: dk_buttons callback fires (system workqueue)
+    CB->>SM: smf_run_state() — updates current_state, may transition
+    SM->>ZB: zbus_chan_pub(BUTTON_PRESSED / RELEASED)
+
+    Note over CB,WQ: timer work also on system workqueue
+    WQ->>SM: set long_press_fired / click_timeout, smf_run_state()
+    SM->>ZB: zbus_chan_pub(SINGLE_CLICK / DOUBLE_CLICK / LONG_PRESS)
+```
+
+> **Why this matters:** Because both the DK callback and the timer work items run on the same system workqueue, they are automatically serialised — no mutex or spinlock is needed to protect the `button_sm_object` fields.
 
 ---
 

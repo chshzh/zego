@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/led` |
-| Version | 2026-06-02-11-38 |
+| Version | 2026-06-04-00-00 |
 | PRD Version | N/A (standalone library module) |
 | Status | Stable |
 
@@ -18,6 +18,7 @@
 | 2026-05-31-00-00 | Initial module spec (ON/OFF/TOGGLE/BLINK/BREATHE/MARQUEE) |
 | 2026-06-01-13-27 | Breathe reworked: linear software-PWM ramp (0%→100%→0%) replaces asymmetric duty cycle; added `BREATHE_PWM_PERIOD_MS`; added sample app; removed test folder; reformatted to match button-spec structure |
 | 2026-06-02-11-38 | Hardware abstraction layer (`led_hw.h` + DK / Zephyr-LED backends); hardware-PWM breathe path for boards with PWM LEDs (`CONFIG_ZEGO_LED_USE_PWM`); `LED_STATE_CHAN` now publishes once per effect start, not per toggle; added `command` field to `led_state_msg`; thread-safe `atomic_t` effect state; T6 HW-PWM breathe test step in sample |
+| 2026-06-04-00-00 | **Full SMF redesign**: BLINK, BREATHE, and MARQUEE are now proper SMF states (no bypass); zbus listener decoupled from SMF via `k_msgq` + `k_work` so all SMF transitions run on the system workqueue; `atomic_t` effect field removed; `CONFIG_ZEGO_LED_CMD_QUEUE_DEPTH` added; Mermaid state diagrams added |
 
 ---
 
@@ -67,10 +68,11 @@ software PWM for LEDs without a PWM channel.
 
 ## Module Type
 
-- [x] **Application module** — zbus listener for `LED_CMD_CHAN`; per-LED SMF for
-  static ON/OFF state; per-LED `k_work_delayable` for blink/breathe effects;
-  global `k_work_delayable` for marquee.  Hardware calls routed through `led_hw.h`
-  HAL (DK or Zephyr LED driver backend).  Auto-initializes via `SYS_INIT`.
+- [x] **Application module** — zbus listener enqueues commands to a `k_msgq`;
+  a `k_work` on the system workqueue dequeues and drives a full per-LED Zephyr SMF
+  (OFF / ON / BLINK / BREATHE).  A module-level marquee controller shares the same
+  workqueue for `k_work_delayable` scheduling.  Hardware calls routed through
+  `led_hw.h` HAL (DK or Zephyr LED driver backend).  Auto-initializes via `SYS_INIT`.
 
 ---
 
@@ -129,48 +131,136 @@ struct led_state_msg {
 
 ---
 
-## State Machine (per LED)
+## State Machine
 
-Static commands (`ON`/`OFF`/`TOGGLE`) drive a two-state SMF.  Dynamic effect
-commands (`BLINK`/`BREATHE`) cancel the SMF and run a per-LED `k_work_delayable`.
-`MARQUEE` cancels all per-LED effects and runs a single global `k_work_delayable`.
-Any static command cancels any active effect and returns the LED to SMF control.
+### Per-LED SMF
+
+Each LED has an independent 4-state Zephyr SMF.  All four states — including the
+dynamic effects BLINK and BREATHE — are proper SMF states with defined entry, run,
+and exit actions.  Effects no longer bypass the SMF.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> LED_OFF
+    direction LR
+    [*] --> OFF
 
-    LED_OFF --> LED_ON  : ON / TOGGLE\n→ set_led_hw(on)\n→ pub LED_STATE_CHAN
-    LED_ON  --> LED_OFF : OFF / TOGGLE\n→ set_led_hw(off)\n→ pub LED_STATE_CHAN
+    OFF --> ON      : CMD_ON / CMD_TOGGLE
+    ON  --> OFF     : CMD_OFF / CMD_TOGGLE
+    OFF --> BLINK   : CMD_BLINK
+    ON  --> BLINK   : CMD_BLINK
+    BLINK --> OFF   : CMD_OFF
+    BLINK --> ON    : CMD_ON
+    OFF --> BREATHE : CMD_BREATHE
+    ON  --> BREATHE : CMD_BREATHE
+    BREATHE --> OFF : CMD_OFF
+    BREATHE --> ON  : CMD_ON
+    BLINK   --> BREATHE : CMD_BREATHE
+    BREATHE --> BLINK   : CMD_BLINK
 
-    LED_OFF --> BLINK   : BLINK
-    LED_ON  --> BLINK   : BLINK
-    BLINK   --> LED_OFF : OFF / ON / TOGGLE
+    note right of OFF
+        entry: hw_off, pub STATE_CHAN
+    end note
 
-    LED_OFF --> BREATHE : BREATHE
-    LED_ON  --> BREATHE : BREATHE
-    BREATHE --> LED_OFF : OFF / ON / TOGGLE
+    note right of ON
+        entry: hw_on, pub STATE_CHAN
+    end note
 
     note right of BLINK
-        k_work_delayable toggles
-        every period_ms (50% duty)
+        entry: hw_off, pub STATE_CHAN,
+               schedule effect_work(period_ms)
+        run/TICK: toggle hw, reschedule
+        run/CMD_BLINK: update period, reschedule
+        run/CMD_TOGGLE: → OFF or ON (is_on-based)
+        exit: cancel effect_work
     end note
 
     note right of BREATHE
-        k_work_delayable steps duty
-        0%→100% over period_ms,
-        then 100%→0% over period_ms
-        (software PWM @ PWM_PERIOD_MS)
+        entry: hw_off, pub STATE_CHAN,
+               schedule effect_work(PWM_PERIOD_MS)
+        run/TICK: step duty 0%→100%→0%, reschedule
+        run/CMD_BREATHE: update period, reschedule
+        run/CMD_TOGGLE: → OFF or ON (is_on-based)
+        exit: cancel effect_work
     end note
 ```
 
-**Effect descriptions:**
+**State descriptions:**
 
-| Effect | Mechanism | Behaviour |
-|--------|-----------|-----------|
-| `BLINK` | `k_work_delayable` per LED | Toggles every `period_ms`; 50% duty cycle |
-| `BREATHE` | `k_work_delayable` per LED | Duty steps 0%→100% over `period_ms`, then 100%→0%. Uses hardware PWM (`led_hw_set_brightness`) when the LED has a PWM channel; falls back to software PWM otherwise. Steps = `period_ms` / `BREATHE_PWM_PERIOD_MS` |
-| `MARQUEE` | Single global `k_work_delayable` | One LED lit at a time, advances every `period_ms`; pre-empts all per-LED effects |
+| State | HW on? | Entry action | Run action | Exit action |
+|-------|--------|--------------|------------|-------------|
+| `OFF` | No | `hw_off`, pub `LED_STATE_CHAN` | Handle CMD_ON / CMD_TOGGLE / CMD_BLINK / CMD_BREATHE | — |
+| `ON` | Yes | `hw_on`, pub `LED_STATE_CHAN` | Handle CMD_OFF / CMD_TOGGLE / CMD_BLINK / CMD_BREATHE | — |
+| `BLINK` | Alternates | `hw_off`, pub `LED_STATE_CHAN`, schedule `effect_work` | TICK: toggle + reschedule; CMD_BLINK: update period + reschedule; CMD: transition to target state | Cancel `effect_work` |
+| `BREATHE` | Fading | `hw_off`, pub `LED_STATE_CHAN`, schedule `effect_work` | TICK: advance duty step + reschedule; CMD_BREATHE: update period + reschedule; CMD: transition to target state | Cancel `effect_work` |
+
+**Events delivered to the SMF `run` handler:**
+
+| Event | Source | Set via |
+|-------|--------|---------|
+| `LED_EVENT_CMD` | `led_cmd_work_fn` (drains `led_cmd_queue`) | `sm->event = LED_EVENT_CMD; sm->cmd = *msg` |
+| `LED_EVENT_TICK` | `effect_work_fn` timer callback | `sm->event = LED_EVENT_TICK` |
+
+### Module-level MARQUEE Control
+
+MARQUEE is a module-level mode tracked by a `marquee.active` flag.  When active,
+the marquee stepper has exclusive control of all LED hardware; per-LED effect timers
+are cancelled.  Per-LED SMFs retain their state while MARQUEE runs — they resume
+when MARQUEE ends and the next command arrives.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> PER_LED
+
+    PER_LED --> MARQUEE : CMD_MARQUEE\n→ cancel all effect_works\n→ hw_off all\n→ hw_on LED[0]\n→ pub STATE_CHAN
+
+    MARQUEE --> PER_LED : non-MARQUEE cmd on any LED\n→ cancel marquee.work\n→ hw_off LED[current]\n→ process cmd on target LED
+
+    MARQUEE --> MARQUEE : marquee.work tick\n→ hw_off(current)\n→ advance current\n→ hw_on(next)\n→ reschedule
+
+    note right of MARQUEE
+        entry: hw_on(LED[0]), schedule marquee.work
+        exit:  cancel marquee.work, hw_off(LED[current])
+    end note
+```
+
+### Command Dispatch Architecture
+
+The zbus listener runs synchronously in the **publisher's thread** (which may be
+the net_mgmt thread, a BLE stack thread, or any other Zephyr thread).  Calling
+`k_work_cancel_delayable` or `k_work_schedule` from an arbitrary thread races with
+the effect `k_work_delayable` callbacks on the system workqueue, corrupting the
+kernel timeout dlist and causing a BUS FAULT in `sys_clock_announce`.
+
+The redesign eliminates this race by decoupling the zbus listener from the SMF:
+
+```mermaid
+sequenceDiagram
+    participant P  as Publisher (any thread)
+    participant L  as led_cmd_listener (zbus, sync)
+    participant Q  as led_cmd_queue (k_msgq)
+    participant W  as led_cmd_work (system workqueue)
+    participant S  as Per-LED SMF (system workqueue)
+    participant E  as effect_work / marquee.work (system workqueue)
+
+    P->>L:  zbus_chan_pub(LED_CMD_CHAN)
+    L->>Q:  k_msgq_put (non-blocking; drops if full)
+    L->>W:  k_work_submit
+    Note over L: listener returns immediately
+
+    W->>Q:  k_msgq_get (drain all pending)
+    W->>S:  process_led_command() → smf_run_state()
+    S->>E:  SMF entry: k_work_schedule (effect_work / marquee.work)
+    Note over W,E: all on system workqueue → serialised, no race
+
+    E->>S:  effect tick: LED_EVENT_TICK → smf_run_state()
+    S->>E:  SMF run: k_work_schedule (reschedule next tick)
+    S-->>E: SMF exit: k_work_cancel_delayable (safe: same thread)
+```
+
+> **Invariant:** All calls to `k_work_schedule` and `k_work_cancel_delayable` on
+> `effect_work` and `marquee.work` happen exclusively on the system workqueue, where
+> they are serialised with the timer callbacks themselves — no timeout dlist race.
 
 ---
 
@@ -181,6 +271,7 @@ stateDiagram-v2
 | `CONFIG_ZEGO_LED` | bool | `n` | Enable the module |
 | `CONFIG_ZEGO_LED_BACKEND_DK` | bool | `y` | Hardware backend: `dk_buttons_and_leds` (default) |
 | `CONFIG_ZEGO_LED_BACKEND_ZEPHYR` | bool | `n` | Hardware backend: Zephyr `gpio-leds` / `pwm-leds` (portable) |
+| `CONFIG_ZEGO_LED_CMD_QUEUE_DEPTH` | int | `8` | Max commands buffered between zbus listener and SMF worker; increase if bursts cause dropped commands |
 | `CONFIG_ZEGO_LED_USE_PWM` | bool | `n` | Enable hardware-PWM breathe (requires `BACKEND_ZEPHYR`) |
 | `CONFIG_ZEGO_LED_0_PWM_INDEX` | int | `-1` | `pwm-leds` child index for LED 0; `-1` = SW PWM fallback |
 | `CONFIG_ZEGO_LED_1_PWM_INDEX` | int | `-1` | `pwm-leds` child index for LED 1; `-1` = SW PWM fallback |

@@ -111,6 +111,16 @@ config ZEGO_LED_NUM_LEDS
 	    nrf7002dk_nrf5340_cpuapp       → 2
 	    nrf54lm20dk_nrf54lm20a_cpuapp  → 4
 
+config ZEGO_LED_CMD_QUEUE_DEPTH
+	int "LED command queue depth"
+	default 8
+	range 2 32
+	help
+	  Maximum number of LED_CMD_CHAN messages buffered between the zbus
+	  listener (which runs in the publisher's thread) and the SMF worker
+	  (which runs on the system workqueue).  Increase this if LOG_WRN
+	  "LED command queue full" appears during rapid command bursts.
+
 config ZEGO_LED_INIT_PRIORITY
 	int "Initialization priority (SYS_INIT APPLICATION level)"
 	default 91
