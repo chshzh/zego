@@ -1,0 +1,17 @@
+manifest:
+  version: "0.13"
+
+  defaults:
+    remote: ncs
+
+  remotes:
+    - name: ncs
+      url-base: https://github.com/nrfconnect
+
+  projects:
+    # NCS imports zephyr, bootloader, modules, nrfxlib, tools, etc.
+    - name: sdk-nrf
+      path: nrf
+      revision: v3.3.0
+      import: true
+      remote: ncs

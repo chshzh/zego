@@ -1,0 +1,32 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menu "Nordic Wi-Fi App Template"
+
+config APP_WIFI_SSID
+	string "Wi-Fi SoftAP SSID"
+	default "nRF_AP"
+	help
+	  SSID used when operating in SoftAP or P2P_GO mode.
+
+config APP_WIFI_PASSWORD
+	string "Wi-Fi SoftAP Password"
+	default "12345678"
+	help
+	  Password for SoftAP (min 8 characters for WPA2).
+
+# mode_selector and network Kconfig provided by zego/wifi and zego/network
+# (EXTRA_ZEPHYR_MODULES) — no rsource needed here.
+# button and led Kconfig registered via EXTRA_ZEPHYR_MODULES (zego/button, zego/led).
+
+# Silence the v3.3.0 "Deprecated symbol MBEDTLS_LEGACY_CRYPTO_C" Kconfig
+# warning. MBEDTLS_LEGACY_CRYPTO_C is needed for the WPA supplicant RSA path.
+config MBEDTLS_LEGACY_CRYPTO_C_SILENCE_DEPRECATION
+	default y if MBEDTLS_LEGACY_CRYPTO_C
+
+endmenu
+
+source "Kconfig.zephyr"

@@ -1,0 +1,232 @@
+# Architecture Specification — Nordic Wi-Fi App Template
+
+## Document Information
+
+| Field | Value |
+|---|---|
+| Project | nordic-wifi-app-template |
+| Version | 2026-06-04-17-09 |
+| PRD Version | 2026-06-04-17-09 |
+| NCS Version | v3.3.0 |
+| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2 |
+| Status | Current |
+
+---
+
+## Changelog
+
+| Version | Summary of changes |
+|---|---|
+| 2026-06-04-17-09 | Initial spec |
+
+---
+
+## 1. Overview
+
+`nordic-wifi-app-template` is a minimal NCS Wi-Fi application skeleton. It wires up the complete
+connectivity layer (all four Wi-Fi modes, all three STA provisioning methods) and exposes a single
+hook file (`net_event_app.c`) where application-specific logic goes.
+
+`main()` is deliberately empty — it prints the startup banner and returns. All modules initialise
+themselves via `SYS_INIT` and communicate exclusively through Zbus channels.
+
+```c
+/* src/main.c — the entire application thread */
+int main(void)
+{
+    zego_wifi_print_banner();
+    return 0;
+}
+```
+
+---
+
+## 2. Module Map
+
+All feature modules are provided by the `zego/` shared library. The template registers five:
+
+| Module dir | Kconfig symbol | Provides |
+|---|---|---|
+| `zego/wifi` | `CONFIG_ZEGO_WIFI` | Startup banner, Wi-Fi mode selector, `app_wifi_mode` shell command, NVS persistence |
+| `zego/network` | `CONFIG_ZEGO_NETWORK` | Wi-Fi event management (STA / SoftAP / P2P_GO / P2P_CLIENT), DHCP, net mgmt callbacks, weak-hook API |
+| `zego/button` | `CONFIG_ZEGO_BUTTON` | GPIO button driver, gesture detection, `BUTTON_CHAN` publisher |
+| `zego/led` | `CONFIG_ZEGO_LED` | Per-LED state machine, `LED_CMD_CHAN` subscriber |
+| `zego/wifi_ble_prov` | `CONFIG_ZEGO_WIFI_BLE_PROV` | BLE GATT provisioning service (nRF Wi-Fi Provisioner compatible) |
+
+Plus one in-tree application file:
+
+| File | Purpose |
+|---|---|
+| `src/modules/network/net_event_app.c` | Strong overrides of the two `__weak` hooks from `zego/network`; application reaction to connectivity events lives here |
+
+---
+
+## 3. Zbus Channels
+
+| Channel | Message type | Publisher | Subscriber(s) | Description |
+|---|---|---|---|---|
+| `WIFI_MODE_CHAN` | `enum zego_wifi_mode` | `zego/wifi` (at `SYS_INIT`) | `zego/network` | Active Wi-Fi mode read once at boot |
+| `BUTTON_CHAN` | `struct button_msg` | `zego/button` | Application (add your own) | Button events (click, double-click, long press) |
+| `LED_CMD_CHAN` | `struct led_cmd_msg` | Application (add your own) | `zego/led` | LED control commands |
+
+> `zego/network` uses a **weak-hook pattern** instead of a Zbus channel for the connectivity event. Override the hooks in `net_event_app.c`; publish your own channel from there if needed.
+
+### 3.1 Weak-hook API (`zego/network`)
+
+```c
+/* Defined as __weak no-ops in zego/network; override in net_event_app.c */
+
+void zego_network_on_wifi_connected(enum zego_wifi_mode mode,
+                                    const char *ip_addr,
+                                    const char *mac_addr,
+                                    const char *ssid);
+
+void zego_network_on_wifi_disconnected(void);
+```
+
+**Trigger events by mode:**
+
+| Mode | Hook called when… |
+|---|---|
+| STA | DHCP bound (IPv4 address assigned) |
+| SoftAP | First client station associates |
+| P2P_GO | First P2P client associates |
+| P2P_CLIENT | DHCP bound (IPv4 address assigned from GO) |
+
+### 3.2 Extending with a custom Zbus channel
+
+The `net_event_app.c` file contains a 4-step TODO guide:
+
+1. Define `struct my_wifi_msg` and `ZBUS_CHAN_DECLARE(MY_WIFI_CHAN)` in `src/modules/messages.h`
+2. Own the channel with `ZBUS_CHAN_DEFINE(...)` in exactly one `.c` file
+3. Replace the `LOG_INF` calls in the hooks with `zbus_chan_pub(&MY_WIFI_CHAN, &msg, K_NO_WAIT)`
+4. Add subscribers with `ZBUS_SUBSCRIBER_DEFINE` / `ZBUS_LISTENER_DEFINE` in other modules
+
+---
+
+## 4. SYS_INIT Boot Sequence
+
+Modules initialise in priority order. Lower numbers run first.
+
+| Priority | Module | Action |
+|---|---|---|
+| 41 | `zego/wifi` | Read NVS for saved Wi-Fi mode; publish `WIFI_MODE_CHAN`; print startup banner |
+| 42 | `zego/network` | Subscribe to `WIFI_MODE_CHAN`; launch selected Wi-Fi path (STA / SoftAP / P2P) |
+| 45 | `zego/button` | Register GPIO interrupt callbacks; start `BUTTON_CHAN` publisher |
+| 45 | `zego/led` | Subscribe to `LED_CMD_CHAN`; initialise LED GPIO |
+| 45 | `zego/wifi_ble_prov` | Start BLE stack; register GATT provisioning service (if `CONFIG_ZEGO_WIFI_BLE_PROV=y`) |
+
+`main()` runs after all `SYS_INIT` callbacks complete. It calls `zego_wifi_print_banner()` to emit the connectivity instructions, then returns (Zephyr keeps the system alive).
+
+---
+
+## 5. Wi-Fi Mode Selector
+
+Implemented entirely in `zego/wifi`. See [zego/wifi — wifi-spec.md](../../wifi/docs/wifi-spec.md) for full details.
+
+**Summary:**
+- NVS settings key: `"app/app_wifi_mode"` (uint8_t)
+- Default on fresh flash: `ZEGO_WIFI_MODE_P2P_GO` (2)
+- Shell command: `uart:~$ app_wifi_mode [sta|softap|p2p_go|p2p_client]`
+- Mode is written to NVS immediately; takes effect on next reboot
+
+---
+
+## 6. STA Provisioning Paths
+
+All three paths are enabled by default; they are independent and coexist in the same binary.
+
+| Method | Kconfig guard | How it works |
+|---|---|---|
+| Shell one-time | `CONFIG_NET_L2_WIFI_SHELL=y` | `wifi connect -s <SSID> -p <pass> -k 1` — session only, not persisted |
+| Saved credentials | `CONFIG_WIFI_CREDENTIALS=y` | `wifi cred add <SSID> WPA2-PSK <pass> -k 1` — stored in flash, auto-reconnect on every boot |
+| BLE provisioning | `CONFIG_ZEGO_WIFI_BLE_PROV=y` | nRF Wi-Fi Provisioner app pushes credentials over BLE; stored in flash via settings subsystem |
+
+BLE provisioning is **disabled on nRF7002DK** (`boards/nrf7002dk_nrf5340_cpuapp.conf`) because the
+combined flash of BLE host stack + P2P snippet + app exceeds the 1 MB limit. Re-enable by removing
+`CONFIG_ZEGO_WIFI_BLE_PROV=n` from that board conf if flash headroom allows.
+
+---
+
+## 7. Board Differences
+
+| Feature | nRF7002DK | nRF54LM20DK + nRF7002EB2 |
+|---|---|---|
+| Flash | 1 MB | 2 MB |
+| RAM | 448 KB (app core) | 512 KB |
+| Buttons | 2 (SW0, SW1) | 3 (BUTTON0–2) |
+| LEDs | 2 | 4 |
+| BLE provisioning | Disabled (flash) | Enabled |
+| Network core | nRF5340 netcore runs `hci_ipc` for BLE | Single-core; `hci_ipc` build is harmless no-op |
+| Build shield | — | `-DSHIELD=nrf7002eb2` |
+
+---
+
+## 8. Memory Budget (nRF7002DK, `wifi-p2p` snippet, BLE prov off)
+
+Measured from last verified build:
+
+| Region | Used | Available | % |
+|---|---|---|---|
+| Flash | ~970 KB | 1024 KB | ~95% |
+| RAM | ~370 KB | 448 KB | ~83% |
+
+> These figures will grow as application logic is added to `net_event_app.c` and new modules are
+> introduced. Monitor with `west build --cmake-only` + `python3 zephyr/scripts/footprint/...`
+> or the `size` command on the `.elf`.
+
+---
+
+## 9. CMakeLists.txt Pattern
+
+The template lives inside `zego/`, so sibling modules are at `../`:
+
+```cmake
+get_filename_component(ZEGO_BUTTON_DIR        ${CMAKE_CURRENT_SOURCE_DIR}/../button        REALPATH)
+get_filename_component(ZEGO_LED_DIR           ${CMAKE_CURRENT_SOURCE_DIR}/../led           REALPATH)
+get_filename_component(ZEGO_WIFI_DIR          ${CMAKE_CURRENT_SOURCE_DIR}/../wifi          REALPATH)
+get_filename_component(ZEGO_NETWORK_DIR       ${CMAKE_CURRENT_SOURCE_DIR}/../network       REALPATH)
+get_filename_component(ZEGO_WIFI_BLE_PROV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../wifi_ble_prov REALPATH)
+list(APPEND EXTRA_ZEPHYR_MODULES
+  ${ZEGO_BUTTON_DIR} ${ZEGO_LED_DIR} ${ZEGO_WIFI_DIR}
+  ${ZEGO_NETWORK_DIR} ${ZEGO_WIFI_BLE_PROV_DIR}
+)
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+```
+
+When copying the template to a standalone project outside `zego/`, update the paths to point at the
+actual zego directory (e.g. `../../zego/button`).
+
+---
+
+## 10. Module Dependency Diagram
+
+```
+          ┌─────────────────────────┐
+          │     NVS / Flash         │
+          └──────────┬──────────────┘
+                     │ read/write
+          ┌──────────▼──────────────┐
+          │       zego/wifi         │◄── uart: app_wifi_mode command
+          │  (mode selector +       │
+          │   startup banner)       │
+          └──────────┬──────────────┘
+                     │ WIFI_MODE_CHAN
+          ┌──────────▼──────────────────────────────────────┐
+          │                  zego/network                    │
+          │  SoftAP path │ STA path │ P2P_GO │ P2P_CLIENT   │
+          └──┬───────────────────────────────────────────────┘
+             │ weak hooks
+  ┌──────────▼───────────────┐
+  │    net_event_app.c        │   ← application customisation point
+  │  (in src/modules/network) │
+  └──────────┬───────────────┘
+             │ app zbus channel (add your own)
+  ┌──────────▼───────────────┐
+  │  your application module  │
+  └───────────────────────────┘
+
+  zego/button ──BUTTON_CHAN──► (add your own subscriber)
+  zego/led    ◄──LED_CMD_CHAN── (add your own publisher)
+  zego/wifi_ble_prov ──► (saves creds via settings → triggers STA connect)
+```
