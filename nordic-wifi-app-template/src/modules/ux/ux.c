@@ -37,6 +37,9 @@
 #include "led.h"
 #include "wifi.h"
 #include "../messages.h"
+#if defined(CONFIG_ZEGO_WIFI_BLE_PROV)
+#include "wifi_ble_prov.h"
+#endif
 
 LOG_MODULE_REGISTER(app_ux, LOG_LEVEL_INF);
 
@@ -150,11 +153,12 @@ static void btn_listener_cb(const struct zbus_channel *chan)
 	case BUTTON_DOUBLE_CLICK:
 #if defined(CONFIG_ZEGO_WIFI_BLE_PROV)
 		ble_prov_led_active = !ble_prov_led_active;
+		zego_wifi_ble_prov_advertise(ble_prov_led_active);
 		if (ble_prov_led_active) {
-			LOG_INF("BLE provisioning: active");
+			LOG_INF("BLE provisioning: enabled");
 			led_set(LED_COMMAND_BREATHE, 0);
 		} else {
-			LOG_INF("BLE provisioning: inactive");
+			LOG_INF("BLE provisioning: disabled");
 			apply_wifi_state_led(last_wifi_state);
 		}
 #else

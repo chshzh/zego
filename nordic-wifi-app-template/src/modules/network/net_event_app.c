@@ -6,8 +6,9 @@
 /*
  * net_event_app.c — application-side Wi-Fi event hooks.
  *
- * zego/network fires two weak callbacks when connectivity changes:
+ * zego/network fires weak callbacks when connectivity changes:
  *
+ *   zego_network_on_softap_ready()     — SoftAP/P2P_GO AP enabled (before any client)
  *   zego_network_on_wifi_connected()   — IP assigned (STA/P2P_CLIENT) or
  *                                        first station joined (SoftAP/P2P_GO)
  *   zego_network_on_wifi_disconnected() — link lost
@@ -40,6 +41,20 @@ ZBUS_CHAN_DEFINE(APP_WIFI_STATE_CHAN, struct app_wifi_state_msg, NULL, NULL,
 		 ZBUS_OBSERVERS_EMPTY,
 		 ZBUS_MSG_INIT(.state = APP_WIFI_STATE_CONNECTING,
 			       .mode = ZEGO_WIFI_MODE_STA));
+
+void zego_network_on_softap_ready(enum zego_wifi_mode mode, const char *ip_addr,
+				  const char *ssid)
+{
+	LOG_INF("SoftAP ready: mode=%s ip=%s ssid=%s",
+		mode == ZEGO_WIFI_MODE_P2P_GO ? "p2p_go" : "softap", ip_addr, ssid);
+
+	struct app_wifi_state_msg msg = {
+		.mode = mode,
+		.state = APP_WIFI_STATE_SOFTAP,
+	};
+
+	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+}
 
 void zego_network_on_wifi_connected(enum zego_wifi_mode mode, const char *ip_addr,
 				    const char *mac_addr, const char *ssid)

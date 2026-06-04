@@ -202,6 +202,14 @@ void __weak zego_network_on_wifi_disconnected(void)
 {
 }
 
+void __weak zego_network_on_softap_ready(enum zego_wifi_mode mode, const char *ip_addr,
+					 const char *ssid)
+{
+	ARG_UNUSED(mode);
+	ARG_UNUSED(ip_addr);
+	ARG_UNUSED(ssid);
+}
+
 /* ============================================================================
  * L2: INTERFACE EVENT HANDLER  (NET_EVENT_IF_UP / NET_EVENT_IF_DOWN)
  * ============================================================================
@@ -359,7 +367,9 @@ static void l2_softap_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 
 		LOG_INF("SoftAP enabled: SSID='%s' IP='%s' waiting for client",
 			CONFIG_ZEGO_WIIF_SOFTAP_SSID, CONFIG_NET_CONFIG_MY_IPV4_ADDR);
-		/* App notification deferred until the first client connects. */
+		zego_network_on_softap_ready(
+			active_mode, CONFIG_NET_CONFIG_MY_IPV4_ADDR,
+			active_mode == ZEGO_WIFI_MODE_SOFTAP ? CONFIG_ZEGO_WIIF_SOFTAP_SSID : "");
 		break;
 	}
 

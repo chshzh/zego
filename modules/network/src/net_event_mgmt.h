@@ -54,4 +54,24 @@ void zego_network_on_wifi_connected(enum zego_wifi_mode mode, const char *ip_add
  */
 void zego_network_on_wifi_disconnected(void);
 
+/**
+ * @brief Called when the SoftAP or P2P_GO access point is enabled and ready
+ *        to accept client connections.
+ *
+ * Weak hook — override in the application.  Fired immediately when
+ * NET_EVENT_WIFI_AP_ENABLE_RESULT succeeds, before any client connects.
+ * Use this to update LEDs or state machines that should reflect "AP up"
+ * rather than "first client joined" (which is reported by
+ * zego_network_on_wifi_connected).
+ *
+ * The default implementation is a no-op.
+ *
+ * @param mode     Active mode: ZEGO_WIFI_MODE_SOFTAP or ZEGO_WIFI_MODE_P2P_GO.
+ * @param ip_addr  Gateway IP address string (static, NUL-terminated).
+ * @param ssid     Hosted SSID (SoftAP); empty string for P2P_GO (SSID not
+ *                 yet negotiated at AP_ENABLE time).
+ */
+void zego_network_on_softap_ready(enum zego_wifi_mode mode, const char *ip_addr,
+				  const char *ssid);
+
 #endif /* NET_EVENT_MGMT_H */

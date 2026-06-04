@@ -590,3 +590,25 @@ ZBUS_CHAN_ADD_OBS(WIFI_CHAN, wifi_ble_prov_listener, 0);
 
 /* Initialize after zego/network (priority 5); priority 95 matches old module. */
 SYS_INIT(wifi_ble_prov_init, APPLICATION, 95);
+
+int zego_wifi_ble_prov_advertise(bool enable)
+{
+	int rc;
+
+	if (!enable) {
+		rc = bt_le_adv_stop();
+		if (rc != 0 && rc != -EALREADY) {
+			LOG_ERR("BLE adv stop failed (err %d)", rc);
+		}
+		return rc;
+	}
+
+	rc = bt_le_adv_start(prov_svc_data[ADV_DATA_FLAG_IDX] & ADV_DATA_FLAG_PROV_STATUS_BIT
+				     ? PROV_BT_LE_ADV_PARAM_SLOW
+				     : PROV_BT_LE_ADV_PARAM_FAST,
+			     ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (rc != 0 && rc != -EALREADY) {
+		LOG_ERR("BLE adv start failed (err %d)", rc);
+	}
+	return rc;
+}

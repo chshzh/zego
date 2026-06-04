@@ -50,4 +50,18 @@ struct wifi_msg {
  */
 ZBUS_CHAN_DECLARE(WIFI_CHAN);
 
+/**
+ * @brief Start or stop BLE provisioning advertisement at runtime.
+ *
+ * Allows the application to enable or disable the BLE provisioning
+ * advertisement.  Uses the same advertising parameters as the initial
+ * start in wifi_ble_prov_init() — FAST if unprovisioned, SLOW if already
+ * provisioned.
+ *
+ * @param enable  true to start advertising, false to stop.
+ * @return 0 on success, -EALREADY if already in the requested state,
+ *         negative errno on other failures.
+ */
+int zego_wifi_ble_prov_advertise(bool enable);
+
 #endif /* WIFI_BLE_PROV_H_ */
