@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Module | app_ux |
-| Version | 2026-06-04-18-00 |
-| PRD Version | 2026-06-04-18-00 |
+| Version | 2026-06-04-22-00 |
+| PRD Version | 2026-06-04-22-00 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2 |
 | Status | Current |
@@ -18,6 +18,7 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-04-18-00 | Initial spec — Button 0 gestures, LED 0 Wi-Fi state feedback |
+| 2026-06-04-22-00 | SoftAP LED behavior: MARQUEE when no clients (was slow BLINK); solid ON when client connected; MARQUEE again when last client disconnects. Added `zego_network_on_softap_sta_disconnected()` hook. Updated APP_WIFI_STATE_CHAN table and state machine diagram. |
 
 ---
 
@@ -64,7 +65,11 @@ Boot
  │
  ├──► APP_WIFI_STATE_CONNECTED  ──► [Solid ON]
  │
- ├──► APP_WIFI_STATE_SOFTAP     ──► [Slow BLINK 500 ms]
+ ├──► APP_WIFI_STATE_SOFTAP     ──► [MARQUEE]  (AP up, no clients)
+ │       │
+ │       └── APP_WIFI_STATE_CONNECTED ──► [Solid ON]  (client joined)
+ │               │
+ │               └── APP_WIFI_STATE_SOFTAP ──► [MARQUEE]  (last client left)
  │
  └──► APP_WIFI_STATE_ERROR      ──► [Fast BLINK 100 ms]
 
@@ -77,7 +82,8 @@ Double-click (nRF54LM20DK, CONFIG_ZEGO_WIFI_BLE_PROV=y):
 |------------------|-------------|-------------|
 | `CONNECTING` (boot) | MARQUEE | Kconfig default |
 | `CONNECTED` (STA/P2P) | Solid ON | — |
-| `SOFTAP` (first client) | BLINK | 500 ms |
+| `SOFTAP` (AP up, no clients) | MARQUEE | Kconfig default |
+| `CONNECTED` (SoftAP client joined) | Solid ON | — |
 | `ERROR` (disconnected) | BLINK | 100 ms |
 | BLE prov active (local toggle) | BREATHE | Kconfig default |
 
@@ -89,13 +95,13 @@ Defined in `src/modules/network/net_event_app.c`. Declared in `src/modules/messa
 
 | Event | Published when |
 |-------|----------------|
-| `APP_WIFI_STATE_CONNECTED` | `zego_network_on_wifi_connected()` with mode STA or P2P_CLIENT |
-| `APP_WIFI_STATE_SOFTAP` | `zego_network_on_wifi_connected()` with mode SoftAP or P2P_GO |
+| `APP_WIFI_STATE_CONNECTED` | `zego_network_on_wifi_connected()` — any mode (STA, P2P_CLIENT, SoftAP client joined) |
+| `APP_WIFI_STATE_SOFTAP` | `zego_network_on_softap_ready()` (AP enabled) or `zego_network_on_softap_sta_disconnected()` with `remaining_clients == 0` |
 | `APP_WIFI_STATE_ERROR` | `zego_network_on_wifi_disconnected()` |
 
 > `APP_WIFI_STATE_CONNECTING` is not published explicitly — the UX module's `SYS_INIT` starts MARQUEE at boot unconditionally.
 
-> For SoftAP mode, `APP_WIFI_STATE_SOFTAP` fires when the **first client connects**, not when the AP is enabled. The MARQUEE continues until a client joins. A future `zego_network_on_softap_ready()` weak hook would allow the LED to transition earlier (on `NET_EVENT_WIFI_AP_ENABLE_RESULT`).
+> In SoftAP mode the state machine follows: MARQUEE (AP enabled, no clients) → Solid ON (client joins) → MARQUEE (last client leaves). The `zego_network_on_softap_sta_disconnected(remaining_clients)` hook triggers the revert to SOFTAP state when `remaining_clients == 0`.
 
 ---
 
@@ -124,3 +130,5 @@ Defined in `src/modules/network/net_event_app.c`. Declared in `src/modules/messa
 ## 8. Known Limitations
 
 No open issues.
+
+> In SoftAP mode with multiple clients, disconnecting one client does not change the LED (still solid) until the **last** client disconnects. This is intentional — the AP is still serving traffic.

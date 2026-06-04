@@ -65,9 +65,7 @@ void zego_network_on_wifi_connected(enum zego_wifi_mode mode, const char *ip_add
 
 	struct app_wifi_state_msg msg = {
 		.mode = mode,
-		.state = (mode == ZEGO_WIFI_MODE_SOFTAP || mode == ZEGO_WIFI_MODE_P2P_GO)
-				 ? APP_WIFI_STATE_SOFTAP
-				 : APP_WIFI_STATE_CONNECTED,
+		.state = APP_WIFI_STATE_CONNECTED,
 	};
 
 	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
@@ -83,4 +81,18 @@ void zego_network_on_wifi_disconnected(void)
 	};
 
 	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+}
+
+void zego_network_on_softap_sta_disconnected(int remaining_clients)
+{
+	LOG_INF("SoftAP client disconnected: remaining=%d", remaining_clients);
+
+	if (remaining_clients == 0) {
+		struct app_wifi_state_msg msg = {
+			.state = APP_WIFI_STATE_SOFTAP,
+			.mode = ZEGO_WIFI_MODE_SOFTAP,
+		};
+
+		zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+	}
 }

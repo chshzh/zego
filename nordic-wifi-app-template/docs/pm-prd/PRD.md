@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Product Name | Nordic Wi-Fi App Template |
-| Version | 2026-06-04-18-00 |
+| Version | 2026-06-04-22-00 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2 |
 | Status | Draft |
@@ -18,6 +18,7 @@
 |---|---|
 | 2026-06-04-17-09 | Initial PRD — template extracted from nordic-wifi-webdash; webserver removed; all four Wi-Fi modes + all three STA provisioning methods supported |
 | 2026-06-04-18-00 | Added UX behaviors: Button 0 gestures (long-press mode cycle, double-click BLE prov toggle, single-click status), LED 0 Wi-Fi state feedback (marquee on boot/connecting, solid on connected, slow blink SoftAP, breathe BLE prov, fast blink error) |
+| 2026-06-04-22-00 | Updated LED 0 SoftAP behavior: MARQUEE when AP is up with no clients connected (was slow BLINK); solid ON when a client connects; back to MARQUEE when last client disconnects |
 
 ---
 
@@ -91,7 +92,8 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 |-------|--------|-------------|
 | Boot / connecting | MARQUEE (all LEDs) | Starts immediately at boot; continues until a connection is established |
 | Connected (STA / P2P) | Solid ON | Clear "all good" |
-| SoftAP active | Slow BLINK (500 ms half-period) | AP is up and accepting clients |
+| SoftAP active, no clients | MARQUEE (all LEDs) | AP is up, waiting for a client to connect |
+| SoftAP client connected | Solid ON | A client device is connected to the AP |
 | BLE provisioning active | BREATHE | Matches BLE convention |
 | Disconnected / error | Fast BLINK (100 ms half-period) | Attention needed |
 
@@ -132,7 +134,7 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 | FR-102 | developer | control LEDs via `LED_CMD_CHAN` | I can add LED feedback immediately | `LED_CMD_CHAN` message changes LED state |
 | FR-103 | developer | see heap usage logged periodically | I detect memory leaks early | Heap high-water mark logged every N minutes |
 | FR-104 | evaluator | cycle Wi-Fi mode with a long button press | I can switch modes without a UART shell | Button 0 held ≥ 3 s → next mode saved to NVS → device reboots into new mode |
-| FR-105 | evaluator | see Wi-Fi connection state on LED 0 | I can tell at a glance whether the device is connected | MARQUEE while connecting → solid ON when connected (STA/P2P) / slow blink when SoftAP active / breathe in BLE prov / fast blink on error |
+| FR-105 | evaluator | see Wi-Fi connection state on LED 0 | I can tell at a glance whether the device is connected | MARQUEE while connecting → solid ON when connected (STA/P2P) / MARQUEE when SoftAP up with no clients / solid ON when SoftAP client connected / breathe in BLE prov / fast blink on error |
 | FR-106 | evaluator | toggle BLE provisioning with a double-click (nRF54LM20DK) | I can enter/exit provisioning mode without the shell | Double-click on Button 0 toggles BLE provisioning advertising |
 
 ---

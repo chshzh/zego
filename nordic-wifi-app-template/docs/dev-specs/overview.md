@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-04-18-00 |
-| PRD Version | 2026-06-04-18-00 |
+| Version | 2026-06-04-22-00 |
+| PRD Version | 2026-06-04-22-00 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2 |
 | Status | Current |
@@ -18,6 +18,7 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-04-18-00 | Added UX module spec (ux.md); updated spec index and PRD mapping for FR-104/105/106; noted APP_WIFI_STATE_CHAN in architecture summary |
+| 2026-06-04-22-00 | Updated ux.md and PRD for revised SoftAP LED behavior (MARQUEE/solid ON) |
 | 2026-06-04-17-09 | Initial overview — template extracted from nordic-wifi-webdash; webserver removed; all four Wi-Fi modes + three STA provisioning paths; architecture.md added |
 
 ---

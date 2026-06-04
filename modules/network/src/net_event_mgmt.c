@@ -210,6 +210,11 @@ void __weak zego_network_on_softap_ready(enum zego_wifi_mode mode, const char *i
 	ARG_UNUSED(ssid);
 }
 
+void __weak zego_network_on_softap_sta_disconnected(int remaining_clients)
+{
+	ARG_UNUSED(remaining_clients);
+}
+
 /* ============================================================================
  * L2: INTERFACE EVENT HANDLER  (NET_EVENT_IF_UP / NET_EVENT_IF_DOWN)
  * ============================================================================
@@ -457,6 +462,7 @@ static void l2_softap_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 
 		LOG_INF("NET_EVENT_WIFI_AP_STA_DISCONNECTED: mac=%s clients=%d", mac_str,
 			rem_count);
+		zego_network_on_softap_sta_disconnected(rem_count);
 		break;
 	}
 

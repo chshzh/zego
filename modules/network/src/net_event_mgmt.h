@@ -74,4 +74,14 @@ void zego_network_on_wifi_disconnected(void);
 void zego_network_on_softap_ready(enum zego_wifi_mode mode, const char *ip_addr,
 				  const char *ssid);
 
+/**
+ * @brief Called when a SoftAP or P2P_GO client disconnects.
+ *
+ * Weak hook — override in the application.  Fired after the station list
+ * is updated, so @p remaining_clients reflects the count after removal.
+ *
+ * @param remaining_clients  Number of stations still connected (0 = no clients).
+ */
+void zego_network_on_softap_sta_disconnected(int remaining_clients);
+
 #endif /* NET_EVENT_MGMT_H */

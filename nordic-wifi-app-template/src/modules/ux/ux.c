@@ -120,7 +120,7 @@ static void apply_wifi_state_led(enum app_wifi_state state)
 		led_set(LED_COMMAND_ON, 0);
 		break;
 	case APP_WIFI_STATE_SOFTAP:
-		led_set(LED_COMMAND_BLINK, 500);
+		led_set(LED_COMMAND_MARQUEE, 0);
 		break;
 	case APP_WIFI_STATE_ERROR:
 		led_set(LED_COMMAND_BLINK, 100);
