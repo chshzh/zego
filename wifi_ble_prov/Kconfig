@@ -1,0 +1,36 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+config ZEGO_WIFI_BLE_PROV
+	bool "Zego Wi-Fi BLE provisioning module"
+	depends on ZEGO_NETWORK && ZBUS && WIFI_CREDENTIALS
+	select BT
+	select BT_PERIPHERAL
+	select BT_SMP
+	select BT_WIFI_PROV
+	select WIFI_PROV_CORE
+	select NANOPB
+	help
+	  BLE-based Wi-Fi credential provisioning using the nRF Wi-Fi Provisioner
+	  app (Android / iOS).
+
+	  Provides:
+	    - WIFI_CHAN (struct wifi_msg): zbus channel for Wi-Fi connect/disconnect.
+	      The app's net_event_app.c must declare and publish to this channel.
+	    - SYS_INIT APPLICATION priority 95: BT init + Wi-Fi provisioning service.
+	    - Automatic credential-based reconnect after provisioning.
+	    - Rotating retry across all stored networks on disconnect.
+
+	  Enable in prj.conf:  CONFIG_ZEGO_WIFI_BLE_PROV=y
+
+if ZEGO_WIFI_BLE_PROV
+
+module = ZEGO_WIFI_BLE_PROV
+module-str = zego_wifi_ble_prov
+source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
+
+endif # ZEGO_WIFI_BLE_PROV
+
+rsource "Kconfig.defaults"

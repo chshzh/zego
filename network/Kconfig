@@ -1,0 +1,78 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+config ZEGO_NETWORK
+	bool "Shared network/Wi-Fi event management module"
+	default n
+	depends on ZEGO_WIFI
+	help
+	  Shared Zephyr module providing a unified Wi-Fi / network event
+	  management layer for zego-based applications.  Handles interface
+	  UP/DOWN events, WPA supplicant ready sequencing, SoftAP / P2P
+	  bring-up, DHCP server, STA / P2P DHCP binding, and weak callback
+	  hooks for app-specific zbus channel publishing.
+
+if ZEGO_NETWORK
+
+# ---------------------------------------------------------------------------
+# SoftAP / P2P GO configuration
+# ---------------------------------------------------------------------------
+
+menu "SoftAP Configuration"
+
+config ZEGO_WIIF_SOFTAP_REG_DOMAIN
+	string "SoftAP regulatory domain"
+	default "US"
+	help
+	  Two-letter country code for the regulatory domain used in SoftAP /
+	  P2P GO mode (e.g. "US", "EU", "JP").  Use "00" for world mode.
+
+config ZEGO_WIIF_SOFTAP_SSID
+	string "SoftAP SSID"
+	default "device_AP"
+	help
+	  SSID used when hosting a SoftAP.  Override per app in prj.conf or
+	  an overlay file.  Must not be committed with production credentials.
+
+config ZEGO_WIIF_SOFTAP_PASSWORD
+	string "SoftAP password"
+	default "password@123"
+	help
+	  WPA2 password for SoftAP (minimum 8 characters).  Override per app.
+
+choice ZEGO_WIIF_SOFTAP_BAND
+	prompt "SoftAP Wi-Fi band"
+	default ZEGO_WIIF_SOFTAP_BAND_2_4_GHZ
+	help
+	  Wi-Fi frequency band to use when hosting SoftAP or P2P GO.
+
+config ZEGO_WIIF_SOFTAP_BAND_2_4_GHZ
+	bool "2.4 GHz"
+
+config ZEGO_WIIF_SOFTAP_BAND_5_GHZ
+	bool "5 GHz"
+
+endchoice # ZEGO_WIIF_SOFTAP_BAND
+
+config ZEGO_WIIF_SOFTAP_CHANNEL
+	int "SoftAP channel"
+	default 1
+	range 1 196
+	help
+	  Wi-Fi channel number for SoftAP / P2P GO.  Must be valid for the
+	  selected band and regulatory domain.
+
+endmenu # "SoftAP Configuration"
+
+# ---------------------------------------------------------------------------
+# Log level (standard Zephyr template)
+# ---------------------------------------------------------------------------
+
+module = ZEGO_NETWORK
+module-str = zego_network
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # ZEGO_NETWORK

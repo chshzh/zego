@@ -1,0 +1,54 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+config ZEGO_WIFI
+        bool "Zego Wi-Fi module (mode selector + banner)"
+        depends on NETWORKING && ZBUS
+        select SETTINGS
+        select FLASH
+        select FLASH_MAP
+        select FLASH_PAGE_LAYOUT
+        select REBOOT
+        help
+          Provides:
+            - Startup banner: app name, version, PRD, specs, build date, board, MAC.
+            - Wi-Fi mode selector: NVS-persisted mode + 'app_wifi_mode' shell command.
+            - zego_banner_wifi_info(): mode string + per-mode connection instructions.
+            - zego_banner_app_extra(): Kconfig-conditional compiled-module list.
+            - zego_wifi_print_banner(): called from each app's main().
+	  Publishes WIFI_MODE_CHAN at SYS_INIT APPLICATION priority 0.
+
+if ZEGO_WIFI
+
+choice ZEGO_WIFI_DEFAULT_MODE
+	prompt "Default Wi-Fi mode on fresh flash (no NVS key present)"
+	default ZEGO_WIFI_DEFAULT_MODE_STA
+	help
+	  Selects the mode used when NVS has no stored value (e.g. first boot
+	  after --erase).  The 'app_wifi_mode' shell command can change it at
+	  any time; the board reboots to apply the change.
+
+config ZEGO_WIFI_DEFAULT_MODE_STA
+	bool "STA — join an existing Wi-Fi network"
+
+config ZEGO_WIFI_DEFAULT_MODE_SOFTAP
+	bool "SoftAP — create an access point"
+	depends on NRF70_AP_MODE
+
+config ZEGO_WIFI_DEFAULT_MODE_P2P_GO
+	bool "P2P Group Owner (Wi-Fi Direct)"
+	depends on NRF70_P2P_MODE
+
+config ZEGO_WIFI_DEFAULT_MODE_P2P_CLIENT
+	bool "P2P Client — join a peer's P2P group"
+	depends on NRF70_P2P_MODE
+
+endchoice
+
+module = ZEGO_WIFI
+module-str = zego_wifi
+source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
+
+endif # ZEGO_WIFI

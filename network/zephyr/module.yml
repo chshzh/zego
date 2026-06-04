@@ -1,0 +1,4 @@
+name: zego_network
+build:
+  cmake: .
+  kconfig: Kconfig

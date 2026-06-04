@@ -1,0 +1,5 @@
+name: zego_wifi_ble_prov
+
+build:
+  cmake: .
+  kconfig: Kconfig
