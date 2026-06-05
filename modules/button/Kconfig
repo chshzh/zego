@@ -52,13 +52,14 @@ endchoice # ZEGO_BUTTON_BACKEND
 config ZEGO_BUTTON_NUM_BUTTONS
 	int "Number of buttons to monitor"
 	default 4
-	range 1 4
+	range 1 5
 	help
 	  Number of DK buttons to monitor (0-based indices 0 to N-1).
 	  Override this in boards/<board>.conf:
 	    nrf7002dk_nrf5340_cpuapp           → 2
 	    nrf54lm20dk_nrf54lm20a_cpuapp      → 4 (or 3 when -DSHIELD=nrf7002eb2,
 	                                           set by the application board conf)
+	    nrf5340_audio_dk_nrf5340_cpuapp    → 5 (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5)
 
 config ZEGO_BUTTON_LONG_PRESS_MS
 	int "Long-press threshold (ms)"
