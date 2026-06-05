@@ -104,12 +104,13 @@ endif # ZEGO_LED_USE_PWM
 config ZEGO_LED_NUM_LEDS
 	int "Number of LEDs to control"
 	default 4
-	range 1 4
+	range 1 9
 	help
 	  Number of LEDs to manage (0-based indices 0 to N-1).
 	  Override this in boards/<board>.conf:
-	    nrf7002dk_nrf5340_cpuapp       → 2
-	    nrf54lm20dk_nrf54lm20a_cpuapp  → 4
+	    nrf7002dk_nrf5340_cpuapp           → 2
+	    nrf54lm20dk_nrf54lm20a_cpuapp      → 4
+	    nrf5340_audio_dk_nrf5340_cpuapp    → 9 (RGB1 + RGB2 + 3 mono)
 
 config ZEGO_LED_CMD_QUEUE_DEPTH
 	int "LED command queue depth"
@@ -160,13 +161,24 @@ config ZEGO_LED_BREATHE_PWM_PERIOD_MS
 	  ramp step interval — time between successive brightness updates sent
 	  to the PWM peripheral.
 
-config ZEGO_LED_MARQUEE_PERIOD_MS
-	int "Default marquee step period in milliseconds"
+config ZEGO_LED_ROTATE_PERIOD_MS
+	int "Default rotate step period in milliseconds"
 	default 500
 	range 50 5000
 	help
-	  Time each LED stays lit during the marquee sweep when
-	  LED_COMMAND_MARQUEE is sent with period_ms = 0.
+	  Time each LED stays lit during the rotate sweep when
+	  LED_COMMAND_ROTATE is sent with period_ms = 0.
+
+config ZEGO_LED_ROTATE_NUM_LEDS
+	int "Number of LEDs participating in the rotate sweep"
+	default ZEGO_LED_NUM_LEDS
+	range 1 9
+	help
+	  Number of LEDs (starting from index 0) that cycle during the rotate
+	  effect.  Defaults to all managed LEDs (ZEGO_LED_NUM_LEDS).  Set to a
+	  smaller value to restrict the sweep to a leading subset of LEDs.
+	  Example: nRF5340 Audio DK sets this to 3 so the rotate cycles only
+	  the RGB1 triplet (indices 0-2), leaving RGB2 and mono LEDs off.
 
 module = ZEGO_LED
 module-str = zego_led
