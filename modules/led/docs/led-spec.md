@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/led` |
-| Version | 2026-06-04-00-00 |
+| Version | 2026-06-05-09-07 |
 | PRD Version | N/A (standalone library module) |
 | Status | Stable |
 
@@ -15,10 +15,11 @@
 
 | Version | Summary of changes |
 |---|---|
-| 2026-05-31-00-00 | Initial module spec (ON/OFF/TOGGLE/BLINK/BREATHE/MARQUEE) |
+| 2026-05-31-00-00 | Initial module spec (ON/OFF/TOGGLE/BLINK/BREATHE/ROTATE) |
 | 2026-06-01-13-27 | Breathe reworked: linear software-PWM ramp (0%→100%→0%) replaces asymmetric duty cycle; added `BREATHE_PWM_PERIOD_MS`; added sample app; removed test folder; reformatted to match button-spec structure |
 | 2026-06-02-11-38 | Hardware abstraction layer (`led_hw.h` + DK / Zephyr-LED backends); hardware-PWM breathe path for boards with PWM LEDs (`CONFIG_ZEGO_LED_USE_PWM`); `LED_STATE_CHAN` now publishes once per effect start, not per toggle; added `command` field to `led_state_msg`; thread-safe `atomic_t` effect state; T6 HW-PWM breathe test step in sample |
-| 2026-06-04-00-00 | **Full SMF redesign**: BLINK, BREATHE, and MARQUEE are now proper SMF states (no bypass); zbus listener decoupled from SMF via `k_msgq` + `k_work` so all SMF transitions run on the system workqueue; `atomic_t` effect field removed; `CONFIG_ZEGO_LED_CMD_QUEUE_DEPTH` added; Mermaid state diagrams added |
+| 2026-06-04-00-00 | **Full SMF redesign**: BLINK, BREATHE, and ROTATE are now proper SMF states (no bypass); zbus listener decoupled from SMF via `k_msgq` + `k_work` so all SMF transitions run on the system workqueue; `atomic_t` effect field removed; `CONFIG_ZEGO_LED_CMD_QUEUE_DEPTH` added; Mermaid state diagrams added |
+| 2026-06-05-09-07 | Added nRF5340 Audio DK support: 9 LEDs (RGB1 idx 0–2, RGB2 idx 3–5, mono idx 6–8); expanded NUM_LEDS range to 1–9; added `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS` to restrict rotate to a leading subset (Audio DK: 3, i.e. RGB1 only) |
 
 ---
 
@@ -54,6 +55,7 @@ software PWM for LEDs without a PWM channel.
 |-------|-------------|----------------|-------|
 | nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | LED1 (idx 0), LED2 (idx 1) | 2 LEDs |
 | nRF54LM20DK | `nrf54lm20dk/nrf54lm20a/cpuapp` | LED0–LED3 (idx 0–3) | 4 LEDs |
+| nRF5340 Audio DK | `nrf5340_audio_dk/nrf5340/cpuapp` | RGB1: led_0–led_2 (idx 0–2, PWM-capable); RGB2: led_3–led_5 (idx 3–5); mono: blue led_6, green led_7/led_8 (idx 6–8) | 9 LEDs total; DK backend drives all 9. ROTATE restricted to RGB1 (idx 0–2) via `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS=3` |
 
 ---
 
@@ -70,7 +72,7 @@ software PWM for LEDs without a PWM channel.
 
 - [x] **Application module** — zbus listener enqueues commands to a `k_msgq`;
   a `k_work` on the system workqueue dequeues and drives a full per-LED Zephyr SMF
-  (OFF / ON / BLINK / BREATHE).  A module-level marquee controller shares the same
+  (OFF / ON / BLINK / BREATHE).  A module-level rotate controller shares the same
   workqueue for `k_work_delayable` scheduling.  Hardware calls routed through
   `led_hw.h` HAL (DK or Zephyr LED driver backend).  Auto-initializes via `SYS_INIT`.
 
@@ -89,17 +91,17 @@ enum led_msg_type {
     LED_COMMAND_TOGGLE,  /* Static: invert current state                                 */
     LED_COMMAND_BLINK,   /* Effect: 50% duty cycle, toggles every period_ms              */
     LED_COMMAND_BREATHE, /* Effect: linear fade 0%→100% over period_ms, then 100%→0%    */
-    LED_COMMAND_MARQUEE, /* Effect: one LED lit at a time, cycles at period_ms per step  */
+    LED_COMMAND_ROTATE, /* Effect: one LED lit at a time, cycles at period_ms per step  */
 };
 
 struct led_msg {
     enum led_msg_type type;
-    uint8_t  led_number; /* 0-based LED index; ignored for LED_COMMAND_MARQUEE           */
+    uint8_t  led_number; /* 0-based LED index; ignored for LED_COMMAND_ROTATE           */
     uint16_t period_ms;  /* Effect period in ms; 0 = use Kconfig default                 */
 };
 
 struct led_state_msg {
-    uint8_t          led_number; /* 0-based LED index (MARQUEE: first lit LED)    */
+    uint8_t          led_number; /* 0-based LED index (ROTATE: first lit LED)    */
     bool             is_on;      /* true = on / effect running; false = off        */
     enum led_msg_type command;   /* Command that triggered this notification       */
 };
@@ -114,9 +116,9 @@ struct led_state_msg {
 | `LED_COMMAND_TOGGLE` | LED state changes | reflects new state | `LED_COMMAND_TOGGLE` |
 | `LED_COMMAND_BLINK` | Effect **starts** (once) | `false` (LED off before first toggle) | `LED_COMMAND_BLINK` |
 | `LED_COMMAND_BREATHE` | Effect **starts** (once) | `false` (LED off; ramps up from 0%) | `LED_COMMAND_BREATHE` |
-| `LED_COMMAND_MARQUEE` | Effect **starts** (once) | `true` (first LED immediately lit) | `LED_COMMAND_MARQUEE` |
+| `LED_COMMAND_ROTATE` | Effect **starts** (once) | `true` (first LED immediately lit) | `LED_COMMAND_ROTATE` |
 
-> **Note:** Dynamic effects (BLINK, BREATHE, MARQUEE) publish to `LED_STATE_CHAN` only
+> **Note:** Dynamic effects (BLINK, BREATHE, ROTATE) publish to `LED_STATE_CHAN` only
 > once when the effect begins, **not** on every hardware toggle.  This prevents the
 > channel from flooding subscribers with hundreds of events during a breathe cycle.
 
@@ -126,7 +128,7 @@ struct led_state_msg {
 |---------|---------------------|-----------------|
 | `LED_COMMAND_BLINK` | Toggle half-period (full cycle = 2×) | `CONFIG_ZEGO_LED_BLINK_PERIOD_MS` (250 ms) |
 | `LED_COMMAND_BREATHE` | Ramp duration per direction (full cycle = 2×) | `CONFIG_ZEGO_LED_BREATHE_PERIOD_MS` (3000 ms) |
-| `LED_COMMAND_MARQUEE` | Time each LED stays lit per step | `CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS` (300 ms) |
+| `LED_COMMAND_ROTATE` | Time each LED stays lit per step | `CONFIG_ZEGO_LED_ROTATE_PERIOD_MS` (300 ms) |
 | Static commands | Ignored | — |
 
 ---
@@ -200,27 +202,27 @@ stateDiagram-v2
 | `LED_EVENT_CMD` | `led_cmd_work_fn` (drains `led_cmd_queue`) | `sm->event = LED_EVENT_CMD; sm->cmd = *msg` |
 | `LED_EVENT_TICK` | `effect_work_fn` timer callback | `sm->event = LED_EVENT_TICK` |
 
-### Module-level MARQUEE Control
+### Module-level ROTATE Control
 
-MARQUEE is a module-level mode tracked by a `marquee.active` flag.  When active,
-the marquee stepper has exclusive control of all LED hardware; per-LED effect timers
-are cancelled.  Per-LED SMFs retain their state while MARQUEE runs — they resume
-when MARQUEE ends and the next command arrives.
+ROTATE is a module-level mode tracked by a `rotate.active` flag.  When active,
+the rotate stepper has exclusive control of all LED hardware; per-LED effect timers
+are cancelled.  Per-LED SMFs retain their state while ROTATE runs — they resume
+when ROTATE ends and the next command arrives.
 
 ```mermaid
 stateDiagram-v2
     direction LR
     [*] --> PER_LED
 
-    PER_LED --> MARQUEE : CMD_MARQUEE\n→ cancel all effect_works\n→ hw_off all\n→ hw_on LED[0]\n→ pub STATE_CHAN
+    PER_LED --> ROTATE : CMD_ROTATE\n→ cancel all effect_works\n→ hw_off all\n→ hw_on LED[0]\n→ pub STATE_CHAN
 
-    MARQUEE --> PER_LED : non-MARQUEE cmd on any LED\n→ cancel marquee.work\n→ hw_off LED[current]\n→ process cmd on target LED
+    ROTATE --> PER_LED : non-ROTATE cmd on any LED\n→ cancel rotate.work\n→ hw_off LED[current]\n→ process cmd on target LED
 
-    MARQUEE --> MARQUEE : marquee.work tick\n→ hw_off(current)\n→ advance current\n→ hw_on(next)\n→ reschedule
+    ROTATE --> ROTATE : rotate.work tick\n→ hw_off(current)\n→ advance current\n→ hw_on(next)\n→ reschedule
 
-    note right of MARQUEE
-        entry: hw_on(LED[0]), schedule marquee.work
-        exit:  cancel marquee.work, hw_off(LED[current])
+    note right of ROTATE
+        entry: hw_on(LED[0]), schedule rotate.work
+        exit:  cancel rotate.work, hw_off(LED[current])
     end note
 ```
 
@@ -241,7 +243,7 @@ sequenceDiagram
     participant Q  as led_cmd_queue (k_msgq)
     participant W  as led_cmd_work (system workqueue)
     participant S  as Per-LED SMF (system workqueue)
-    participant E  as effect_work / marquee.work (system workqueue)
+    participant E  as effect_work / rotate.work (system workqueue)
 
     P->>L:  zbus_chan_pub(LED_CMD_CHAN)
     L->>Q:  k_msgq_put (non-blocking; drops if full)
@@ -250,7 +252,7 @@ sequenceDiagram
 
     W->>Q:  k_msgq_get (drain all pending)
     W->>S:  process_led_command() → smf_run_state()
-    S->>E:  SMF entry: k_work_schedule (effect_work / marquee.work)
+    S->>E:  SMF entry: k_work_schedule (effect_work / rotate.work)
     Note over W,E: all on system workqueue → serialised, no race
 
     E->>S:  effect tick: LED_EVENT_TICK → smf_run_state()
@@ -259,7 +261,7 @@ sequenceDiagram
 ```
 
 > **Invariant:** All calls to `k_work_schedule` and `k_work_cancel_delayable` on
-> `effect_work` and `marquee.work` happen exclusively on the system workqueue, where
+> `effect_work` and `rotate.work` happen exclusively on the system workqueue, where
 > they are serialised with the timer callbacks themselves — no timeout dlist race.
 
 ---
@@ -277,20 +279,22 @@ sequenceDiagram
 | `CONFIG_ZEGO_LED_1_PWM_INDEX` | int | `-1` | `pwm-leds` child index for LED 1; `-1` = SW PWM fallback |
 | `CONFIG_ZEGO_LED_2_PWM_INDEX` | int | `-1` | `pwm-leds` child index for LED 2; `-1` = SW PWM fallback |
 | `CONFIG_ZEGO_LED_3_PWM_INDEX` | int | `-1` | `pwm-leds` child index for LED 3; `-1` = SW PWM fallback |
-| `CONFIG_ZEGO_LED_NUM_LEDS` | int | `4` | Number of LEDs; board conf overrides |
+| `CONFIG_ZEGO_LED_NUM_LEDS` | int | `4` | Number of LEDs (range 1–9); board conf overrides |
 | `CONFIG_ZEGO_LED_INIT_PRIORITY` | int | `91` | `SYS_INIT` APPLICATION level priority |
 | `CONFIG_ZEGO_LED_LOG_LEVEL` | choice | `info` | Log verbosity |
 | `CONFIG_ZEGO_LED_BLINK_PERIOD_MS` | int | `250` | Blink toggle half-period (ms); full cycle = 2× |
 | `CONFIG_ZEGO_LED_BREATHE_PERIOD_MS` | int | `3000` | Breathe ramp duration per direction (ms); full cycle = 2× |
 | `CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS` | int | `20` | Software-PWM frame size for breathe (ms); steps per ramp = PERIOD/PWM |
-| `CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS` | int | `500` | Time each LED stays lit during marquee (ms) |
+| `CONFIG_ZEGO_LED_ROTATE_PERIOD_MS` | int | `500` | Time each LED stays lit during rotate (ms) |
+| `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS` | int | `=ZEGO_LED_NUM_LEDS` | Number of LEDs (from idx 0) that participate in the rotate sweep. Defaults to all LEDs. Set smaller to restrict to a leading subset — e.g. Audio DK sets 3 to cycle RGB1 only (idx 0–2). Range 1–9. |
 
 Board-specific defaults (`boards/<board>.conf`):
 
-| Board | `NUM_LEDS` |
-|-------|-----------|
-| `nrf7002dk/nrf5340/cpuapp` | 2 |
-| `nrf54lm20dk/nrf54lm20a/cpuapp` | 4 |
+| Board | `NUM_LEDS` | `ROTATE_NUM_LEDS` |
+|-------|-----------|---------------------|
+| `nrf7002dk/nrf5340/cpuapp` | 2 | 2 (default = NUM_LEDS) |
+| `nrf54lm20dk/nrf54lm20a/cpuapp` | 4 | 4 (default = NUM_LEDS) |
+| `nrf5340_audio_dk/nrf5340/cpuapp` | 9 | 3 (RGB1: idx 0–2 only) |
 
 ---
 
@@ -327,9 +331,9 @@ zbus_chan_pub(&LED_CMD_CHAN, &blink, K_NO_WAIT);
 struct led_msg breathe = { .type = LED_COMMAND_BREATHE, .led_number = 1 };
 zbus_chan_pub(&LED_CMD_CHAN, &breathe, K_NO_WAIT);
 
-/* Marquee all LEDs at 200 ms per step */
-struct led_msg marquee = { .type = LED_COMMAND_MARQUEE, .period_ms = 200 };
-zbus_chan_pub(&LED_CMD_CHAN, &marquee, K_NO_WAIT);
+/* Rotate all LEDs at 200 ms per step */
+struct led_msg rotate = { .type = LED_COMMAND_ROTATE, .period_ms = 200 };
+zbus_chan_pub(&LED_CMD_CHAN, &rotate, K_NO_WAIT);
 
 /* Stop any effect */
 struct led_msg stop = { .type = LED_COMMAND_OFF, .led_number = 0 };
@@ -368,7 +372,7 @@ CONFIG_ZEGO_LED=y
 | Resource | Value | Notes |
 |----------|-------|-------|
 | Flash | ~3 KB | Code + effect handlers + read-only state table |
-| RAM (static) | ~`NUM_LEDS × 40` bytes + 12 bytes | Per-LED `led_sm_object` structs + global marquee state |
+| RAM (static) | ~`NUM_LEDS × 40` bytes + 12 bytes | Per-LED `led_sm_object` structs + global rotate state |
 | Stack | None | Runs on system work queue (no dedicated thread) |
 
 ---
@@ -385,7 +389,7 @@ CONFIG_ZEGO_LED=y
 | Breathe started (SW PWM) | `[zego_led] LED N BREATHE (SW PWM) ramp=X ms (N steps x M ms/step)` | INF |
 | Breathe started (HW PWM) | `[zego_led] LED N BREATHE (HW PWM) ramp=X ms (N steps x M ms/step)` | INF |
 | Breathe direction reversal | `[zego_led] LED N BREATHE direction -> UP/DOWN (step X/Y)` | DBG |
-| Marquee started | `[zego_led] Marquee started (period N ms)` | INF |
+| Rotate started | `[zego_led] Rotate started (period N ms, M LEDs)` | INF |
 | Invalid LED number | `[zego_led] Invalid LED number: N (max M)` | WRN |
 | LED_STATE_CHAN publish error | `[zego_led] Failed to publish LED_STATE_CHAN (led N): E` | ERR |
 
@@ -404,7 +408,7 @@ test protocol in [`sample/README.md`](../sample/README.md).
 | T2 | TOGGLE | LED 0 | 4 blinks at ~400 ms, ends off |
 | T3 | BLINK | LED 0 | Steady 2 Hz (250 ms half-period); visually equal on/off |
 | T4 | BREATHE | LED 0 | Gradually brightens over 3 s (SW PWM by default), then dims; on-pulses visibly grow then shrink |
-| T5 | MARQUEE | all | Exactly one LED lit at a time, advances left-to-right |
+| T5 | ROTATE | all | Exactly one LED lit at a time, advances left-to-right |
 | T6 | BREATHE (HW PWM) | each LED in sequence | Requires `CONFIG_ZEGO_LED_USE_PWM=y`; module log shows `(HW PWM)` for LEDs with `PWM_INDEX >= 0` and `(SW PWM)` fallback for others. HW PWM LEDs show true analogue fade; SW fallback shows rapid toggling |
 
 ---

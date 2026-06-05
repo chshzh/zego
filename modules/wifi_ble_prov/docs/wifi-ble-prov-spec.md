@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/wifi_ble_prov` |
-| Version | 2026-06-04-17-10 |
+| Version | 2026-06-05-09-31 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -17,6 +17,7 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-04-17-10 | Initial spec — reverse-designed from source |
+| 2026-06-05-09-31 | Added Supported Hardware section; documented nRF5340 Audio DK + nRF7002EK + BLE network-core constraint |
 
 ---
 
@@ -39,6 +40,20 @@ messages to `WIFI_CHAN` to keep the BLE advertisement status flags up to date.
 - **Path**: `zego/wifi_ble_prov/`
 - **Files**: `src/wifi_ble_prov.c`, `src/wifi_ble_prov.h`, `Kconfig`, `Kconfig.defaults`,
   `CMakeLists.txt`, `zephyr/module.yml`
+
+---
+
+## Supported Hardware
+
+BLE provisioning requires the BT host stack. On dual-core boards (nRF7002DK, nRF5340 Audio DK),
+BLE runs on the network core via `hci_ipc` — set `SB_CONFIG_NETCORE_HCI_IPC=y` in
+`sysbuild.conf`. On single-core nRF54LM20DK, the BT stack runs on the same core as the app.
+
+| Board | Build target | BLE core | Notes |
+|-------|-------------|----------|-------|
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | Network core (`hci_ipc`) | `SB_CONFIG_NETCORE_HCI_IPC=y` in `sysbuild.conf`; ~1 MB app flash — BT stack (~150 KB) fits but leaves little headroom alongside a heavy app |
+| nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-DSHIELD=nrf7002eb2` | Same app core | Single-core; ~2× flash/RAM — comfortable margin |
+| nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-DSHIELD=nrf7002ek` | Network core (`hci_ipc`) | `SB_CONFIG_NETCORE_HCI_IPC=y` in `sysbuild.conf`; same ~1 MB app-core flash budget as nRF7002DK |
 
 ---
 
@@ -216,8 +231,9 @@ the Wi-Fi stack is operational.
 | `WIFI_PROV_CORE` + nanopb | ~20 KB | ~4 KB |
 | **Module total (excl. BT stack)** | **~12 KB** | **~6 KB** |
 
-> The BT host stack is the dominant cost (~150 KB Flash). This is why `CONFIG_ZEGO_WIFI_BLE_PROV`
-> is disabled on nRF7002DK (1 MB flash) when a heavy application is present.
+> The BT host stack is the dominant cost (~150 KB Flash). On boards with ~1 MB app-core flash
+> (nRF7002DK, nRF5340 Audio DK), disable `CONFIG_ZEGO_WIFI_BLE_PROV` when a heavy application
+> (Memfault, large audio stack, etc.) is present. nRF54LM20DK has sufficient headroom.
 
 ---
 

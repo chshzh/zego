@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/button` |
-| Version | 2026-06-04-00-00 |
+| Version | 2026-06-05-09-07 |
 | PRD Version | N/A (standalone library module) |
 | Status | Stable |
 
@@ -19,6 +19,7 @@
 | 2026-06-01-08-54 | 5-state FSM: added BUTTON_SINGLE_CLICK, BUTTON_DOUBLE_CLICK, BUTTON_LONG_PRESS gesture classification; BUTTON_PRESSED / BUTTON_RELEASED raw events retained; long-press default 3000 ms |
 | 2026-06-03-00-00 | Added HAL backend section (DK / GPIO-keys); added BACKEND Kconfig symbols to table; fixed nRF54LM20DK NUM_BUTTONS default (4, not 3); removed stale duplicate spec block |
 | 2026-06-04-00-00 | Expanded state machine section: clarified execution context (all SMF runs on system workqueue); added Entry/Exit/Timer action tables; added timing diagram |
+| 2026-06-05-09-07 | Added nRF5340 Audio DK support: 5 buttons (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5); expanded NUM_BUTTONS range to 1–5 |
 
 ---
 
@@ -69,6 +70,7 @@ driver.  Choose a backend via Kconfig:
 |-------|-------------|-------------------|-------|
 | nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | BUTTON1 (idx 0), BUTTON2 (idx 1) | 2 buttons |
 | nRF54LM20DK | `nrf54lm20dk/nrf54lm20a/cpuapp` | BUTTON0–BUTTON3 (idx 0–3) | 4 buttons; when built with `-DSHIELD=nrf7002eb2` BUTTON3 pin is occupied by the shield — the application overrides `CONFIG_ZEGO_BUTTON_NUM_BUTTONS=3` in its own board conf |
+| nRF5340 Audio DK | `nrf5340_audio_dk/nrf5340/cpuapp` | VOL- (idx 0), VOL+ (idx 1), PLAY/PAUSE (idx 2), BTN4 (idx 3), BTN5 (idx 4) | 5 buttons; DTS uses non-consecutive `zephyr,code` values (`KEY_VOLUMEDOWN`, `KEY_VOLUMEUP`, `KEY_3`, `KEY_4`, `KEY_5`) — DK backend iterates all 5 children via bitmask |
 
 ---
 
@@ -195,7 +197,7 @@ sequenceDiagram
 | `CONFIG_ZEGO_BUTTON` | bool | `n` | Enable the module |
 | `CONFIG_ZEGO_BUTTON_BACKEND_DK` | bool | `y` | Hardware backend: `dk_buttons_and_leds` (default) |
 | `CONFIG_ZEGO_BUTTON_BACKEND_GPIO` | bool | `n` | Hardware backend: Zephyr Input subsystem / `gpio-keys` (portable) |
-| `CONFIG_ZEGO_BUTTON_NUM_BUTTONS` | int | `4` | Number of buttons; board overlays override |
+| `CONFIG_ZEGO_BUTTON_NUM_BUTTONS` | int | `4` | Number of buttons (range 1–5); board overlays override |
 | `CONFIG_ZEGO_BUTTON_LONG_PRESS_MS` | int | `3000` | Hold time (ms) that triggers `BUTTON_LONG_PRESS` |
 | `CONFIG_ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS` | int | `400` | Max gap (ms) between two presses for double-click |
 | `CONFIG_ZEGO_BUTTON_INIT_PRIORITY` | int | `90` | `SYS_INIT` APPLICATION level priority |
@@ -207,6 +209,7 @@ Board-specific defaults (`boards/<board>.conf`):
 |-------|--------------|
 | `nrf7002dk/nrf5340/cpuapp` | 2 |
 | `nrf54lm20dk/nrf54lm20a/cpuapp` | 4 (3 when `-DSHIELD=nrf7002eb2` — app overrides in its own board conf) |
+| `nrf5340_audio_dk/nrf5340/cpuapp` | 5 (VOL- / VOL+ / PLAY/PAUSE / BTN4 / BTN5) |
 
 ---
 

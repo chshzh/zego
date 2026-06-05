@@ -55,7 +55,7 @@ On a successful boot you should see:
 [00:00:00.XXX] <inf> led_sample:   LEDs              : N  (NUM_LEDS)
 [00:00:00.XXX] <inf> led_sample:   Blink half-period : 250 ms
 [00:00:00.XXX] <inf> led_sample:   Breathe period    : 3000 ms/dir  pwm=20 ms/step
-[00:00:00.XXX] <inf> led_sample:   Marquee step      : 300 ms  (MARQUEE_PERIOD_MS)
+[00:00:00.XXX] <inf> led_sample:   Rotate step      : 300 ms  (ROTATE_PERIOD_MS)
 [00:00:00.XXX] <inf> led_sample: ------------------------------------------
 [00:00:00.XXX] <inf> led_sample:   nRF7002DK  : LED1=idx0  LED2=idx1
 [00:00:00.XXX] <inf> led_sample:   nRF54LM20DK: LED0=idx0 ... LED3=idx3
@@ -181,25 +181,25 @@ Examples:
 
 ---
 
-### T5 — MARQUEE (all LEDs)
+### T5 — ROTATE (all LEDs)
 
 **Action:** Automatic — one LED at a time chases through all LEDs for three sweeps.
 
 **Expected log:**
 
 ```
-<inf> led_sample: === T5: MARQUEE -- all LEDs, 300 ms/step ===
-<inf> zego_led: Marquee started (period 300 ms)
-<dbg> led_sample:   state: LED0 -> ON  (cmd=MARQUEE)
+<inf> led_sample: === T5: ROTATE -- all LEDs, 300 ms/step ===
+<inf> zego_led: Rotate started (period 300 ms)
+<dbg> led_sample:   state: LED0 -> ON  (cmd=ROTATE)
 ```
 
-> MARQUEE publishes to `LED_STATE_CHAN` **once** when the effect starts.
+> ROTATE publishes to `LED_STATE_CHAN` **once** when the effect starts.
 > The per-step LED transitions are not reported via the state channel.
 > Verify the chasing pattern visually — exactly one LED lit at a time.
 
 **Pass condition:** Exactly one LED is lit at any time, cycling left-to-right. No two LEDs on simultaneously. All LEDs off when the step ends.
 
-**Tuning:** Change `CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS` in `prj.conf`. Lower = faster chase.
+**Tuning:** Change `CONFIG_ZEGO_LED_ROTATE_PERIOD_MS` in `prj.conf`. Lower = faster chase.
 
 ---
 
@@ -281,7 +281,7 @@ nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
 | T2 | TOGGLE | LED 0 | ~2 s | 4 blinks at ~400 ms, ends off |
 | T3 | BLINK | LED 0 | 4 s | steady 2 Hz at default; state log fires once (`is_on=false`, cmd=BLINK) |
 | T4 | BREATHE | LED 0 | 6 s | fade up then down; state log fires once (`is_on=false`, cmd=BREATHE); module log says `(SW PWM)` |
-| T5 | MARQUEE | all | 3 sweeps | one LED at a time, left-to-right; state log fires once (cmd=MARQUEE) |
+| T5 | ROTATE | all | 3 sweeps | one LED at a time, left-to-right; state log fires once (cmd=ROTATE) |
 | T6 | BREATHE (HW PWM) | each LED | `2×BREATHE_PERIOD_MS` per LED | Requires `CONFIG_ZEGO_LED_USE_PWM=y`; module log says `(HW PWM)` or `(SW PWM)` per LED |
 
 ---
@@ -300,8 +300,8 @@ CONFIG_ZEGO_LED_BREATHE_PERIOD_MS=1000
 # Finer steps / smoother fade (default 20 ms = 150 steps per 3 s ramp):
 CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS=10
 
-# Faster marquee chase (default 300 ms/step):
-CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS=100
+# Faster rotate chase (default 300 ms/step):
+CONFIG_ZEGO_LED_ROTATE_PERIOD_MS=100
 
 # Enable hardware-PWM breathe (T6) via west -D overrides — see T6 section for
 # full -DCONFIG_ZEGO_LED_n_PWM_INDEX board-specific values:

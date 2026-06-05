@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/app_main` |
-| Version | 2026-06-04-00-00 |
+| Version | 2026-06-05-09-31 |
 | PRD Version | N/A (standalone library module) |
 | Status | Stable |
 
@@ -16,6 +16,7 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-04-00-00 | Initial module spec — banner merged in from zego/banner; Wi-Fi mode selector; shell command; NVS persistence |
+| 2026-06-05-09-31 | Added nRF5340 Audio DK + nRF7002EK to Supported Hardware table |
 
 ---
 
@@ -65,6 +66,7 @@ is needed.
 |-------|-------------|-------|
 | nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | STA + SoftAP (`NRF70_AP_MODE`); P2P with `-DSNIPPET=wifi-p2p` |
 | nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-DSHIELD=nrf7002eb2` | Same capabilities; larger flash/RAM |
+| nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-DSHIELD=nrf7002ek` | STA + SoftAP + P2P; ~1 MB app-core flash (same as nRF7002DK); network core runs `hci_ipc` for BLE (`SB_CONFIG_NETCORE_HCI_IPC=y`); application must provide a DTS board overlay mapping the nRF7002EK SPI bus to the Audio DK GPIO pins |
 
 ---
 

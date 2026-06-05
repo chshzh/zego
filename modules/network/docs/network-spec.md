@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/network` |
-| Version | 2026-06-04-17-10 |
+| Version | 2026-06-05-09-31 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -17,6 +17,7 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-04-17-10 | Initial spec — reverse-designed from source |
+| 2026-06-05-09-31 | Added Supported Hardware section; documented nRF5340 Audio DK + nRF7002EK |
 
 ---
 
@@ -38,6 +39,19 @@ the bridge between the raw Zephyr net_mgmt event system and the application even
 - **Path**: `zego/network/`
 - **Files**: `src/net_event_mgmt.c`, `src/net_event_mgmt.h`, `src/wifi_utils.c`,
   `src/wifi_utils.h`, `Kconfig`, `Kconfig.defaults`, `CMakeLists.txt`, `zephyr/module.yml`
+
+---
+
+## Supported Hardware
+
+The `zego/network` module is board-agnostic. Any board with a working nRF70-series Wi-Fi driver
+and WPA supplicant is supported. Tested combinations:
+
+| Board | Build target | Notes |
+|-------|-------------|-------|
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | STA + SoftAP + P2P; WPA supplicant on nRF5340 app core |
+| nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-DSHIELD=nrf7002eb2` | Same capabilities; larger flash/RAM |
+| nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-DSHIELD=nrf7002ek` | STA + SoftAP + P2P; application must supply a DTS overlay mapping the nRF7002EK SPI bus to the Audio DK GPIO pins |
 
 ---
 
