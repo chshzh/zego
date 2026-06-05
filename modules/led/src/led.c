@@ -13,7 +13,8 @@ LOG_MODULE_REGISTER(zego_led, CONFIG_ZEGO_LED_LOG_LEVEL);
 #include <zephyr/smf.h>
 #include <zephyr/zbus/zbus.h>
 
-#define NUM_LEDS CONFIG_ZEGO_LED_NUM_LEDS
+#define NUM_LEDS        CONFIG_ZEGO_LED_NUM_LEDS
+#define ROTATE_NUM_LEDS CONFIG_ZEGO_LED_ROTATE_NUM_LEDS
 
 /* ============================================================================
  * ZBUS CHANNEL DEFINITIONS
@@ -72,10 +73,11 @@ enum led_state_idx {
 };
 
 static const struct smf_state led_states[] = {
-	[LED_S_OFF]     = SMF_CREATE_STATE(s_off_entry,     s_off_run,     NULL,         NULL, NULL),
-	[LED_S_ON]      = SMF_CREATE_STATE(s_on_entry,      s_on_run,      NULL,         NULL, NULL),
-	[LED_S_BLINK]   = SMF_CREATE_STATE(s_blink_entry,   s_blink_run,   s_blink_exit, NULL, NULL),
-	[LED_S_BREATHE] = SMF_CREATE_STATE(s_breathe_entry, s_breathe_run, s_breathe_exit, NULL, NULL),
+	[LED_S_OFF] = SMF_CREATE_STATE(s_off_entry, s_off_run, NULL, NULL, NULL),
+	[LED_S_ON] = SMF_CREATE_STATE(s_on_entry, s_on_run, NULL, NULL, NULL),
+	[LED_S_BLINK] = SMF_CREATE_STATE(s_blink_entry, s_blink_run, s_blink_exit, NULL, NULL),
+	[LED_S_BREATHE] =
+		SMF_CREATE_STATE(s_breathe_entry, s_breathe_run, s_breathe_exit, NULL, NULL),
 };
 
 struct led_sm_object {
@@ -98,7 +100,7 @@ struct led_sm_object {
 static struct led_sm_object led_sm[NUM_LEDS];
 
 /* ============================================================================
- * MARQUEE — module-level global effect
+ * ROTATE — module-level global effect
  * ============================================================================
  */
 
@@ -107,7 +109,7 @@ static struct {
 	uint16_t period_ms;
 	uint8_t current;
 	bool active;
-} marquee;
+} rotate;
 
 /* ============================================================================
  * HELPERS
@@ -171,27 +173,27 @@ static void effect_work_fn(struct k_work *work)
 }
 
 /* ============================================================================
- * MARQUEE WORK HANDLER (runs on system workqueue)
+ * ROTATE WORK HANDLER (runs on system workqueue)
  * ============================================================================
  */
 
-static void marquee_work_fn(struct k_work *work)
+static void rotate_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
 
-	if (!marquee.active) {
+	if (!rotate.active) {
 		return;
 	}
 
-	led_hw_set(marquee.current, false);
-	led_sm[marquee.current].is_on = false;
+	led_hw_set(rotate.current, false);
+	led_sm[rotate.current].is_on = false;
 
-	marquee.current = (uint8_t)((marquee.current + 1) % NUM_LEDS);
+	rotate.current = (uint8_t)((rotate.current + 1) % ROTATE_NUM_LEDS);
 
-	led_hw_set(marquee.current, true);
-	led_sm[marquee.current].is_on = true;
+	led_hw_set(rotate.current, true);
+	led_sm[rotate.current].is_on = true;
 
-	k_work_schedule(&marquee.work, K_MSEC(marquee.period_ms));
+	k_work_schedule(&rotate.work, K_MSEC(rotate.period_ms));
 }
 
 /* ============================================================================
@@ -324,7 +326,7 @@ static enum smf_state_result s_blink_run(void *obj)
 		/* Restart blink with (possibly new) period — cancel and reschedule */
 		k_work_cancel_delayable(&sm->effect_work);
 		sm->effect_period_ms = (sm->cmd.period_ms > 0) ? sm->cmd.period_ms
-							        : CONFIG_ZEGO_LED_BLINK_PERIOD_MS;
+							       : CONFIG_ZEGO_LED_BLINK_PERIOD_MS;
 		k_work_schedule(&sm->effect_work, K_MSEC(sm->effect_period_ms));
 		break;
 	case LED_COMMAND_BREATHE:
@@ -372,13 +374,11 @@ static void s_breathe_entry(void *obj)
 	if (led_hw_has_brightness(sm->led_number)) {
 		k_work_schedule(&sm->effect_work, K_MSEC(CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS));
 		LOG_INF("LED %d BREATHE (HW PWM) ramp=%u ms (%u steps x %u ms/step)",
-			sm->led_number, (unsigned)sm->effect_period_ms, steps,
-			(unsigned)pwm_ms);
+			sm->led_number, (unsigned)sm->effect_period_ms, steps, (unsigned)pwm_ms);
 	} else {
 		k_work_schedule(&sm->effect_work, K_MSEC(CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS));
 		LOG_INF("LED %d BREATHE (SW PWM) ramp=%u ms (%u steps x %u ms/step)",
-			sm->led_number, (unsigned)sm->effect_period_ms, steps,
-			(unsigned)pwm_ms);
+			sm->led_number, (unsigned)sm->effect_period_ms, steps, (unsigned)pwm_ms);
 	}
 }
 
@@ -451,7 +451,7 @@ static enum smf_state_result s_breathe_run(void *obj)
 		/* Restart breathe with (possibly new) period */
 		k_work_cancel_delayable(&sm->effect_work);
 		sm->effect_period_ms = (sm->cmd.period_ms > 0) ? sm->cmd.period_ms
-							        : CONFIG_ZEGO_LED_BREATHE_PERIOD_MS;
+							       : CONFIG_ZEGO_LED_BREATHE_PERIOD_MS;
 		{
 			uint32_t pwm_ms = CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS;
 			uint16_t steps = (uint16_t)(sm->effect_period_ms / pwm_ms);
@@ -481,19 +481,19 @@ static void s_breathe_exit(void *obj)
 }
 
 /* ============================================================================
- * MARQUEE HELPERS
+ * ROTATE HELPERS
  * ============================================================================
  */
 
-static void marquee_stop(void)
+static void rotate_stop(void)
 {
-	if (!marquee.active) {
+	if (!rotate.active) {
 		return;
 	}
-	marquee.active = false;
-	k_work_cancel_delayable(&marquee.work);
-	led_hw_set(marquee.current, false);
-	led_sm[marquee.current].is_on = false;
+	rotate.active = false;
+	k_work_cancel_delayable(&rotate.work);
+	led_hw_set(rotate.current, false);
+	led_sm[rotate.current].is_on = false;
 }
 
 /* Cancel all per-LED effect timers without changing SMF state. */
@@ -513,17 +513,18 @@ static void cancel_all_effect_timers(void)
 
 static void process_led_command(const struct led_msg *msg)
 {
-	if (msg->type == LED_COMMAND_MARQUEE) {
+	if (msg->type == LED_COMMAND_ROTATE) {
 		cancel_all_effect_timers();
-		marquee.period_ms =
-			msg->period_ms > 0 ? msg->period_ms : CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS;
-		marquee.current = 0;
-		marquee.active = true;
+		rotate.period_ms =
+			msg->period_ms > 0 ? msg->period_ms : CONFIG_ZEGO_LED_ROTATE_PERIOD_MS;
+		rotate.current = 0;
+		rotate.active = true;
 		led_hw_set(0, true);
 		led_sm[0].is_on = true;
-		publish_state(0, true, LED_COMMAND_MARQUEE);
-		k_work_schedule(&marquee.work, K_MSEC(marquee.period_ms));
-		LOG_INF("Marquee started (period %u ms)", (unsigned)marquee.period_ms);
+		publish_state(0, true, LED_COMMAND_ROTATE);
+		k_work_schedule(&rotate.work, K_MSEC(rotate.period_ms));
+		LOG_INF("Rotate started (period %u ms, %d LEDs)", (unsigned)rotate.period_ms,
+			ROTATE_NUM_LEDS);
 		return;
 	}
 
@@ -532,8 +533,8 @@ static void process_led_command(const struct led_msg *msg)
 		return;
 	}
 
-	if (marquee.active) {
-		marquee_stop();
+	if (rotate.active) {
+		rotate_stop();
 	}
 
 	struct led_sm_object *sm = &led_sm[msg->led_number];
@@ -554,7 +555,7 @@ static void process_led_command(const struct led_msg *msg)
  * The zbus listener runs synchronously in the publisher's thread (which may
  * be the net_mgmt thread or any other Zephyr thread).  If it called
  * k_work_cancel_delayable directly, it would race with the effect_work /
- * marquee.work callbacks on the system workqueue, corrupting the kernel
+ * rotate.work callbacks on the system workqueue, corrupting the kernel
  * timeout dlist.
  *
  * Instead: listener enqueues to led_cmd_queue (non-blocking, drops if full)
@@ -563,8 +564,7 @@ static void process_led_command(const struct led_msg *msg)
  * ============================================================================
  */
 
-K_MSGQ_DEFINE(led_cmd_queue, sizeof(struct led_msg),
-		     CONFIG_ZEGO_LED_CMD_QUEUE_DEPTH, 4);
+K_MSGQ_DEFINE(led_cmd_queue, sizeof(struct led_msg), CONFIG_ZEGO_LED_CMD_QUEUE_DEPTH, 4);
 
 static void led_cmd_work_fn(struct k_work *work)
 {
@@ -639,13 +639,12 @@ static int led_module_init(void)
 		smf_set_initial(SMF_CTX(&led_sm[i]), &led_states[LED_S_OFF]);
 	}
 
-	k_work_init_delayable(&marquee.work, marquee_work_fn);
-	marquee.active = false;
-	marquee.current = 0;
+	k_work_init_delayable(&rotate.work, rotate_work_fn);
+	rotate.active = false;
+	rotate.current = 0;
 
 	LOG_INF("zego_led initialized");
 	return 0;
 }
 
 SYS_INIT(led_module_init, APPLICATION, CONFIG_ZEGO_LED_INIT_PRIORITY);
-

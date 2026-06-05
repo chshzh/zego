@@ -27,7 +27,7 @@
  *       // s->command tells you what caused the change:
  *       //   LED_COMMAND_ON / OFF / TOGGLE  — static state change; s->is_on is the new state.
  *       //   LED_COMMAND_BLINK / BREATHE    — effect started; no per-toggle updates follow.
- *       //   LED_COMMAND_MARQUEE            — marquee started; s->led_number = first lit LED.
+ *       //   LED_COMMAND_ROTATE            — rotate started; s->led_number = first lit LED.
  *   }
  *   ZBUS_LISTENER_DEFINE(my_state_lst, my_state_listener);
  *   ZBUS_CHAN_ADD_OBS(LED_STATE_CHAN, my_state_lst, 0);
@@ -35,7 +35,7 @@
  *
  * State-channel publish policy:
  *  - Static commands (ON / OFF / TOGGLE): one publish per command.
- *  - Effect commands (BLINK / BREATHE / MARQUEE): one publish when the effect
+ *  - Effect commands (BLINK / BREATHE / ROTATE): one publish when the effect
  *    starts; no per-toggle publishes during execution.  When an effect is
  *    replaced by a static command, the static command generates its own publish.
  */
@@ -59,7 +59,7 @@ enum led_msg_type {
 	LED_COMMAND_TOGGLE,  /**< Toggle LED state. */
 	LED_COMMAND_BLINK,   /**< Blink: equal on/off at period_ms each. */
 	LED_COMMAND_BREATHE, /**< Linear fade: ramps from 0% to 100% brightness over period_ms, then 100% back to 0% over period_ms. Full cycle = 2 × period_ms. */
-	LED_COMMAND_MARQUEE, /**< Cycle all LEDs in sequence at period_ms per step. led_number ignored. */
+	LED_COMMAND_ROTATE, /**< Cycle all LEDs in sequence at period_ms per step. led_number ignored. */
 };
 
 /**
@@ -69,7 +69,7 @@ enum led_msg_type {
  */
 struct led_msg {
 	enum led_msg_type type;
-	uint8_t led_number;  /**< 0-based LED index. Ignored for LED_COMMAND_MARQUEE. */
+	uint8_t led_number;  /**< 0-based LED index. Ignored for LED_COMMAND_ROTATE. */
 	uint16_t period_ms;  /**< Effect period in ms. 0 = use Kconfig default. */
 };
 
@@ -77,11 +77,11 @@ struct led_msg {
  * @brief LED state notification, published on LED_STATE_CHAN.
  *
  * Published once when a command takes effect.  During blink, breathe, or
- * marquee effects the channel is silent — only the effect-start publish is
+ * rotate effects the channel is silent — only the effect-start publish is
  * sent (see module-level docstring for the full policy).
  */
 struct led_state_msg {
-	uint8_t led_number;        /**< 0-based LED index (for MARQUEE: first lit LED). */
+	uint8_t led_number;        /**< 0-based LED index (for ROTATE: first lit LED). */
 	bool is_on;                /**< New state: true = on/effect running, false = off. */
 	enum led_msg_type command; /**< Command that triggered this notification. */
 };

@@ -36,8 +36,8 @@ static const char *cmd_name(enum led_msg_type cmd)
 		return "BLINK";
 	case LED_COMMAND_BREATHE:
 		return "BREATHE";
-	case LED_COMMAND_MARQUEE:
-		return "MARQUEE";
+	case LED_COMMAND_ROTATE:
+		return "ROTATE";
 	default:
 		return "?";
 	}
@@ -121,11 +121,11 @@ static void step_breathe(void)
 	k_sleep(K_MSEC(300));
 }
 
-static void step_marquee(void)
+static void step_rotate(void)
 {
-	LOG_INF("=== T5: MARQUEE -- all LEDs, %d ms/step ===", CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS);
-	led_cmd(0, LED_COMMAND_MARQUEE, 0);
-	k_sleep(K_MSEC((uint32_t)CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS * CONFIG_ZEGO_LED_NUM_LEDS * 3));
+	LOG_INF("=== T5: ROTATE -- all LEDs, %d ms/step ===", CONFIG_ZEGO_LED_ROTATE_PERIOD_MS);
+	led_cmd(0, LED_COMMAND_ROTATE, 0);
+	k_sleep(K_MSEC((uint32_t)CONFIG_ZEGO_LED_ROTATE_PERIOD_MS * CONFIG_ZEGO_LED_NUM_LEDS * 3));
 	all_off();
 	k_sleep(K_MSEC(300));
 }
@@ -174,8 +174,8 @@ int main(void)
 	LOG_INF("  Blink half-period : %d ms", CONFIG_ZEGO_LED_BLINK_PERIOD_MS);
 	LOG_INF("  Breathe period    : %d ms/dir  pwm=%d ms/step",
 		CONFIG_ZEGO_LED_BREATHE_PERIOD_MS, CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS);
-	LOG_INF("  Marquee step      : %d ms  (MARQUEE_PERIOD_MS)",
-		CONFIG_ZEGO_LED_MARQUEE_PERIOD_MS);
+	LOG_INF("  Marquee step      : %d ms  (ROTATE_PERIOD_MS)",
+		CONFIG_ZEGO_LED_ROTATE_PERIOD_MS);
 #if defined(CONFIG_ZEGO_LED_USE_PWM)
 	LOG_INF("  HW PWM breathe    : enabled  (T6 will run)");
 #else
@@ -191,7 +191,7 @@ int main(void)
 		step_toggle();
 		step_blink();
 		step_breathe();
-		step_marquee();
+		step_rotate();
 #if defined(CONFIG_ZEGO_LED_USE_PWM)
 		step_breathe_hw_pwm();
 #endif
