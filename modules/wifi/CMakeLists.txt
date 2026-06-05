@@ -15,6 +15,8 @@ if(CONFIG_ZEGO_WIFI)
         # -----------------------------------------------------------------------
         if(DEFINED APP_VERSION_STRING)
                 zephyr_compile_definitions(APP_VERSION_STRING="${APP_VERSION_STRING}")
+        elseif(DEFINED CONFIG_MEMFAULT_NCS_FW_VERSION AND NOT CONFIG_MEMFAULT_NCS_FW_VERSION STREQUAL "")
+                zephyr_compile_definitions(APP_VERSION_STRING="${CONFIG_MEMFAULT_NCS_FW_VERSION}")
         else()
                 # Read NCS version from the application's west.yml
                 file(STRINGS ${APPLICATION_SOURCE_DIR}/west.yml _WEST_NCS_LINE
