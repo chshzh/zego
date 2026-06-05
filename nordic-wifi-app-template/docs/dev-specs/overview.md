@@ -5,10 +5,10 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-04-22-00 |
-| PRD Version | 2026-06-04-22-00 |
+| Version | 2026-06-05-09-38 |
+| PRD Version | 2026-06-05-09-38 |
 | NCS Version | v3.3.0 |
-| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2 |
+| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
 
 ---
@@ -18,7 +18,8 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-04-18-00 | Added UX module spec (ux.md); updated spec index and PRD mapping for FR-104/105/106; noted APP_WIFI_STATE_CHAN in architecture summary |
-| 2026-06-04-22-00 | Updated ux.md and PRD for revised SoftAP LED behavior (MARQUEE/solid ON) |
+| 2026-06-04-22-00 | Updated ux.md and PRD for revised SoftAP LED behavior (ROTATE/solid ON) |
+| 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK target; updated Target Board(s), architecture.md, and ux.md; added board conf + DTS overlay + hci_ipc netcore conf |
 | 2026-06-04-17-09 | Initial overview — template extracted from nordic-wifi-webdash; webserver removed; all four Wi-Fi modes + three STA provisioning paths; architecture.md added |
 
 ---
@@ -41,7 +42,7 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | [zego/network — network-spec.md](https://github.com/chshzh/zego/blob/main/modules/network/docs/network-spec.md) | Wi-Fi event handling, STA/SoftAP/P2P_GO/P2P_CLIENT paths, net event mgmt, `zego_network_on_wifi_connected` weak hook | FR-002–FR-008 |
 | [zego/wifi_ble_prov — wifi-ble-prov-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi_ble_prov/docs/wifi-ble-prov-spec.md) | BLE provisioning (nRF Wi-Fi Provisioner), `WIFI_CHAN` owner, rotating credential reconnect | FR-004 |
 | [zego/button — button-spec.md](https://github.com/chshzh/zego/blob/main/modules/button/docs/button-spec.md) | Gesture detection (click, double-click, long press), `BUTTON_CHAN` | FR-101 |
-| [zego/led — led-spec.md](https://github.com/chshzh/zego/blob/main/modules/led/docs/led-spec.md) | Per-LED state machine (static, blink, breathe, marquee), `LED_CMD_CHAN` | FR-102 |
+| [zego/led — led-spec.md](https://github.com/chshzh/zego/blob/main/modules/led/docs/led-spec.md) | Per-LED state machine (static, blink, breathe, rotate), `LED_CMD_CHAN` | FR-102 |
 | [ux.md](ux.md) | Button 0 gesture map, LED 0 Wi-Fi state machine, `APP_WIFI_STATE_CHAN` definition, BLE prov toggle | FR-104, FR-105, FR-106 |
 
 ---
@@ -57,7 +58,7 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | No application thread | `main()` calls banner then `k_sleep(K_FOREVER)` | All work is event-driven via SYS_INIT modules and zbus callbacks |
 | Application customisation point | Weak-hook overrides in `src/modules/network/net_event_app.c` | Single predictable file to edit; no forking of shared zego modules |
 | STA provisioning | Three parallel options (shell, cred, BLE) | Supports all use cases without requiring build-time choice |
-| BLE prov on nRF7002DK | Disabled (`CONFIG_ZEGO_WIFI_BLE_PROV=n`) | BLE host stack + large app exceeds 1 MB flash; re-enable if flash allows |
+| BLE prov on nRF7002DK / Audio DK | Disabled (`CONFIG_ZEGO_WIFI_BLE_PROV=n`) | BLE host stack + large app exceeds 1 MB flash; re-enable if flash allows |
 | Default mode | P2P_GO | Enables out-of-box demo with no network infrastructure |
 | All modules from zego | No in-tree application modules except `net_event_app.c` and `ux.c` | Template stays minimal; feature modules are shared across all zego apps |
 | `APP_WIFI_STATE_CHAN` | Defined in `net_event_app.c`; declared in `messages.h` | Decouples network events from LED/UX logic without making the UX module depend on `zego/network` internals |

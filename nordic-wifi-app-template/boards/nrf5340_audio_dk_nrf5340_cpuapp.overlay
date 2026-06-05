@@ -1,0 +1,38 @@
+/*
+ * Copyright (c) 2026 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ */
+
+/*
+ * nRF5340 Audio DK + nRF7002EK board overlay.
+ *
+ * The nRF7002EK shield uses UART1 pins for bucken and iovdd-ctrl.  The
+ * gpio_fwd node would forward those pins to the network core, which
+ * conflicts with the shield's usage.  Disable the entire node so the
+ * application core controls the lines directly.
+ */
+&gpio_fwd {
+	status = "disabled";
+};
+
+/*
+ * Pull down the SPI4 (arduino_spi) lines when idle.  Without this the
+ * floating inputs on the nRF7002EK can cause spurious SPI transactions
+ * when the interface is not in use.  Mirrors the identical fix applied
+ * to nRF5340DK in the upstream nrf7002ek shield overlay.
+ */
+&pinctrl {
+	spi4_default: spi4_default {
+		group1 {
+			bias-pull-down;
+		};
+	};
+
+	spi4_sleep: spi4_sleep {
+		group1 {
+			bias-pull-down;
+			low-power-enable;
+		};
+	};
+};

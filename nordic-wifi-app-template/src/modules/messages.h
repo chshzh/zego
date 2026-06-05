@@ -28,7 +28,7 @@
 
 /** @brief Application-level Wi-Fi state used to drive LED 0. */
 enum app_wifi_state {
-	/** Boot / connecting — MARQUEE on LED 0. */
+	/** Boot / connecting — ROTATE on LED 0. */
 	APP_WIFI_STATE_CONNECTING = 0,
 	/** STA or P2P link established (IP assigned / peer joined). */
 	APP_WIFI_STATE_CONNECTED,

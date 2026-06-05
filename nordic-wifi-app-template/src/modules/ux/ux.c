@@ -16,9 +16,9 @@
  *                 save to NVS via settings, reboot.
  *
  * LED 0 state machine driven by APP_WIFI_STATE_CHAN:
- *   CONNECTING  →  MARQUEE  (starts at boot via SYS_INIT)
+ *   CONNECTING  →  ROTATE  (starts at boot via SYS_INIT)
  *   CONNECTED   →  Solid ON
- *   SOFTAP      →  Slow BLINK  (500 ms half-period)
+ *   SOFTAP      →  ROTATE  (same as CONNECTING; AP up, no clients)
  *   ERROR       →  Fast BLINK  (100 ms half-period)
  *   BLE_PROV    →  BREATHE     (double-click toggle, local to this module)
  *
@@ -114,13 +114,13 @@ static void apply_wifi_state_led(enum app_wifi_state state)
 {
 	switch (state) {
 	case APP_WIFI_STATE_CONNECTING:
-		led_set(LED_COMMAND_MARQUEE, 0);
+		led_set(LED_COMMAND_ROTATE, 0);
 		break;
 	case APP_WIFI_STATE_CONNECTED:
 		led_set(LED_COMMAND_ON, 0);
 		break;
 	case APP_WIFI_STATE_SOFTAP:
-		led_set(LED_COMMAND_MARQUEE, 0);
+		led_set(LED_COMMAND_ROTATE, 0);
 		break;
 	case APP_WIFI_STATE_ERROR:
 		led_set(LED_COMMAND_BLINK, 100);
@@ -138,10 +138,10 @@ static bool ble_prov_led_active;
  *
  * led_cmd_listener() (called via zbus_chan_pub) runs synchronously in the
  * caller's thread.  If it runs in the net_mgmt thread it can race with
- * marquee_work_fn (system workqueue) on the kernel timeout dlist, causing a
+ * rotate_work_fn (system workqueue) on the kernel timeout dlist, causing a
  * BUS FAULT in sys_clock_announce.  Submitting the LED command through this
  * work item ensures led_cmd_listener runs on the system workqueue, where it
- * is serialised with marquee_work_fn.
+ * is serialised with rotate_work_fn.
  */
 static enum app_wifi_state pending_wifi_state;
 
@@ -231,7 +231,7 @@ static void wifi_state_listener_cb(const struct zbus_channel *chan)
 	 * Defer the LED command to the system workqueue (see app_ux_led_work_fn).
 	 * Do not call apply_wifi_state_led() directly here — it would invoke
 	 * led_cmd_listener synchronously in this thread (net_mgmt event thread),
-	 * which races with marquee_work_fn on the kernel timeout dlist.
+	 * which races with rotate_work_fn on the kernel timeout dlist.
 	 */
 	pending_wifi_state = msg->state;
 	k_work_submit(&app_ux_led_work);
@@ -240,13 +240,13 @@ static void wifi_state_listener_cb(const struct zbus_channel *chan)
 ZBUS_LISTENER_DEFINE(app_wifi_state_listener, wifi_state_listener_cb);
 ZBUS_CHAN_ADD_OBS(APP_WIFI_STATE_CHAN, app_wifi_state_listener, 0);
 
-/* ── SYS_INIT: start MARQUEE at boot ───────────────────────────────────── */
+/* ── SYS_INIT: start ROTATE at boot ───────────────────────────────────── */
 
 static int app_ux_init(void)
 {
 	/* Start boot animation.  led_module_init (priority 91) has already run
 	 * because this function runs at a higher priority number (>91). */
-	led_set(LED_COMMAND_MARQUEE, 0);
+	led_set(LED_COMMAND_ROTATE, 0);
 
 	/* Unblock app_ux_led_work_fn — LED module is now fully initialised. */
 	atomic_set(&app_ux_ready, 1);

@@ -5,10 +5,10 @@
 | Field | Value |
 |---|---|
 | Module | app_ux |
-| Version | 2026-06-04-22-00 |
-| PRD Version | 2026-06-04-22-00 |
+| Version | 2026-06-05-09-38 |
+| PRD Version | 2026-06-05-09-38 |
 | NCS Version | v3.3.0 |
-| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2 |
+| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
 
 ---
@@ -18,7 +18,8 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-04-18-00 | Initial spec — Button 0 gestures, LED 0 Wi-Fi state feedback |
-| 2026-06-04-22-00 | SoftAP LED behavior: MARQUEE when no clients (was slow BLINK); solid ON when client connected; MARQUEE again when last client disconnects. Added `zego_network_on_softap_sta_disconnected()` hook. Updated APP_WIFI_STATE_CHAN table and state machine diagram. |
+| 2026-06-04-22-00 | SoftAP LED behavior: ROTATE when no clients (was slow BLINK); solid ON when client connected; ROTATE again when last client disconnects. Added `zego_network_on_softap_sta_disconnected()` hook. Updated APP_WIFI_STATE_CHAN table and state machine diagram. |
+| 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK: Button 0 = VOL-; ROTATE chases RGB1 only (3 LEDs); BLE prov double-click disabled (1 MB flash); board differences note added |
 
 ---
 
@@ -51,6 +52,8 @@ Enable with `CONFIG_APP_UX_MODULE=y`.
 
 > **BLE prov double-click**: The BREATHE effect is driven locally within the UX module by toggling `ble_prov_led_active`. It does **not** start or stop BLE advertising — that requires a future `zego_wifi_ble_prov_advertise(bool)` API in `zego/modules/wifi_ble_prov`.
 
+> **nRF5340 Audio DK**: Button 0 maps to **VOL-** (index 0). All three gestures work identically. The double-click BLE prov toggle is compiled in but has no visual effect because `CONFIG_ZEGO_WIFI_BLE_PROV=n` on this board.
+
 ---
 
 ## 4. LED 0 State Machine
@@ -61,15 +64,15 @@ LED 0 is driven by `APP_WIFI_STATE_CHAN` (published by `net_event_app.c`) and by
 Boot
  │
  ▼
-[MARQUEE] ◄── APP_WIFI_STATE_CONNECTING published (or at SYS_INIT)
+[ROTATE] ◄── APP_WIFI_STATE_CONNECTING published (or at SYS_INIT)
  │
  ├──► APP_WIFI_STATE_CONNECTED  ──► [Solid ON]
  │
- ├──► APP_WIFI_STATE_SOFTAP     ──► [MARQUEE]  (AP up, no clients)
+ ├──► APP_WIFI_STATE_SOFTAP     ──► [ROTATE]  (AP up, no clients)
  │       │
  │       └── APP_WIFI_STATE_CONNECTED ──► [Solid ON]  (client joined)
  │               │
- │               └── APP_WIFI_STATE_SOFTAP ──► [MARQUEE]  (last client left)
+ │               └── APP_WIFI_STATE_SOFTAP ──► [ROTATE]  (last client left)
  │
  └──► APP_WIFI_STATE_ERROR      ──► [Fast BLINK 100 ms]
 
@@ -80,12 +83,14 @@ Double-click (nRF54LM20DK, CONFIG_ZEGO_WIFI_BLE_PROV=y):
 
 | `app_wifi_state` | LED 0 effect | `period_ms` |
 |------------------|-------------|-------------|
-| `CONNECTING` (boot) | MARQUEE | Kconfig default |
+| `CONNECTING` (boot) | ROTATE | Kconfig default |
 | `CONNECTED` (STA/P2P) | Solid ON | — |
-| `SOFTAP` (AP up, no clients) | MARQUEE | Kconfig default |
+| `SOFTAP` (AP up, no clients) | ROTATE | Kconfig default |
 | `CONNECTED` (SoftAP client joined) | Solid ON | — |
 | `ERROR` (disconnected) | BLINK | 100 ms |
 | BLE prov active (local toggle) | BREATHE | Kconfig default |
+
+> **ROTATE LED count**: On nRF7002DK (2 LEDs) ROTATE chases across both LEDs. On nRF54LM20DK (4 LEDs) it chases across all four. On nRF5340 Audio DK (9 LEDs total) ROTATE chases across **RGB1 only (indices 0–2)**, controlled by `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS=3`; RGB2 and mono LEDs remain off during the effect.
 
 ---
 
@@ -99,9 +104,9 @@ Defined in `src/modules/network/net_event_app.c`. Declared in `src/modules/messa
 | `APP_WIFI_STATE_SOFTAP` | `zego_network_on_softap_ready()` (AP enabled) or `zego_network_on_softap_sta_disconnected()` with `remaining_clients == 0` |
 | `APP_WIFI_STATE_ERROR` | `zego_network_on_wifi_disconnected()` |
 
-> `APP_WIFI_STATE_CONNECTING` is not published explicitly — the UX module's `SYS_INIT` starts MARQUEE at boot unconditionally.
+> `APP_WIFI_STATE_CONNECTING` is not published explicitly — the UX module's `SYS_INIT` starts ROTATE at boot unconditionally.
 
-> In SoftAP mode the state machine follows: MARQUEE (AP enabled, no clients) → Solid ON (client joins) → MARQUEE (last client leaves). The `zego_network_on_softap_sta_disconnected(remaining_clients)` hook triggers the revert to SOFTAP state when `remaining_clients == 0`.
+> In SoftAP mode the state machine follows: ROTATE (AP enabled, no clients) → Solid ON (client joins) → ROTATE (last client leaves). The `zego_network_on_softap_sta_disconnected(remaining_clients)` hook triggers the revert to SOFTAP state when `remaining_clients == 0`.
 
 ---
 

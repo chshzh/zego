@@ -5,10 +5,10 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-04-17-09 |
-| PRD Version | 2026-06-04-17-09 |
+| Version | 2026-06-05-09-38 |
+| PRD Version | 2026-06-05-09-38 |
 | NCS Version | v3.3.0 |
-| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2 |
+| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
 
 ---
@@ -18,6 +18,7 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-04-17-09 | Initial spec |
+| 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK to Board Differences table; updated BLE prov note |
 
 ---
 
@@ -142,23 +143,24 @@ All three paths are enabled by default; they are independent and coexist in the 
 | Saved credentials | `CONFIG_WIFI_CREDENTIALS=y` | `wifi cred add <SSID> WPA2-PSK <pass> -k 1` — stored in flash, auto-reconnect on every boot |
 | BLE provisioning | `CONFIG_ZEGO_WIFI_BLE_PROV=y` | nRF Wi-Fi Provisioner app pushes credentials over BLE; stored in flash via settings subsystem |
 
-BLE provisioning is **disabled on nRF7002DK** (`boards/nrf7002dk_nrf5340_cpuapp.conf`) because the
+BLE provisioning is **disabled on nRF7002DK and nRF5340 Audio DK** (`boards/*_nrf5340_cpuapp.conf`) because the
 combined flash of BLE host stack + P2P snippet + app exceeds the 1 MB limit. Re-enable by removing
-`CONFIG_ZEGO_WIFI_BLE_PROV=n` from that board conf if flash headroom allows.
+`CONFIG_ZEGO_WIFI_BLE_PROV=n` from the relevant board conf if flash headroom allows.
 
 ---
 
 ## 7. Board Differences
 
-| Feature | nRF7002DK | nRF54LM20DK + nRF7002EB2 |
-|---|---|---|
-| Flash | 1 MB | 2 MB |
-| RAM | 448 KB (app core) | 512 KB |
-| Buttons | 2 (SW0, SW1) | 3 (BUTTON0–2) |
-| LEDs | 2 | 4 |
-| BLE provisioning | Disabled (flash) | Enabled |
-| Network core | nRF5340 netcore runs `hci_ipc` for BLE | Single-core; `hci_ipc` build is harmless no-op |
-| Build shield | — | `-DSHIELD=nrf7002eb2` |
+| Feature | nRF7002DK | nRF54LM20DK + nRF7002EB2 | nRF5340 Audio DK + nRF7002EK |
+|---|---|---|---|
+| Flash | 1 MB | 2 MB | 1 MB |
+| RAM | 448 KB (app core) | 512 KB | 512 KB (app core) |
+| Buttons | 2 (SW0, SW1) | 3 (BUTTON0–2) | 5 (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5) |
+| LEDs | 2 | 4 | 9 (RGB1 + RGB2 + 3 mono; ROTATE on RGB1 only) |
+| BLE provisioning | Disabled (flash) | Enabled | Disabled (flash) |
+| Network core | nRF5340 netcore runs `hci_ipc` for BLE | Single-core; `hci_ipc` build is harmless no-op | nRF5340 netcore runs `hci_ipc` for BLE |
+| Build shield | — | `-DSHIELD=nrf7002eb2` | `-DSHIELD=nrf7002ek` |
+| DTS overlay | — | — | Required: disables `gpio_fwd`, adds SPI4 `bias-pull-down` |
 
 ---
 

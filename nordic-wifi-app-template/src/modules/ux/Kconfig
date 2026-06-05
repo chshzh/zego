@@ -16,7 +16,7 @@ config APP_UX_MODULE
 	                    save to NVS, reboot
 
 	  LED 0 Wi-Fi state:
-	    Boot / connecting → MARQUEE
+	    Boot / connecting → ROTATE
 	    STA/P2P connected → Solid ON
 	    SoftAP active     → Slow BLINK (500 ms half-period)
 	    BLE prov active   → BREATHE (triggered by double-click)
@@ -30,6 +30,6 @@ config APP_UX_INIT_PRIORITY
 	help
 	  Must be higher (later) than ZEGO_LED_INIT_PRIORITY (91) and
 	  ZEGO_BUTTON_INIT_PRIORITY (90) so LED and button are ready before
-	  the UX module starts MARQUEE and registers observers.
+	  the UX module starts ROTATE and registers observers.
 
 endif # APP_UX_MODULE

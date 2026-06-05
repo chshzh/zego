@@ -23,6 +23,7 @@ Out of the box it connects your device to Wi-Fi in any of four modes and fires a
 |---|---|---|
 | nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | Disabled (flash full) |
 | nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-DSHIELD=nrf7002eb2` | Enabled |
+| nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-DSHIELD=nrf7002ek` | Disabled (flash full) |
 
 ---
 
@@ -44,6 +45,13 @@ west build -p -b nrf54lm20dk/nrf54lm20a/cpuapp -d build_nrf54lm20dk -- -DSHIELD=
 # nRF54LM20DK + nRF7002EB2 — all four modes including P2P
 west build -p -b nrf54lm20dk/nrf54lm20a/cpuapp -d build_nrf54lm20dk -- \
   -Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002eb2
+
+# nRF5340 Audio DK + nRF7002EK — STA + SoftAP (no P2P)
+west build -p -b nrf5340_audio_dk/nrf5340/cpuapp -d build_nrf5340_audio_dk -- -DSHIELD=nrf7002ek
+
+# nRF5340 Audio DK + nRF7002EK — all four modes including P2P
+west build -p -b nrf5340_audio_dk/nrf5340/cpuapp -d build_nrf5340_audio_dk -- \
+  -Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002ek
 ```
 
 > The image-scoped `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p` applies the snippet only to the app
@@ -62,15 +70,17 @@ west build -p -b nrf54lm20dk/nrf54lm20a/cpuapp -d build_nrf54lm20dk -- \
 # First flash (erases NVS — re-enter Wi-Fi credentials after)
 west flash -d build_nrf7002dk --erase          # nRF7002DK
 west flash -d build_nrf54lm20dk --recover      # nRF54LM20DK
+west flash -d build_nrf5340_audio_dk --erase   # nRF5340 Audio DK
 
 # Subsequent flashes (preserves NVS / saved credentials)
 west flash -d build_nrf7002dk
 west flash -d build_nrf54lm20dk
+west flash -d build_nrf5340_audio_dk
 ```
 
 ### 3. Connect via shell (STA mode)
 
-Open a serial terminal at **115200 baud** (nRF7002DK: VCOM1; nRF54LM20DK: VCOM0).
+Open a serial terminal at **115200 baud** (nRF7002DK: VCOM1; nRF54LM20DK / nRF5340 Audio DK: VCOM0).
 
 ```
 uart:~$ wifi connect -s MyNetwork -p MyPassword -k 1

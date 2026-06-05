@@ -5,9 +5,9 @@
 | Field | Value |
 |---|---|
 | Product Name | Nordic Wi-Fi App Template |
-| Version | 2026-06-04-22-00 |
+| Version | 2026-06-05-09-38 |
 | NCS Version | v3.3.0 |
-| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2 |
+| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2, nRF5340 Audio DK + nRF7002EK |
 | Status | Draft |
 
 ---
@@ -17,8 +17,9 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-04-17-09 | Initial PRD — template extracted from nordic-wifi-webdash; webserver removed; all four Wi-Fi modes + all three STA provisioning methods supported |
-| 2026-06-04-18-00 | Added UX behaviors: Button 0 gestures (long-press mode cycle, double-click BLE prov toggle, single-click status), LED 0 Wi-Fi state feedback (marquee on boot/connecting, solid on connected, slow blink SoftAP, breathe BLE prov, fast blink error) |
-| 2026-06-04-22-00 | Updated LED 0 SoftAP behavior: MARQUEE when AP is up with no clients connected (was slow BLINK); solid ON when a client connects; back to MARQUEE when last client disconnects |
+| 2026-06-04-18-00 | Added UX behaviors: Button 0 gestures (long-press mode cycle, double-click BLE prov toggle, single-click status), LED 0 Wi-Fi state feedback (rotate on boot/connecting, solid on connected, slow blink SoftAP, breathe BLE prov, fast blink error) |
+| 2026-06-04-22-00 | Updated LED 0 SoftAP behavior: ROTATE when AP is up with no clients connected (was slow BLINK); solid ON when a client connects; back to ROTATE when last client disconnects |
+| 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK as a target board: 5 buttons (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5), 9 LEDs (ROTATE over RGB1 only); BLE prov disabled (1 MB flash); DTS overlay required for nRF7002EK SPI pinout |
 
 ---
 
@@ -47,6 +48,7 @@ Starting a new nRF7x Wi-Fi project from a blank Zephyr sample requires setting u
 |---|---|
 | Clean build — nRF7002DK | `west build -p -b nrf7002dk/nrf5340/cpuapp -d build_nrf7002dk -- -Dnordic-wifi-app-template_SNIPPET=wifi-p2p` succeeds |
 | Clean build — nRF54LM20DK | `west build -p -b nrf54lm20dk/nrf54lm20a/cpuapp -d build_nrf54lm20dk -- -Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002eb2` succeeds |
+| Clean build — nRF5340 Audio DK | `west build -p -b nrf5340_audio_dk/nrf5340/cpuapp -d build_nrf5340_audio_dk -- -Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002ek` succeeds |
 | Startup banner printed | All four modes display correct connection instructions at boot |
 | STA via shell | `wifi connect -s <SSID> -p <pass> -k 1` connects the device |
 | STA via BLE prov (nRF54LM20DK) | nRF Wi-Fi Provisioner app successfully provisions credentials |
@@ -75,6 +77,7 @@ Starting a new nRF7x Wi-Fi project from a blank Zephyr sample requires setting u
 |---|---|---|
 | nRF7002DK | 2 (SW0, SW1) | 2 |
 | nRF54LM20DK + nRF7002EB2 | 3 (BUTTON0–2) | 4 |
+| nRF5340 Audio DK + nRF7002EK | 5 (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5) | 9 (RGB1 idx 0–2, RGB2 idx 3–5, mono idx 6–8) |
 
 All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` commands.
 
@@ -83,21 +86,21 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 | Gesture | Action | Boards |
 |---------|--------|--------|
 | Single click | Print current Wi-Fi state (mode, IP, SSID) to UART shell | both |
-| Double-click | Toggle BLE provisioning mode on/off | nRF54LM20DK only (`CONFIG_ZEGO_WIFI_BLE_PROV=y`) |
+| Double-click | Toggle BLE provisioning mode on/off | nRF54LM20DK only (`CONFIG_ZEGO_WIFI_BLE_PROV=y`); Button 0 = VOL- on Audio DK |
 | Long press (≥ 3 s) | Cycle Wi-Fi mode STA → SoftAP → P2P_GO → STA; save to NVS; reboot | both |
 
 #### LED 0 — Wi-Fi state feedback
 
 | State | Effect | Description |
 |-------|--------|-------------|
-| Boot / connecting | MARQUEE (all LEDs) | Starts immediately at boot; continues until a connection is established |
+| Boot / connecting | ROTATE (all LEDs) | Starts immediately at boot; continues until a connection is established |
 | Connected (STA / P2P) | Solid ON | Clear "all good" |
-| SoftAP active, no clients | MARQUEE (all LEDs) | AP is up, waiting for a client to connect |
+| SoftAP active, no clients | ROTATE (all LEDs) | AP is up, waiting for a client to connect |
 | SoftAP client connected | Solid ON | A client device is connected to the AP |
 | BLE provisioning active | BREATHE | Matches BLE convention |
 | Disconnected / error | Fast BLINK (100 ms half-period) | Attention needed |
 
-> On nRF7002DK (2 LEDs) the MARQUEE effect chases across both LEDs. On nRF54LM20DK (4 LEDs) it chases across all four.
+> On nRF7002DK (2 LEDs) the ROTATE effect chases across both LEDs. On nRF54LM20DK (4 LEDs) it chases across all four. On nRF5340 Audio DK (9 LEDs) it chases across RGB1 only (indices 0–2), leaving RGB2 and mono LEDs off.
 
 ### 2.3 Application Customisation Point
 
@@ -134,7 +137,7 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 | FR-102 | developer | control LEDs via `LED_CMD_CHAN` | I can add LED feedback immediately | `LED_CMD_CHAN` message changes LED state |
 | FR-103 | developer | see heap usage logged periodically | I detect memory leaks early | Heap high-water mark logged every N minutes |
 | FR-104 | evaluator | cycle Wi-Fi mode with a long button press | I can switch modes without a UART shell | Button 0 held ≥ 3 s → next mode saved to NVS → device reboots into new mode |
-| FR-105 | evaluator | see Wi-Fi connection state on LED 0 | I can tell at a glance whether the device is connected | MARQUEE while connecting → solid ON when connected (STA/P2P) / MARQUEE when SoftAP up with no clients / solid ON when SoftAP client connected / breathe in BLE prov / fast blink on error |
+| FR-105 | evaluator | see Wi-Fi connection state on LED 0 | I can tell at a glance whether the device is connected | ROTATE while connecting → solid ON when connected (STA/P2P) / ROTATE when SoftAP up with no clients / solid ON when SoftAP client connected / breathe in BLE prov / fast blink on error |
 | FR-106 | evaluator | toggle BLE provisioning with a double-click (nRF54LM20DK) | I can enter/exit provisioning mode without the shell | Double-click on Button 0 toggles BLE provisioning advertising |
 
 ---
@@ -145,8 +148,8 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 |---|---|
 | Build | No compiler errors or warnings in template source files |
 | Security | BLE provisioning credentials stored only in flash (Zephyr settings subsystem), never in source control |
-| Portability | Template works unchanged on both nRF7002DK and nRF54LM20DK + nRF7002EB2 (board `.conf` files handle differences) |
-| Flash budget | nRF7002DK build fits in 1 MB (BLE prov disabled); nRF54LM20DK build fits in 2 MB (BLE prov enabled) |
+| Portability | Template works on all three targets (nRF7002DK, nRF54LM20DK + nRF7002EB2, nRF5340 Audio DK + nRF7002EK); board `.conf` and `.overlay` files handle differences |
+| Flash budget | nRF7002DK and nRF5340 Audio DK builds fit in 1 MB (BLE prov disabled); nRF54LM20DK build fits in 2 MB (BLE prov enabled) |
 
 ---
 
@@ -156,3 +159,4 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 |---|---|---|---|
 | nRF7002DK | `nrf7002dk/nrf5340/cpuapp` + `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p` | Disabled (1 MB flash too tight) | 2 buttons, 2 LEDs |
 | nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002eb2` | Enabled | 3 buttons, 4 LEDs |
+| nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002ek` | Disabled (1 MB flash too tight) | 5 buttons (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5), 9 LEDs; ROTATE on RGB1 only |
