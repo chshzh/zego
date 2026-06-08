@@ -6,7 +6,10 @@
 if(CONFIG_ZEGO_WIFI)
         get_filename_component(_BANNER_APP_NAME ${APPLICATION_SOURCE_DIR} NAME)
         zephyr_library()
-        zephyr_library_sources(src/wifi.c src/wifi_mode_selector.c)
+        zephyr_library_sources(src/wifi.c)
+        if(CONFIG_ZEGO_WIFI_MODE_SELECTOR)
+                zephyr_library_sources(src/wifi_mode_selector.c)
+        endif()
         zephyr_include_directories(src)
         zephyr_library_compile_definitions(ZEGO_BANNER_APP_NAME="${_BANNER_APP_NAME}")
 

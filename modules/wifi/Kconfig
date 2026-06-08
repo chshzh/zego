@@ -6,21 +6,38 @@
 config ZEGO_WIFI
         bool "Zego Wi-Fi module (mode selector + banner)"
         depends on NETWORKING && ZBUS
-        select SETTINGS
-        select FLASH
-        select FLASH_MAP
-        select FLASH_PAGE_LAYOUT
-        select REBOOT
         help
           Provides:
             - Startup banner: app name, version, PRD, specs, build date, board, MAC.
-            - Wi-Fi mode selector: NVS-persisted mode + 'app_wifi_mode' shell command.
+            - WIFI_MODE_CHAN: zbus channel published at SYS_INIT APPLICATION priority 0.
+            - zego_wifi_get_mode(): returns the active Wi-Fi mode.
             - zego_banner_wifi_info(): mode string + per-mode connection instructions.
             - zego_banner_app_extra(): Kconfig-conditional compiled-module list.
             - zego_wifi_print_banner(): called from each app's main().
-	  Publishes WIFI_MODE_CHAN at SYS_INIT APPLICATION priority 0.
+          When NRF70_AP_MODE or NRF70_P2P_MODE is enabled, ZEGO_WIFI_MODE_SELECTOR
+          is auto-enabled to persist the active mode in NVS.  STA-only builds skip
+          NVS entirely — WIFI_MODE_CHAN is published as STA directly from wifi.c.
+
+config ZEGO_WIFI_MODE_SELECTOR
+	bool
+	depends on ZEGO_WIFI
+	default y if NRF70_AP_MODE || NRF70_P2P_MODE
+	select SETTINGS
+	select FLASH
+	select FLASH_MAP
+	select FLASH_PAGE_LAYOUT
+	select REBOOT
+	help
+	  Automatically enabled when more than one Wi-Fi mode is available
+	  (NRF70_AP_MODE or NRF70_P2P_MODE).  Stores the active mode as a
+	  uint8_t in NVS under "app/app_wifi_mode" and registers the
+	  'app_wifi_mode' shell command.  Changing the enum order in wifi.h
+	  without erasing NVS will corrupt the stored value.
+	  When disabled (STA-only builds) no NVS or settings access occurs.
 
 if ZEGO_WIFI
+
+if ZEGO_WIFI_MODE_SELECTOR
 
 choice ZEGO_WIFI_DEFAULT_MODE
 	prompt "Default Wi-Fi mode on fresh flash (no NVS key present)"
@@ -46,6 +63,8 @@ config ZEGO_WIFI_DEFAULT_MODE_P2P_CLIENT
 	depends on NRF70_P2P_MODE
 
 endchoice
+
+endif # ZEGO_WIFI_MODE_SELECTOR
 
 module = ZEGO_WIFI
 module-str = zego_wifi

@@ -32,14 +32,6 @@
 LOG_MODULE_REGISTER(wifi_mode_selector, CONFIG_ZEGO_WIFI_LOG_LEVEL);
 
 /* ============================================================================
- * ZBUS CHANNEL DEFINITION
- * ============================================================================
- */
-
-ZBUS_CHAN_DEFINE(WIFI_MODE_CHAN, struct wifi_mode_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY,
-		 ZBUS_MSG_INIT(0));
-
-/* ============================================================================
  * MODULE STATE
  * ============================================================================
  */
