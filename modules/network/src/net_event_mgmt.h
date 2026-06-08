@@ -11,16 +11,6 @@
 #include <wifi.h> /* enum zego_wifi_mode */
 
 /**
- * @brief Wait for the Wi-Fi interface to be up and WPA supplicant ready.
- *
- * Blocks until NET_EVENT_SUPPLICANT_READY has fired.
- *
- * @param timeout Maximum time to wait (K_FOREVER to wait indefinitely).
- * @return 0 on success, negative error code on timeout.
- */
-int network_wait_for_wpa_supp_ready(k_timeout_t timeout);
-
-/**
  * @brief Wait for the first SoftAP / P2P GO station to connect.
  *
  * @param timeout Maximum time to wait.

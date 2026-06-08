@@ -14,8 +14,9 @@
  *
  *   Boot sequence
  *   ─────────────
- *   network_module_init() waits for WPA supplicant ready (up to 30 s), then
- *   dispatches to the appropriate Wi-Fi mode startup:
+ *   network_module_init() registers event handlers and returns immediately.
+ *   When NET_EVENT_SUPPLICANT_READY fires, start_mode_work is submitted to
+ *   the system workqueue, which then dispatches to the mode startup:
  *     SoftAP      → wifi_run_softap_mode()
  *     STA         → NET_REQUEST_WIFI_CONNECT_STORED
  *     P2P_GO      → wifi_run_p2p_go_mode()
@@ -105,7 +106,6 @@ static int softap_station_count(void)
  * ============================================================================
  */
 
-static K_SEM_DEFINE(wpa_supp_ready_sem, 0, 1);    /* NET_EVENT_SUPPLICANT_READY */
 static K_SEM_DEFINE(station_connected_sem, 0, 1); /* SoftAP: first STA joined  */
 
 /* ============================================================================
@@ -121,6 +121,15 @@ static struct net_mgmt_event_callback softap_event_cb;
 #endif
 static struct net_mgmt_event_callback ipv4_event_cb;
 static struct net_mgmt_event_callback l4_event_cb;
+
+/* Work item: dispatches mode startup after WPA supplicant is ready.
+ * Runs on the system workqueue (CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE), which is
+ * sized for the deep WPA ctrl-socket chain (wpa_cli_cmd → z_wpa_ctrl_request
+ * → zvfs_select). Never call NET_REQUEST_WIFI_CONNECT_STORED directly from
+ * a SYS_INIT function — the main-thread stack is too small for that path.
+ */
+static void start_mode_work_handler(struct k_work *work);
+static K_WORK_DEFINE(start_mode_work, start_mode_work_handler);
 
 /* ============================================================================
  * HELPER UTILITIES
@@ -256,7 +265,7 @@ static void l3_wpa_supp_event_handler(struct net_mgmt_event_callback *cb, uint64
 	switch (mgmt_event) {
 	case NET_EVENT_SUPPLICANT_READY:
 		LOG_INF("NET_EVENT_SUPPLICANT_READY");
-		k_sem_give(&wpa_supp_ready_sem);
+		k_work_submit(&start_mode_work);
 		break;
 	case NET_EVENT_SUPPLICANT_NOT_READY:
 		LOG_ERR("NET_EVENT_SUPPLICANT_NOT_READY");
@@ -567,14 +576,49 @@ static void l4_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_e
 }
 
 /* ============================================================================
- * PUBLIC API
+ * MODE STARTUP WORK ITEM  (runs on system workqueue after WPA supp ready)
  * ============================================================================
  */
 
-int network_wait_for_wpa_supp_ready(k_timeout_t timeout)
+static void start_mode_work_handler(struct k_work *work)
 {
-	return k_sem_take(&wpa_supp_ready_sem, timeout);
+	switch (active_mode) {
+	case ZEGO_WIFI_MODE_SOFTAP:
+		wifi_run_softap_mode();
+		break;
+	case ZEGO_WIFI_MODE_STA: {
+		struct net_if *sta_iface = net_if_get_wifi_sta();
+
+		if (sta_iface) {
+			int rc = net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, sta_iface, NULL, 0);
+
+			if (rc) {
+				LOG_INF("No stored credentials or connect failed (%d) — "
+					"use 'wifi cred add' to provision",
+					rc);
+			} else {
+				LOG_INF("Auto-connecting with stored credentials...");
+			}
+		}
+		break;
+	}
+	case ZEGO_WIFI_MODE_P2P_GO:
+		wifi_run_p2p_go_mode();
+		break;
+	case ZEGO_WIFI_MODE_P2P_CLIENT:
+		/* User initiates via shell: 'wifi p2p find' then 'wifi p2p connect' */
+		break;
+	default:
+		LOG_WRN("Unsupported mode, falling back to SoftAP");
+		wifi_run_softap_mode();
+		break;
+	}
 }
+
+/* ============================================================================
+ * PUBLIC API
+ * ============================================================================
+ */
 
 int network_wait_for_station_connected(k_timeout_t timeout)
 {
@@ -629,47 +673,7 @@ int network_module_init(void)
 	net_mgmt_add_event_callback(&l4_event_cb);
 
 	LOG_INF("All network event handlers initialized");
-
-	/* Wait for WPA supplicant ready, then dispatch to selected mode */
-	int ret_sem = network_wait_for_wpa_supp_ready(K_SECONDS(30));
-
-	if (ret_sem) {
-		LOG_ERR("WPA supplicant not ready after 30s (%d) — aborting network init", ret_sem);
-		return -ETIMEDOUT;
-	}
-
-	switch (zego_wifi_get_mode()) {
-	case ZEGO_WIFI_MODE_SOFTAP:
-		wifi_run_softap_mode();
-		break;
-	case ZEGO_WIFI_MODE_STA: {
-		/* STA: attempt auto-connect using stored credentials. */
-		struct net_if *sta_iface = net_if_get_wifi_sta();
-
-		if (sta_iface) {
-			int rc = net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, sta_iface, NULL, 0);
-
-			if (rc) {
-				LOG_INF("No stored credentials or connect failed (%d) — "
-					"use 'wifi cred add' to provision",
-					rc);
-			} else {
-				LOG_INF("Auto-connecting with stored credentials...");
-			}
-		}
-		break;
-	}
-	case ZEGO_WIFI_MODE_P2P_GO:
-		wifi_run_p2p_go_mode();
-		break;
-	case ZEGO_WIFI_MODE_P2P_CLIENT:
-		/* P2P_CLIENT: user runs 'wifi p2p find' then 'wifi p2p connect <MAC> pbc -g 0' */
-		break;
-	default:
-		LOG_WRN("Unsupported mode, falling back to SoftAP");
-		wifi_run_softap_mode();
-		break;
-	}
+	/* Mode startup is deferred to start_mode_work, submitted by NET_EVENT_SUPPLICANT_READY. */
 	return 0;
 }
 
