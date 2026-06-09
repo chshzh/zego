@@ -8,7 +8,7 @@
 | Version | 2026-06-05-09-38 |
 | PRD Version | 2026-06-05-09-38 |
 | NCS Version | v3.3.0 |
-| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2, nRF5340 Audio DK + nRF7002EK |
+| Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
 
 ---
@@ -151,15 +151,15 @@ combined flash of BLE host stack + P2P snippet + app exceeds the 1 MB limit. Re-
 
 ## 7. Board Differences
 
-| Feature | nRF7002DK | nRF54LM20DK + nRF7002EB2 | nRF5340 Audio DK + nRF7002EK |
+| Feature | nRF54LM20DK + nRF7002EB2 | nRF7002DK | nRF5340 Audio DK + nRF7002EK |
 |---|---|---|---|
-| Flash | 1 MB | 2 MB | 1 MB |
-| RAM | 448 KB (app core) | 512 KB | 512 KB (app core) |
-| Buttons | 2 (SW0, SW1) | 3 (BUTTON0–2) | 5 (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5) |
-| LEDs | 2 | 4 | 9 (RGB1 + RGB2 + 3 mono; ROTATE on RGB1 only) |
-| BLE provisioning | Disabled (flash) | Enabled | Disabled (flash) |
-| Network core | nRF5340 netcore runs `hci_ipc` for BLE | Single-core; `hci_ipc` build is harmless no-op | nRF5340 netcore runs `hci_ipc` for BLE |
-| Build shield | — | `-DSHIELD=nrf7002eb2` | `-DSHIELD=nrf7002ek` |
+| Flash | 2 MB | 1 MB | 1 MB |
+| RAM | 512 KB | 448 KB (app core) | 512 KB (app core) |
+| Buttons | 3 (BUTTON0–2) | 2 (SW0, SW1) | 5 (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5) |
+| LEDs | 4 | 2 | 9 (RGB1 + RGB2 + 3 mono; ROTATE on RGB1 only) |
+| BLE provisioning | Enabled | Disabled (flash) | Disabled (flash) |
+| Network core | Single-core; `hci_ipc` build is harmless no-op | nRF5340 netcore runs `hci_ipc` for BLE | nRF5340 netcore runs `hci_ipc` for BLE |
+| Build shield | `-DSHIELD=nrf7002eb2` | — | `-DSHIELD=nrf7002ek` |
 | DTS overlay | — | — | Required: disables `gpio_fwd`, adds SPI4 `bias-pull-down` |
 
 ---

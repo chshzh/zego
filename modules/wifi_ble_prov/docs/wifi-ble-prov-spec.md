@@ -51,8 +51,8 @@ BLE runs on the network core via `hci_ipc` — set `SB_CONFIG_NETCORE_HCI_IPC=y`
 
 | Board | Build target | BLE core | Notes |
 |-------|-------------|----------|-------|
-| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | Network core (`hci_ipc`) | `SB_CONFIG_NETCORE_HCI_IPC=y` in `sysbuild.conf`; ~1 MB app flash — BT stack (~150 KB) fits but leaves little headroom alongside a heavy app |
 | nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-DSHIELD=nrf7002eb2` | Same app core | Single-core; ~2× flash/RAM — comfortable margin |
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | Network core (`hci_ipc`) | `SB_CONFIG_NETCORE_HCI_IPC=y` in `sysbuild.conf`; ~1 MB app flash — BT stack (~150 KB) fits but leaves little headroom alongside a heavy app |
 | nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-DSHIELD=nrf7002ek` | Network core (`hci_ipc`) | `SB_CONFIG_NETCORE_HCI_IPC=y` in `sysbuild.conf`; same ~1 MB app-core flash budget as nRF7002DK |
 
 ---

@@ -68,8 +68,8 @@ driver.  Choose a backend via Kconfig:
 
 | Board | Build target | Buttons available | Notes |
 |-------|-------------|-------------------|-------|
-| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | BUTTON1 (idx 0), BUTTON2 (idx 1) | 2 buttons |
 | nRF54LM20DK | `nrf54lm20dk/nrf54lm20a/cpuapp` | BUTTON0–BUTTON3 (idx 0–3) | 4 buttons; when built with `-DSHIELD=nrf7002eb2` BUTTON3 pin is occupied by the shield — the application overrides `CONFIG_ZEGO_BUTTON_NUM_BUTTONS=3` in its own board conf |
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | BUTTON1 (idx 0), BUTTON2 (idx 1) | 2 buttons |
 | nRF5340 Audio DK | `nrf5340_audio_dk/nrf5340/cpuapp` | VOL- (idx 0), VOL+ (idx 1), PLAY/PAUSE (idx 2), BTN4 (idx 3), BTN5 (idx 4) | 5 buttons; DTS uses non-consecutive `zephyr,code` values (`KEY_VOLUMEDOWN`, `KEY_VOLUMEUP`, `KEY_3`, `KEY_4`, `KEY_5`) — DK backend iterates all 5 children via bitmask |
 
 ---
@@ -207,8 +207,8 @@ Board-specific defaults (`boards/<board>.conf`):
 
 | Board | `NUM_BUTTONS` |
 |-------|--------------|
-| `nrf7002dk/nrf5340/cpuapp` | 2 |
 | `nrf54lm20dk/nrf54lm20a/cpuapp` | 4 (3 when `-DSHIELD=nrf7002eb2` — app overrides in its own board conf) |
+| `nrf7002dk/nrf5340/cpuapp` | 2 |
 | `nrf5340_audio_dk/nrf5340/cpuapp` | 5 (VOL- / VOL+ / PLAY/PAUSE / BTN4 / BTN5) |
 
 ---

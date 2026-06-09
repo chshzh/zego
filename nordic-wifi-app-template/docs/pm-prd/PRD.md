@@ -7,7 +7,7 @@
 | Product Name | Nordic Wi-Fi App Template |
 | Version | 2026-06-05-09-38 |
 | NCS Version | v3.3.0 |
-| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2, nRF5340 Audio DK + nRF7002EK |
+| Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Draft |
 
 ---
@@ -46,8 +46,8 @@ Starting a new nRF7x Wi-Fi project from a blank Zephyr sample requires setting u
 
 | Metric | Target |
 |---|---|
-| Clean build — nRF7002DK | `west build -p -b nrf7002dk/nrf5340/cpuapp -d build_nrf7002dk -- -Dnordic-wifi-app-template_SNIPPET=wifi-p2p` succeeds |
 | Clean build — nRF54LM20DK | `west build -p -b nrf54lm20dk/nrf54lm20a/cpuapp -d build_nrf54lm20dk -- -Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002eb2` succeeds |
+| Clean build — nRF7002DK | `west build -p -b nrf7002dk/nrf5340/cpuapp -d build_nrf7002dk -- -Dnordic-wifi-app-template_SNIPPET=wifi-p2p` succeeds |
 | Clean build — nRF5340 Audio DK | `west build -p -b nrf5340_audio_dk/nrf5340/cpuapp -d build_nrf5340_audio_dk -- -Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002ek` succeeds |
 | Startup banner printed | All four modes display correct connection instructions at boot |
 | STA via shell | `wifi connect -s <SSID> -p <pass> -k 1` connects the device |
@@ -75,8 +75,8 @@ Starting a new nRF7x Wi-Fi project from a blank Zephyr sample requires setting u
 
 | Board | Buttons | LEDs |
 |---|---|---|
-| nRF7002DK | 2 (SW0, SW1) | 2 |
 | nRF54LM20DK + nRF7002EB2 | 3 (BUTTON0–2) | 4 |
+| nRF7002DK | 2 (SW0, SW1) | 2 |
 | nRF5340 Audio DK + nRF7002EK | 5 (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5) | 9 (RGB1 idx 0–2, RGB2 idx 3–5, mono idx 6–8) |
 
 All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` commands.
@@ -100,7 +100,7 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 | BLE provisioning active | BREATHE | Matches BLE convention |
 | Disconnected / error | Fast BLINK (100 ms half-period) | Attention needed |
 
-> On nRF7002DK (2 LEDs) the ROTATE effect chases across both LEDs. On nRF54LM20DK (4 LEDs) it chases across all four. On nRF5340 Audio DK (9 LEDs) it chases across RGB1 only (indices 0–2), leaving RGB2 and mono LEDs off.
+> On nRF54LM20DK (4 LEDs) the ROTATE effect chases across all four. On nRF7002DK (2 LEDs) it chases across both LEDs. On nRF5340 Audio DK (9 LEDs) it chases across RGB1 only (indices 0–2), leaving RGB2 and mono LEDs off.
 
 ### 2.3 Application Customisation Point
 
@@ -148,7 +148,7 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 |---|---|
 | Build | No compiler errors or warnings in template source files |
 | Security | BLE provisioning credentials stored only in flash (Zephyr settings subsystem), never in source control |
-| Portability | Template works on all three targets (nRF7002DK, nRF54LM20DK + nRF7002EB2, nRF5340 Audio DK + nRF7002EK); board `.conf` and `.overlay` files handle differences |
+| Portability | Template works on all three targets (nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK); board `.conf` and `.overlay` files handle differences |
 | Flash budget | nRF7002DK and nRF5340 Audio DK builds fit in 1 MB (BLE prov disabled); nRF54LM20DK build fits in 2 MB (BLE prov enabled) |
 
 ---
@@ -157,6 +157,6 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 
 | Board | Build target | BLE prov | Notes |
 |---|---|---|---|
-| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` + `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p` | Disabled (1 MB flash too tight) | 2 buttons, 2 LEDs |
 | nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002eb2` | Enabled | 3 buttons, 4 LEDs |
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` + `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p` | Disabled (1 MB flash too tight) | 2 buttons, 2 LEDs |
 | nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002ek` | Disabled (1 MB flash too tight) | 5 buttons (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5), 9 LEDs; ROTATE on RGB1 only |

@@ -49,8 +49,8 @@ and WPA supplicant is supported. Tested combinations:
 
 | Board | Build target | Notes |
 |-------|-------------|-------|
-| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | STA + SoftAP + P2P; WPA supplicant on nRF5340 app core |
 | nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-DSHIELD=nrf7002eb2` | Same capabilities; larger flash/RAM |
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | STA + SoftAP + P2P; WPA supplicant on nRF5340 app core |
 | nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-DSHIELD=nrf7002ek` | STA + SoftAP + P2P; application must supply a DTS overlay mapping the nRF7002EK SPI bus to the Audio DK GPIO pins |
 
 ---

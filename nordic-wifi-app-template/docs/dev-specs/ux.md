@@ -8,7 +8,7 @@
 | Version | 2026-06-05-09-38 |
 | PRD Version | 2026-06-05-09-38 |
 | NCS Version | v3.3.0 |
-| Target Board(s) | nRF7002DK, nRF54LM20DK + nRF7002EB2, nRF5340 Audio DK + nRF7002EK |
+| Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
 
 ---
@@ -90,7 +90,7 @@ Double-click (nRF54LM20DK, CONFIG_ZEGO_WIFI_BLE_PROV=y):
 | `ERROR` (disconnected) | BLINK | 100 ms |
 | BLE prov active (local toggle) | BREATHE | Kconfig default |
 
-> **ROTATE LED count**: On nRF7002DK (2 LEDs) ROTATE chases across both LEDs. On nRF54LM20DK (4 LEDs) it chases across all four. On nRF5340 Audio DK (9 LEDs total) ROTATE chases across **RGB1 only (indices 0–2)**, controlled by `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS=3`; RGB2 and mono LEDs remain off during the effect.
+> **ROTATE LED count**: On nRF54LM20DK (4 LEDs) ROTATE chases across all four. On nRF7002DK (2 LEDs) it chases across both LEDs. On nRF5340 Audio DK (9 LEDs total) ROTATE chases across **RGB1 only (indices 0–2)**, controlled by `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS=3`; RGB2 and mono LEDs remain off during the effect.
 
 ---
 

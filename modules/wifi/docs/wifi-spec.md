@@ -64,8 +64,8 @@ is needed.
 
 | Board | Build target | Notes |
 |-------|-------------|-------|
-| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | STA + SoftAP (`NRF70_AP_MODE`); P2P with `-DSNIPPET=wifi-p2p` |
 | nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-DSHIELD=nrf7002eb2` | Same capabilities; larger flash/RAM |
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | STA + SoftAP (`NRF70_AP_MODE`); P2P with `-DSNIPPET=wifi-p2p` |
 | nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-DSHIELD=nrf7002ek` | STA + SoftAP + P2P; ~1 MB app-core flash (same as nRF7002DK); network core runs `hci_ipc` for BLE (`SB_CONFIG_NETCORE_HCI_IPC=y`); application must provide a DTS board overlay mapping the nRF7002EK SPI bus to the Audio DK GPIO pins |
 
 ---

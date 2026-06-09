@@ -9,25 +9,25 @@ Run this sample to validate all gesture types and calibrate the timing parameter
 
 | Board | Build target | Available buttons |
 |-------|-------------|-------------------|
-| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | Button 1 (idx 0), Button 2 (idx 1) |
 | nRF54LM20DK (standalone) | `nrf54lm20dk/nrf54lm20a/cpuapp` | BUTTON0 (idx 0)–BUTTON3 (idx 3) |
 | nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-DSHIELD=nrf7002eb2` | BUTTON0–BUTTON2 (BUTTON3 unavailable — shield pin conflict) |
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | Button 1 (idx 0), Button 2 (idx 1) |
 
 ---
 
 ## Build
 
 ```bash
-# nRF7002DK (2 buttons: Button 1, Button 2)
-nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
-  west build -b nrf7002dk/nrf5340/cpuapp -p \
-  -d zego/button/sample/build_7002dk \
-  zego/button/sample
-
 # nRF54LM20DK (4 buttons: BUTTON0–BUTTON3)
 nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
   west build -b nrf54lm20dk/nrf54lm20a/cpuapp -p \
   -d zego/button/sample/build_54lm20dk \
+  zego/button/sample
+
+# nRF7002DK (2 buttons: Button 1, Button 2)
+nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
+  west build -b nrf7002dk/nrf5340/cpuapp -p \
+  -d zego/button/sample/build_7002dk \
   zego/button/sample
 ```
 
@@ -66,10 +66,10 @@ Verify `N` matches the expected button count for the board before proceeding.
 
 Button names to use per board:
 
-| Step | nRF7002DK | nRF54LM20DK |
-|------|-----------|-------------|
-| T1, T2, T3 | **Button 1** | **BUTTON0** |
-| T4 | **Button 2** | **BUTTON1, BUTTON2, BUTTON3** |
+| Step | nRF54LM20DK | nRF7002DK |
+|------|-------------|-----------|
+| T1, T2, T3 | **BUTTON0** | **Button 1** |
+| T4 | **BUTTON1, BUTTON2, BUTTON3** | **Button 2** |
 
 ---
 
@@ -188,9 +188,9 @@ functional and independent. Buttons to test per board:
 
 | Board | Buttons to test in T4 |
 |-------|-----------------------|
-| nRF7002DK | **Button 2** (idx 1) |
 | nRF54LM20DK standalone | **BUTTON1** (idx 1), **BUTTON2** (idx 2), **BUTTON3** (idx 3) |
 | nRF54LM20DK + nRF7002EB2 | **BUTTON1** (idx 1), **BUTTON2** (idx 2) |
+| nRF7002DK | **Button 2** (idx 1) |
 
 **Action per button:** Press and release once, then wait 600 ms.
 
@@ -212,12 +212,12 @@ functional and independent. Buttons to test per board:
 
 ## Summary Table
 
-| Step | Action | nRF7002DK button | nRF54LM20DK button | Expected event | Key check |
-|------|--------|------------------|--------------------|----------------|-----------|
-| T1 × 3 | Single click, wait 600 ms | Button 1 | BUTTON0 | `SINGLE_CLICK` | `button_number=0`, count+1 each |
-| T2 × 3 | Two rapid presses | Button 1 | BUTTON0 | `DOUBLE_CLICK` | `button_number=0`, count+2 each |
-| T3 × 1 | Hold > 3 s, release | Button 1 | BUTTON0 | `LONG_PRESS` then `RELEASED` | No click after release |
-| T4 × 1 each | Single click, wait 600 ms | **Button 2** | **BUTTON1, BUTTON2, BUTTON3**¹ | `SINGLE_CLICK` per button | `button_number`=idx, count=1 |
+| Step | Action | nRF54LM20DK button | nRF7002DK button | Expected event | Key check |
+|------|--------|--------------------|--------------------|----------------|-----------|
+| T1 × 3 | Single click, wait 600 ms | BUTTON0 | Button 1 | `SINGLE_CLICK` | `button_number=0`, count+1 each |
+| T2 × 3 | Two rapid presses | BUTTON0 | Button 1 | `DOUBLE_CLICK` | `button_number=0`, count+2 each |
+| T3 × 1 | Hold > 3 s, release | BUTTON0 | Button 1 | `LONG_PRESS` then `RELEASED` | No click after release |
+| T4 × 1 each | Single click, wait 600 ms | **BUTTON1, BUTTON2, BUTTON3**¹ | **Button 2** | `SINGLE_CLICK` per button | `button_number`=idx, count=1 |
 
 ¹ With nRF7002EB2 shield: BUTTON1 and BUTTON2 only (BUTTON3 unavailable — shield pin conflict).
 

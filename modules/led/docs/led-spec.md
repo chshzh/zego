@@ -53,8 +53,8 @@ software PWM for LEDs without a PWM channel.
 
 | Board | Build target | LEDs available | Notes |
 |-------|-------------|----------------|-------|
-| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | LED1 (idx 0), LED2 (idx 1) | 2 LEDs |
 | nRF54LM20DK | `nrf54lm20dk/nrf54lm20a/cpuapp` | LED0–LED3 (idx 0–3) | 4 LEDs |
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | LED1 (idx 0), LED2 (idx 1) | 2 LEDs |
 | nRF5340 Audio DK | `nrf5340_audio_dk/nrf5340/cpuapp` | RGB1: led_0–led_2 (idx 0–2, PWM-capable); RGB2: led_3–led_5 (idx 3–5); mono: blue led_6, green led_7/led_8 (idx 6–8) | 9 LEDs total; DK backend drives all 9. ROTATE restricted to RGB1 (idx 0–2) via `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS=3` |
 
 ---
@@ -292,8 +292,8 @@ Board-specific defaults (`boards/<board>.conf`):
 
 | Board | `NUM_LEDS` | `ROTATE_NUM_LEDS` |
 |-------|-----------|---------------------|
-| `nrf7002dk/nrf5340/cpuapp` | 2 | 2 (default = NUM_LEDS) |
 | `nrf54lm20dk/nrf54lm20a/cpuapp` | 4 | 4 (default = NUM_LEDS) |
+| `nrf7002dk/nrf5340/cpuapp` | 2 | 2 (default = NUM_LEDS) |
 | `nrf5340_audio_dk/nrf5340/cpuapp` | 9 | 3 (RGB1: idx 0–2 only) |
 
 ---

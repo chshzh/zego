@@ -9,24 +9,24 @@ Run this sample to validate all LED command types and calibrate effect timing pa
 
 | Board | Build target | LEDs available |
 |-------|-------------|----------------|
-| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | LED1 (idx 0), LED2 (idx 1) |
 | nRF54LM20DK | `nrf54lm20dk/nrf54lm20a/cpuapp` | LED0 (idx 0) – LED3 (idx 3) |
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | LED1 (idx 0), LED2 (idx 1) |
 
 ---
 
 ## Build
 
 ```bash
-# nRF7002DK (2 LEDs: LED1, LED2)
-nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
-  west build -b nrf7002dk/nrf5340/cpuapp -p \
-  -d zego/led/sample/build_7002dk \
-  zego/led/sample
-
 # nRF54LM20DK (4 LEDs: LED0–LED3)
 nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
   west build -b nrf54lm20dk/nrf54lm20a/cpuapp -p \
   -d zego/led/sample/build_54lm20dk \
+  zego/led/sample
+
+# nRF7002DK (2 LEDs: LED1, LED2)
+nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
+  west build -b nrf7002dk/nrf5340/cpuapp -p \
+  -d zego/led/sample/build_7002dk \
   zego/led/sample
 ```
 
@@ -73,11 +73,11 @@ The sample loops through five steps automatically.
 
 LED names to use per board:
 
-| Step | nRF7002DK | nRF54LM20DK |
-|------|-----------|-------------|
-| T1 | LED1, LED2 | LED0, LED1, LED2, LED3 |
-| T2–T4 | **LED1** (idx 0) | **LED0** (idx 0) |
-| T5 | LED1 + LED2 | LED0 + LED1 + LED2 + LED3 |
+| Step | nRF54LM20DK | nRF7002DK |
+|------|-------------|-----------|
+| T1 | LED0, LED1, LED2, LED3 | LED1, LED2 |
+| T2–T4 | **LED0** (idx 0) | **LED1** (idx 0) |
+| T5 | LED0 + LED1 + LED2 + LED3 | LED1 + LED2 |
 
 ---
 
@@ -214,17 +214,6 @@ then reboot.  The sample automatically runs T6 after T5.
 **Build configuration for HW PWM test:**
 
 ```bash
-# nRF7002DK: LED1 (idx 0) has a PWM channel on pwm-leds child 0
-#            LED2 (idx 1) has no PWM → SW PWM fallback
-nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
-  west build -b nrf7002dk/nrf5340/cpuapp -p \
-  -d zego/led/sample/build_7002dk_pwm \
-  zego/led/sample \
-  -- -DCONFIG_ZEGO_LED_BACKEND_ZEPHYR=y \
-     -DCONFIG_ZEGO_LED_USE_PWM=y \
-     -DCONFIG_ZEGO_LED_0_PWM_INDEX=0 \
-     -DCONFIG_ZEGO_LED_1_PWM_INDEX=-1
-
 # nRF54LM20DK: LED1 (idx 1) has a PWM channel on pwm-leds child 0
 #              LED0/2/3 have no PWM → SW PWM fallback
 nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
@@ -237,6 +226,17 @@ nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
      -DCONFIG_ZEGO_LED_1_PWM_INDEX=0 \
      -DCONFIG_ZEGO_LED_2_PWM_INDEX=-1 \
      -DCONFIG_ZEGO_LED_3_PWM_INDEX=-1
+
+# nRF7002DK: LED1 (idx 0) has a PWM channel on pwm-leds child 0
+#            LED2 (idx 1) has no PWM → SW PWM fallback
+nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
+  west build -b nrf7002dk/nrf5340/cpuapp -p \
+  -d zego/led/sample/build_7002dk_pwm \
+  zego/led/sample \
+  -- -DCONFIG_ZEGO_LED_BACKEND_ZEPHYR=y \
+     -DCONFIG_ZEGO_LED_USE_PWM=y \
+     -DCONFIG_ZEGO_LED_0_PWM_INDEX=0 \
+     -DCONFIG_ZEGO_LED_1_PWM_INDEX=-1
 ```
 
 **Expected log (nRF7002DK example):**
@@ -262,11 +262,11 @@ nrfutil sdk-manager toolchain launch --ncs-version=v3.3.0 -- \
 
 | LED | Board | Expected path | Visual |
 |-----|-------|---------------|--------|
-| LED0 (LED1 silkscreen) | nRF7002DK | `(HW PWM)` | Smooth analogue fade |
-| LED1 (LED2 silkscreen) | nRF7002DK | `(SW PWM)` | Rapid on/off toggling (perceived fade) |
 | LED0 | nRF54LM20DK | `(SW PWM)` | Rapid toggling |
 | LED1 | nRF54LM20DK | `(HW PWM)` | Smooth analogue fade |
 | LED2, LED3 | nRF54LM20DK | `(SW PWM)` | Rapid toggling |
+| LED0 (LED1 silkscreen) | nRF7002DK | `(HW PWM)` | Smooth analogue fade |
+| LED1 (LED2 silkscreen) | nRF7002DK | `(SW PWM)` | Rapid on/off toggling (perceived fade) |
 
 > The visual difference between HW and SW PWM is most obvious at low brightness levels:
 > HW PWM produces a true dim glow while SW PWM flickers visibly.
