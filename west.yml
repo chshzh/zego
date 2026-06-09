@@ -21,12 +21,6 @@ manifest:
       import: true
       remote: ncs
 
-    - name: zview
-      url: https://github.com/wkhadgar/zview
-      revision: main
-      path: modules/tools/zview
-      west-commands: scripts/west-commands.yml
-
     # Application projects — add/remove as needed
     # - name: nordic-wifi-webdash
     #   path: nordic-wifi-webdash
@@ -43,10 +37,18 @@ manifest:
     #   revision: main
     #   remote: chshzh
 
+
     # - name: claude
     #   path: .claude
     #   revision: main
     #   remote: chshzh
+
+    # - name: zview
+    #   url: https://github.com/wkhadgar/zview
+    #   revision: main
+    #   path: modules/tools/zview
+    #   west-commands: scripts/west-commands.yml
+    
 
   self:
     path: zego
