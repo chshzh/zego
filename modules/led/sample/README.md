@@ -308,3 +308,9 @@ CONFIG_ZEGO_LED_ROTATE_PERIOD_MS=100
 # CONFIG_ZEGO_LED_BACKEND_ZEPHYR=y
 # CONFIG_ZEGO_LED_USE_PWM=y
 ```
+
+---
+
+## License
+
+[SPDX-License-Identifier: LicenseRef-Nordic-5-Clause](../../../../LICENSE)

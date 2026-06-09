@@ -334,4 +334,4 @@ Each phase feeds the next: requirements drive specs, specs drive code, code driv
 
 ## License
 
-[SPDX-License-Identifier: LicenseRef-Nordic-5-Clause](LICENSE)
+[SPDX-License-Identifier: LicenseRef-Nordic-5-Clause](../LICENSE)

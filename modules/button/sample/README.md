@@ -238,3 +238,9 @@ CONFIG_ZEGO_BUTTON_LONG_PRESS_REPEAT_MS=500     # default 0 = disabled
 
 Edit `prj.conf`, rebuild (`-p` for pristine), reflash. The boot banner shows
 the active values on every boot so you can confirm the change took effect.
+
+---
+
+## License
+
+[SPDX-License-Identifier: LicenseRef-Nordic-5-Clause](../../../../LICENSE)

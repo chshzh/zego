@@ -171,4 +171,4 @@ Applications are released independently from their own repositories.
 
 ## License
 
-[LicenseRef-Nordic-5-Clause](https://www.nordicsemi.com/About-us/Legal-information/Software-licence-agreement)
+[SPDX-License-Identifier: LicenseRef-Nordic-5-Clause](LICENSE)
