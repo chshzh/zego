@@ -1,5 +1,33 @@
 # Zego — Reusable NCS/Zephyr modules
 
+**Zego** is the *Zephyr + LEGO* concept applied to embedded firmware: build applications
+by snapping together self-contained modules the way you assemble LEGO bricks.
+Each module is an independent Zephyr module with its own Kconfig, CMake, and zbus
+channel definitions. Applications declare which bricks they need; the build system
+wires them automatically — no code copying, no manual glue.
+
+```
+┌─────────────────────────────────────────────┐
+│              Application                    │
+│  (prj.conf: CONFIG_ZEGO_BUTTON=y, etc.)     │
+├──────────┬──────────┬──────────┬────────────┤
+│  button  │   led    │   wifi   │  network   │  ← zego bricks
+│  module  │  module  │  module  │   module   │
+├──────────┴──────────┴──────────┴────────────┤
+│          Zephyr kernel + zbus               │
+└─────────────────────────────────────────────┘
+```
+
+### Design principles
+
+| Principle | How zego applies it |
+|-----------|---------------------|
+| **Single responsibility** | Each module owns exactly one hardware abstraction or service. |
+| **Loose coupling** | Modules never call each other directly — they communicate only through typed zbus channels. |
+| **Opt-in composition** | A module is compiled in only when its `CONFIG_ZEGO_*` Kconfig symbol is enabled. Unused bricks add zero code. |
+| **Portable backends** | Hardware-specific code is isolated behind a Kconfig-selectable backend (e.g. `ZEGO_BUTTON_BACKEND_DK` vs `ZEGO_BUTTON_BACKEND_GPIO`). Swap the board; keep the module. |
+| **Self-contained specs** | Every module ships its own `docs/<module>-spec.md` — API, channels, Kconfig reference, and hardware test guide in one place. |
+
 Shared module library for Nordic nRF Connect SDK applications.
 Capabilities are composed by enabling Kconfig symbols — no code copying.
 
@@ -50,8 +78,27 @@ west update
 
 ## Integration
 
-Register modules as first-class Zephyr modules via `EXTRA_ZEPHYR_MODULES`
-in the app's `CMakeLists.txt` **before** `find_package(Zephyr ...)`.
+### Start from the template (recommended)
+
+The fastest way to build a new zego-based application is to copy
+[`nordic-wifi-app-template/`](nordic-wifi-app-template/) and trim it down
+to the modules you need.  The template already has the full `CMakeLists.txt`
+wiring, `prj.conf` stubs, `boards/` overlays, and a working `west.yml` —
+so you get a clean build on the first try without reading the details below.
+
+```sh
+cp -r zego/nordic-wifi-app-template my-app
+cd my-app
+# edit CMakeLists.txt: remove modules you don't need
+# edit prj.conf: set CONFIG_ZEGO_* symbols
+west build -p -b nrf7002dk/nrf5340/cpuapp
+```
+
+### Wire modules manually (from scratch)
+
+If you prefer to start from a blank NCS application, register modules as
+first-class Zephyr modules via `EXTRA_ZEPHYR_MODULES` in the app's
+`CMakeLists.txt` **before** `find_package(Zephyr ...)`.
 Kconfig is wired automatically — no `rsource` needed.
 
 ```cmake
@@ -110,7 +157,7 @@ zego/
 │   ├── network/       ← Wi-Fi event management, DHCP, weak-hook API
 │   └── wifi_ble_prov/ ← BLE GATT provisioning service
 ├── nordic-wifi-app-template/  ← example app (STA / SoftAP / P2P + BLE prov)
-└── west.yml   ← workspace manifest (NCS v3.3.0)
+└── west.yml   ← workspace manifest (contain NCS version based on)
 ```
 
 ---
