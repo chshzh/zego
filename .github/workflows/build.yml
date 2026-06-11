@@ -154,42 +154,23 @@ jobs:
 
           echo "Generated size report: $SIZE_REPORT"
 
-      - name: Create merged hex for ${{ matrix.config.name }}
+      - name: Collect merged hex for ${{ matrix.config.name }}
         if: always()
         working-directory: app-workspace/zego/nordic-wifi-app-template
         run: |
           BUILD_DIR="${{ matrix.config.build_dir }}"
-          MERGED_HEX="${BUILD_DIR}/merged.hex"
-
-          if [ -f "${MERGED_HEX}" ]; then
-            echo "merged.hex already exists"
+          BOARD_QUAL="${{ matrix.config.board }}"
+          BOARD_QUAL="${BOARD_QUAL//\//_}"
+          APP_HEX="${BUILD_DIR}/merged_${BOARD_QUAL}.hex"
+          NET_HEX="${BUILD_DIR}/merged_${BOARD_QUAL/cpuapp/cpunet}.hex"
+          if [ -f "${APP_HEX}" ] && [ -f "${NET_HEX}" ]; then
+            python3 -c "import sys; from intelhex import IntelHex; a=IntelHex(); a.loadhex(sys.argv[1]); n=IntelHex(); n.loadhex(sys.argv[2]); a.merge(n,overlap='replace'); a.write_hex_file(sys.argv[3])" "${APP_HEX}" "${NET_HEX}" "${BUILD_DIR}/merged.hex"
+            echo "Combined app+net → merged.hex"
+          elif [ -f "${APP_HEX}" ]; then
+            cp "${APP_HEX}" "${BUILD_DIR}/merged.hex"
+            echo "Collected ${APP_HEX}"
           else
-            echo "merged.hex not found, attempting to assemble from mcuboot + signed app..."
-            MCUBOOT_HEX="${BUILD_DIR}/mcuboot/zephyr/zephyr.hex"
-            APP_HEX="${BUILD_DIR}/nordic-wifi-app-template/zephyr/zephyr.signed.hex"
-
-            if [ -f "${MCUBOOT_HEX}" ] && [ -f "${APP_HEX}" ]; then
-              python3 -c "
-import sys
-from intelhex import IntelHex
-ih = IntelHex(); ih.loadhex(sys.argv[1])
-app = IntelHex(); app.loadhex(sys.argv[2])
-ih.merge(app, overlap='replace')
-ih.write_hex_file(sys.argv[3])
-print('merged.hex created successfully')
-" "${MCUBOOT_HEX}" "${APP_HEX}" "${MERGED_HEX}"
-            else
-              PLAIN_HEX="${BUILD_DIR}/nordic-wifi-app-template/zephyr/zephyr.hex"
-              if [ -f "${PLAIN_HEX}" ]; then
-                echo "No MCUboot image found, using plain zephyr.hex as release artifact"
-                cp "${PLAIN_HEX}" "${MERGED_HEX}"
-              else
-                echo "Warning: no flashable hex found"
-                [ -f "${MCUBOOT_HEX}" ] || echo "  Missing: ${MCUBOOT_HEX}"
-                [ -f "${APP_HEX}" ]     || echo "  Missing: ${APP_HEX}"
-                [ -f "${PLAIN_HEX}" ]   || echo "  Missing: ${PLAIN_HEX}"
-              fi
-            fi
+            echo "Warning: ${APP_HEX} not found"
           fi
 
       - name: Stage artifacts for ${{ matrix.config.name }}
