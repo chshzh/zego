@@ -12,7 +12,7 @@ config APP_UX_MODULE
 	    Single click  — print current Wi-Fi mode to UART log
 	    Double-click  — toggle BLE provisioning LED (nRF54LM20DK only;
 	                    full BLE prov toggle requires CONFIG_ZEGO_WIFI_BLE_PROV=y)
-	    Long press    — cycle Wi-Fi mode (STA → SoftAP → P2P_GO → STA),
+	    Long press    — cycle Wi-Fi mode (STA → SoftAP → P2P_GO → P2P_CLIENT → STA),
 	                    save to NVS, reboot
 
 	  LED 0 Wi-Fi state:
@@ -31,5 +31,43 @@ config APP_UX_INIT_PRIORITY
 	  Must be higher (later) than ZEGO_LED_INIT_PRIORITY (91) and
 	  ZEGO_BUTTON_INIT_PRIORITY (90) so LED and button are ready before
 	  the UX module starts ROTATE and registers observers.
+
+config APP_UX_ROTATE_FIRST_LED
+	int "First LED index in the Wi-Fi ROTATE sequence"
+	default 0
+	range 0 8
+	help
+	  Index of the first LED included in the Wi-Fi connecting/softap ROTATE
+	  effect.  Consecutive indices from this value are used; count is set by
+	  APP_UX_ROTATE_COUNT.  Leave both at 0 to let the LED module use its
+	  own ROTATE_NUM_LEDS default (indices 0..ROTATE_NUM_LEDS-1).
+
+config APP_UX_ROTATE_COUNT
+	int "Number of LEDs in the Wi-Fi ROTATE sequence"
+	default 0
+	range 0 9
+	help
+	  How many consecutive LEDs (starting from APP_UX_ROTATE_FIRST_LED) to
+	  include in the rotate sweep.  0 means fall back to the LED module
+	  default (CONFIG_ZEGO_LED_ROTATE_NUM_LEDS consecutive LEDs from 0).
+	  Example — rotate RGB2 only on nRF5340 Audio DK: FIRST_LED=3, COUNT=3.
+
+config APP_UX_CONNECTED_LED
+	int "LED index turned ON when Wi-Fi is connected"
+	default 0
+	range 0 8
+	help
+	  0-based LED index driven solid-ON for the CONNECTED state.
+	  Default 0 (all boards).  Set to 4 on nRF5340 Audio DK to light the
+	  green channel of RGB2.
+
+config APP_UX_CONNECTED_LED_GREEN_ONLY
+	bool "Turn off adjacent LEDs for a pure-colour connected indicator"
+	default n
+	help
+	  When enabled, the CONNECTED handler also sends LED_COMMAND_OFF to
+	  (CONNECTED_LED - 1) and (CONNECTED_LED + 1) so only the target
+	  colour channel is lit.  Use on nRF5340 Audio DK where LED 4 is the
+	  green channel of RGB2 (red = LED 3, blue = LED 5).
 
 endif # APP_UX_MODULE

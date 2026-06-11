@@ -12,7 +12,7 @@
  *   DOUBLE_CLICK  Toggle BLE provisioning LED (BREATHE ↔ last Wi-Fi state).
  *                 (Full BLE adv toggle requires CONFIG_ZEGO_WIFI_BLE_PROV=y
  *                  and a future zego_wifi_ble_prov_advertise() API.)
- *   LONG_PRESS    Cycle Wi-Fi mode STA → SoftAP → P2P_GO → STA,
+ *   LONG_PRESS    Cycle Wi-Fi mode STA → SoftAP → P2P_GO → P2P_CLIENT → STA,
  *                 save to NVS via settings, reboot.
  *
  * LED 0 state machine driven by APP_WIFI_STATE_CHAN:
@@ -49,6 +49,7 @@ static const enum zego_wifi_mode mode_cycle[] = {
 	ZEGO_WIFI_MODE_STA,
 	ZEGO_WIFI_MODE_SOFTAP,
 	ZEGO_WIFI_MODE_P2P_GO,
+	ZEGO_WIFI_MODE_P2P_CLIENT,
 };
 
 static const char *mode_name(enum zego_wifi_mode m)
@@ -81,8 +82,11 @@ static void do_mode_cycle(void)
 
 	LOG_INF("Mode cycle: %s → %s — saving and rebooting", mode_name(cur), mode_name(next));
 
-	/* Acknowledge the long press with a brief LED-off before reboot. */
-	struct led_msg ack = {.type = LED_COMMAND_OFF, .led_number = 0};
+	/* Acknowledge the long press: briefly turn off the first rotate LED
+	 * (stops ROTATE and gives the user a visible blink before reboot). */
+	uint8_t ack_led =
+		(CONFIG_APP_UX_ROTATE_COUNT > 0) ? (uint8_t)CONFIG_APP_UX_ROTATE_FIRST_LED : 0;
+	struct led_msg ack = {.type = LED_COMMAND_OFF, .led_number = ack_led};
 
 	zbus_chan_pub(&LED_CMD_CHAN, &ack, K_NO_WAIT);
 	k_sleep(K_MSEC(300));
@@ -110,17 +114,82 @@ static void led_set(enum led_msg_type type, uint16_t period_ms)
 	zbus_chan_pub(&LED_CMD_CHAN, &msg, K_NO_WAIT);
 }
 
+/*
+ * Send ROTATE, optionally constraining to a board-specific LED subset.
+ *
+ * When CONFIG_APP_UX_ROTATE_COUNT > 0 the command carries an explicit index
+ * array (FIRST_LED, FIRST_LED+1, …, FIRST_LED+COUNT-1), overriding the LED
+ * module's default 0..ROTATE_NUM_LEDS-1 sweep.
+ *
+ * Example — nRF5340 Audio DK, RGB2 only (indices 3, 4, 5):
+ *   CONFIG_APP_UX_ROTATE_FIRST_LED=3  CONFIG_APP_UX_ROTATE_COUNT=3
+ */
+static void led_rotate(void)
+{
+	struct led_msg msg = {
+		.type = LED_COMMAND_ROTATE,
+		.period_ms = 0,
+	};
+
+#if CONFIG_APP_UX_ROTATE_COUNT > 0
+	msg.rotate_count = CONFIG_APP_UX_ROTATE_COUNT;
+	for (uint8_t i = 0; i < (uint8_t)CONFIG_APP_UX_ROTATE_COUNT; i++) {
+		msg.rotate_indices[i] = (uint8_t)(CONFIG_APP_UX_ROTATE_FIRST_LED + i);
+	}
+#endif
+
+	zbus_chan_pub(&LED_CMD_CHAN, &msg, K_NO_WAIT);
+}
+
+/*
+ * Drive the connected-state LED solid ON.
+ *
+ * CONFIG_APP_UX_CONNECTED_LED selects the LED index (default 0).
+ * CONFIG_APP_UX_CONNECTED_LED_GREEN_ONLY also turns the adjacent LEDs OFF,
+ * isolating a single colour channel (e.g. green channel of an RGB LED).
+ *
+ * Example — nRF5340 Audio DK, green channel of RGB2 (LED 4):
+ *   CONFIG_APP_UX_CONNECTED_LED=4  CONFIG_APP_UX_CONNECTED_LED_GREEN_ONLY=y
+ *   → LED 4 ON, LED 3 OFF, LED 5 OFF
+ */
+static void led_connected(void)
+{
+	struct led_msg on = {
+		.type = LED_COMMAND_ON,
+		.led_number = CONFIG_APP_UX_CONNECTED_LED,
+	};
+
+	zbus_chan_pub(&LED_CMD_CHAN, &on, K_NO_WAIT);
+
+	if (IS_ENABLED(CONFIG_APP_UX_CONNECTED_LED_GREEN_ONLY)) {
+		if (CONFIG_APP_UX_CONNECTED_LED > 0) {
+			struct led_msg off_r = {
+				.type = LED_COMMAND_OFF,
+				.led_number = CONFIG_APP_UX_CONNECTED_LED - 1,
+			};
+
+			zbus_chan_pub(&LED_CMD_CHAN, &off_r, K_NO_WAIT);
+		}
+		struct led_msg off_b = {
+			.type = LED_COMMAND_OFF,
+			.led_number = CONFIG_APP_UX_CONNECTED_LED + 1,
+		};
+
+		zbus_chan_pub(&LED_CMD_CHAN, &off_b, K_NO_WAIT);
+	}
+}
+
 static void apply_wifi_state_led(enum app_wifi_state state)
 {
 	switch (state) {
 	case APP_WIFI_STATE_CONNECTING:
-		led_set(LED_COMMAND_ROTATE, 0);
+		led_rotate();
 		break;
 	case APP_WIFI_STATE_CONNECTED:
-		led_set(LED_COMMAND_ON, 0);
+		led_connected();
 		break;
 	case APP_WIFI_STATE_SOFTAP:
-		led_set(LED_COMMAND_ROTATE, 0);
+		led_rotate();
 		break;
 	case APP_WIFI_STATE_ERROR:
 		led_set(LED_COMMAND_BLINK, 100);
@@ -246,7 +315,7 @@ static int app_ux_init(void)
 {
 	/* Start boot animation.  led_module_init (priority 91) has already run
 	 * because this function runs at a higher priority number (>91). */
-	led_set(LED_COMMAND_ROTATE, 0);
+	led_rotate();
 
 	/* Unblock app_ux_led_work_fn — LED module is now fully initialised. */
 	atomic_set(&app_ux_ready, 1);
