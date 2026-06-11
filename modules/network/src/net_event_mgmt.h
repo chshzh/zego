@@ -19,22 +19,41 @@
 int network_wait_for_station_connected(k_timeout_t timeout);
 
 /**
- * @brief Called when Wi-Fi connectivity is established.
+ * @brief Called when the Wi-Fi association succeeds (L2 connected, before DHCP).
  *
- * Weak hook — override in the application to publish app-specific zbus
- * channels.  Called by the network module at:
- *   - STA / P2P_CLIENT: DHCP bound (IP assigned)
- *   - SoftAP / P2P_GO:  first station connected
+ * Weak hook — override in the application.  Fired at NET_EVENT_WIFI_CONNECT_RESULT
+ * success for STA and P2P_CLIENT modes.  At this point the device is associated
+ * with the AP but does not yet have a routable IP address.
  *
  * The default implementation is a no-op.
  *
- * @param mode     Active Wi-Fi mode at the time of connection.
+ * @param mode  Active Wi-Fi mode (ZEGO_WIFI_MODE_STA or ZEGO_WIFI_MODE_P2P_CLIENT).
+ */
+void zego_on_net_event_wifi_connect(enum zego_wifi_mode mode);
+
+/**
+ * @brief Called when STA or P2P_CLIENT obtains a DHCP-assigned IP address.
+ *
+ * Weak hook — override in the application.  Fired after DHCP negotiation
+ * completes and the device has a routable IP on the AP's subnet.
+ *
+ * @param mode     Active Wi-Fi mode (ZEGO_WIFI_MODE_STA or ZEGO_WIFI_MODE_P2P_CLIENT).
  * @param ip_addr  Device IP address string (NUL-terminated).
  * @param mac_addr Device MAC address string ("XX:XX:XX:XX:XX:XX").
- * @param ssid     Connected or hosted SSID (NUL-terminated).
+ * @param ssid     Connected SSID (NUL-terminated).
  */
-void zego_network_on_wifi_connected(enum zego_wifi_mode mode, const char *ip_addr,
-				    const char *mac_addr, const char *ssid);
+void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
+				  const char *mac_addr, const char *ssid);
+
+/**
+ * @brief Called when a station connects to the SoftAP or P2P_GO.
+ *
+ * Weak hook — override in the application.  Fired after the station table
+ * is updated, so @p sta_count reflects the count after the new connection.
+ *
+ * @param sta_count  Total stations currently connected (including the new one).
+ */
+void zego_on_net_event_wifi_ap_sta_connected(int sta_count);
 
 /**
  * @brief Called when Wi-Fi connectivity is lost.
@@ -42,7 +61,7 @@ void zego_network_on_wifi_connected(enum zego_wifi_mode mode, const char *ip_add
  * Weak hook — override in the application to publish app-specific zbus
  * channels.  The default implementation is a no-op.
  */
-void zego_network_on_wifi_disconnected(void);
+void zego_on_net_event_wifi_disconnect(void);
 
 /**
  * @brief Called when the SoftAP or P2P_GO access point is enabled and ready
@@ -52,7 +71,7 @@ void zego_network_on_wifi_disconnected(void);
  * NET_EVENT_WIFI_AP_ENABLE_RESULT succeeds, before any client connects.
  * Use this to update LEDs or state machines that should reflect "AP up"
  * rather than "first client joined" (which is reported by
- * zego_network_on_wifi_connected).
+ * zego_on_net_event_wifi_ap_sta_connected).
  *
  * The default implementation is a no-op.
  *
@@ -61,8 +80,8 @@ void zego_network_on_wifi_disconnected(void);
  * @param ssid     Hosted SSID (SoftAP); empty string for P2P_GO (SSID not
  *                 yet negotiated at AP_ENABLE time).
  */
-void zego_network_on_softap_ready(enum zego_wifi_mode mode, const char *ip_addr,
-				  const char *ssid);
+void zego_on_net_event_wifi_ap_enabled(enum zego_wifi_mode mode, const char *ip_addr,
+				       const char *ssid);
 
 /**
  * @brief Called when a SoftAP or P2P_GO client disconnects.
@@ -72,6 +91,6 @@ void zego_network_on_softap_ready(enum zego_wifi_mode mode, const char *ip_addr,
  *
  * @param remaining_clients  Number of stations still connected (0 = no clients).
  */
-void zego_network_on_softap_sta_disconnected(int remaining_clients);
+void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients);
 
 #endif /* NET_EVENT_MGMT_H */

@@ -24,9 +24,10 @@
  *
  *   App notification
  *   ─────────────────
- *   When connectivity is ready, zego_network_on_wifi_connected() is called.
- *   When connectivity is lost,  zego_network_on_wifi_disconnected() is called.
- *   Both are __weak and defined as no-ops here; each app overrides them in its
+ *   For STA/P2P_CLIENT: zego_on_net_event_dhcp_bound() is called when IP is assigned.
+ *   For SoftAP/P2P_GO:  zego_on_net_event_wifi_ap_sta_connected() is called when a station joins.
+ *   On link loss:       zego_on_net_event_wifi_disconnect() is called.
+ *   All are __weak and defined as no-ops here; each app overrides them in its
  *   own net_event_app.c to publish app-specific zbus channels.
  */
 
@@ -58,13 +59,19 @@ LOG_MODULE_REGISTER(zego_net_event_mgmt, CONFIG_ZEGO_NETWORK_LOG_LEVEL);
 
 #define L2_IF_EVENT_MASK ((uint64_t)(NET_EVENT_IF_DOWN | NET_EVENT_IF_UP))
 #define L2_WIFI_CONN_MASK                                                                          \
-	((uint64_t)(NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT))
-#define L2_SOFTAP_MASK                                                                             \
+	((uint64_t)(NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT |             \
+		    NET_EVENT_WIFI_SCAN_DONE))
+#define L2_AP_MASK                                                                                 \
 	((uint64_t)(NET_EVENT_WIFI_AP_ENABLE_RESULT | NET_EVENT_WIFI_AP_STA_CONNECTED |            \
 		    NET_EVENT_WIFI_AP_STA_DISCONNECTED))
 #define L3_WPA_SUPP_MASK ((uint64_t)(NET_EVENT_SUPPLICANT_READY | NET_EVENT_SUPPLICANT_NOT_READY))
 #define L3_IPV4_MASK     ((uint64_t)NET_EVENT_IPV4_DHCP_BOUND)
-#define L4_CONN_MASK     ((uint64_t)(NET_EVENT_L4_CONNECTED | NET_EVENT_L4_DISCONNECTED))
+/* NET_EVENT_L4_CONNECTED fires when *any* interface becomes routable (has an IP
+ * and is up). Useful for multi-interface boards (WiFi + Ethernet) where you want
+ * a single "network ready" signal without caring which interface delivered it.
+ * For single-interface WiFi-only apps, L2-WIFI_CONNECT_RESULT + L3-DHCP_BOUND
+ * are more precise and preferred. Uncomment if you add a second interface. */
+/* #define L4_CONN_MASK ((uint64_t)(NET_EVENT_L4_CONNECTED | NET_EVENT_L4_DISCONNECTED)) */
 
 /* ============================================================================
  * MODULE STATE
@@ -73,6 +80,7 @@ LOG_MODULE_REGISTER(zego_net_event_mgmt, CONFIG_ZEGO_NETWORK_LOG_LEVEL);
 
 static enum zego_wifi_mode active_mode = ZEGO_WIFI_MODE_SOFTAP;
 static bool network_connected;
+static bool initial_scan_done; /* set on first NET_EVENT_WIFI_SCAN_DONE */
 /* SSID captured at L4_CONNECTED or re-confirmed at DHCP_BOUND */
 static char sta_ssid[WIFI_SSID_MAX_LEN + 1];
 
@@ -117,10 +125,10 @@ static struct net_mgmt_event_callback iface_event_cb;
 static struct net_mgmt_event_callback wpa_event_cb;
 static struct net_mgmt_event_callback wifi_event_cb;
 #if IS_ENABLED(CONFIG_WIFI_NM_WPA_SUPPLICANT_AP)
-static struct net_mgmt_event_callback softap_event_cb;
+static struct net_mgmt_event_callback ap_event_cb;
 #endif
 static struct net_mgmt_event_callback ipv4_event_cb;
-static struct net_mgmt_event_callback l4_event_cb;
+/* static struct net_mgmt_event_callback l4_event_cb; */
 
 /* Work item: dispatches mode startup after WPA supplicant is ready.
  * Runs on the system workqueue (CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE), which is
@@ -198,8 +206,17 @@ static void iface_mac_to_str(struct net_if *iface, char out[18])
  * ============================================================================
  */
 
-void __weak zego_network_on_wifi_connected(enum zego_wifi_mode mode, const char *ip_addr,
-					   const char *mac_addr, const char *ssid)
+void __weak zego_on_net_event_wifi_connect(enum zego_wifi_mode mode)
+{
+	ARG_UNUSED(mode);
+}
+
+void __weak zego_on_net_event_wifi_disconnect(void)
+{
+}
+
+void __weak zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
+					 const char *mac_addr, const char *ssid)
 {
 	ARG_UNUSED(mode);
 	ARG_UNUSED(ip_addr);
@@ -207,19 +224,20 @@ void __weak zego_network_on_wifi_connected(enum zego_wifi_mode mode, const char 
 	ARG_UNUSED(ssid);
 }
 
-void __weak zego_network_on_wifi_disconnected(void)
-{
-}
-
-void __weak zego_network_on_softap_ready(enum zego_wifi_mode mode, const char *ip_addr,
-					 const char *ssid)
+void __weak zego_on_net_event_wifi_ap_enabled(enum zego_wifi_mode mode, const char *ip_addr,
+					      const char *ssid)
 {
 	ARG_UNUSED(mode);
 	ARG_UNUSED(ip_addr);
 	ARG_UNUSED(ssid);
 }
 
-void __weak zego_network_on_softap_sta_disconnected(int remaining_clients)
+void __weak zego_on_net_event_wifi_ap_sta_connected(int sta_count)
+{
+	ARG_UNUSED(sta_count);
+}
+
+void __weak zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 {
 	ARG_UNUSED(remaining_clients);
 }
@@ -243,10 +261,10 @@ static void l2_iface_event_handler(struct net_mgmt_event_callback *cb, uint64_t 
 
 	switch (mgmt_event) {
 	case NET_EVENT_IF_UP:
-		LOG_INF("NET_EVENT_IF_UP: iface=%s", ifname);
+		LOG_INF("L2-NET_EVENT_IF_UP: iface=%s", ifname);
 		break;
 	case NET_EVENT_IF_DOWN:
-		LOG_INF("NET_EVENT_IF_DOWN: iface=%s", ifname);
+		LOG_INF("L2-NET_EVENT_IF_DOWN: iface=%s", ifname);
 		break;
 	default:
 		LOG_DBG("Unhandled if event: 0x%08" PRIx64, mgmt_event);
@@ -255,29 +273,7 @@ static void l2_iface_event_handler(struct net_mgmt_event_callback *cb, uint64_t 
 }
 
 /* ============================================================================
- * L3: WPA SUPPLICANT EVENT HANDLER  (SUPPLICANT_READY / NOT_READY)
- * ============================================================================
- */
-
-static void l3_wpa_supp_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
-				      struct net_if *iface)
-{
-	switch (mgmt_event) {
-	case NET_EVENT_SUPPLICANT_READY:
-		LOG_INF("NET_EVENT_SUPPLICANT_READY");
-		k_work_submit(&start_mode_work);
-		break;
-	case NET_EVENT_SUPPLICANT_NOT_READY:
-		LOG_ERR("NET_EVENT_SUPPLICANT_NOT_READY");
-		break;
-	default:
-		LOG_DBG("Unhandled WPA event: 0x%08" PRIx64, mgmt_event);
-		break;
-	}
-}
-
-/* ============================================================================
- * L2: WIFI CONNECT RESULT HANDLER  (STA / P2P — connection attempt results)
+ * L2: WIFI CONNECT RESULT HANDLER  (STA / P2P GO and CLIENT — connection attempt results)
  * ============================================================================
  */
 
@@ -289,7 +285,8 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 		const struct wifi_status *status = (const struct wifi_status *)cb->info;
 
 		if (status->status == 0) {
-			LOG_INF("NET_EVENT_WIFI_CONNECT_RESULT: success");
+			LOG_INF("L2-NET_EVENT_WIFI_CONNECT_RESULT: success");
+			zego_on_net_event_wifi_connect(active_mode);
 			if (active_mode == ZEGO_WIFI_MODE_P2P_GO) {
 				int ret = wifi_setup_dhcp_server();
 
@@ -297,8 +294,14 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 					LOG_WRN("P2P_GO: DHCP server start failed (%d)", ret);
 				}
 			}
+		} else if (!initial_scan_done && status->status == 1) {
+			/* Status=1 before the first scan completes is the normal
+			 * "connect before scan" race in the supplicant state machine.
+			 * The supplicant will retry automatically after scanning. */
+			LOG_WRN("L2-NET_EVENT_WIFI_CONNECT_RESULT: pre-scan retry (status=1)");
 		} else {
-			LOG_ERR("NET_EVENT_WIFI_CONNECT_RESULT: failed: status=%d", status->status);
+			LOG_ERR("L2-NET_EVENT_WIFI_CONNECT_RESULT: failed: status=%d",
+				status->status);
 			switch (status->status) {
 			case 1:
 				LOG_ERR("  Reason: Generic failure");
@@ -335,9 +338,12 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 			status ? status->status : -1, reason, wifi_disconn_reason_str(reason),
 			wifi_utils_get_last_ssid() ? wifi_utils_get_last_ssid() : "<unknown>");
 		network_connected = false;
-		zego_network_on_wifi_disconnected();
+		zego_on_net_event_wifi_disconnect();
 		break;
 	}
+	case NET_EVENT_WIFI_SCAN_DONE:
+		initial_scan_done = true;
+		break;
 	default:
 		LOG_DBG("Unhandled Wi-Fi event: 0x%08" PRIx64, mgmt_event);
 		break;
@@ -345,13 +351,37 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 }
 
 /* ============================================================================
- * L2: SOFTAP EVENT HANDLER  (AP enable result, STA join/leave)
+ * L2: AP EVENT HANDLER  (SOFTAP/P2P_GO enable result, STA join/leave)
  * ============================================================================
+ *
+ * P2P Group Owner (GO) is an AP at the 802.11 / hostapd level.  WPA
+ * supplicant runs the same hostapd code path for both SoftAP and P2P_GO,
+ * so the kernel fires NET_EVENT_WIFI_AP_* events for BOTH modes.  This one
+ * handler therefore serves ZEGO_WIFI_MODE_SOFTAP and ZEGO_WIFI_MODE_P2P_GO.
+ *
+ * The two modes diverge in the following ways:
+ *
+ *   SoftAP:
+ *     - SSID is fixed at build time (CONFIG_ZEGO_WIIF_SOFTAP_SSID)
+ *     - Static IP only (no DHCP server)
+ *     - Cancels the SoftAP periodic-remind timer on first client
+ *     - Supports up to MAX_SOFTAP_STATIONS clients simultaneously
+ *
+ *   P2P_GO:
+ *     - SSID is negotiated by WPS and always starts with "DIRECT-"
+ *     - DHCP server is started when CONNECT_RESULT fires (see
+ *       l2_wifi_conn_event_handler), not here
+ *     - Cancels the WPS re-arm timer on first client
+ *     - Typically only one P2P client connects at a time
+ *
+ * The is_p2p_go flag inside NET_EVENT_WIFI_AP_STA_CONNECTED performs the
+ * branching — common bookkeeping (station table, semaphore, MAC logging)
+ * runs unconditionally for both modes.
  */
 
 #if IS_ENABLED(CONFIG_WIFI_NM_WPA_SUPPLICANT_AP)
-static void l2_softap_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
-				    struct net_if *iface)
+static void l2_ap_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
+				struct net_if *iface)
 {
 	ARG_UNUSED(iface);
 
@@ -360,10 +390,8 @@ static void l2_softap_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 	case NET_EVENT_WIFI_AP_ENABLE_RESULT: {
 		const struct wifi_status *status = (const struct wifi_status *)cb->info;
 
-		if (status->status == 0) {
-			LOG_INF("NET_EVENT_WIFI_AP_ENABLE_RESULT: success");
-		} else {
-			LOG_ERR("NET_EVENT_WIFI_AP_ENABLE_RESULT: failed: status=%d",
+		if (status->status != 0) {
+			LOG_ERR("L2-NET_EVENT_WIFI_AP_ENABLE_RESULT: failed: status=%d",
 				status->status);
 			break;
 		}
@@ -379,9 +407,10 @@ static void l2_softap_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 		net_if_ipv4_addr_add(ap_iface, &addr, NET_ADDR_MANUAL, 0);
 		net_if_ipv4_set_netmask_by_addr(ap_iface, &addr, &netmask);
 
-		LOG_INF("SoftAP enabled: SSID='%s' IP='%s' waiting for client",
+		LOG_INF("L2-NET_EVENT_WIFI_AP_ENABLE_RESULT: success SSID='%s' IP='%s' waiting for "
+			"client",
 			CONFIG_ZEGO_WIIF_SOFTAP_SSID, CONFIG_NET_CONFIG_MY_IPV4_ADDR);
-		zego_network_on_softap_ready(
+		zego_on_net_event_wifi_ap_enabled(
 			active_mode, CONFIG_NET_CONFIG_MY_IPV4_ADDR,
 			active_mode == ZEGO_WIFI_MODE_SOFTAP ? CONFIG_ZEGO_WIIF_SOFTAP_SSID : "");
 		break;
@@ -405,9 +434,6 @@ static void l2_softap_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 		int sta_count = softap_station_count();
 
 		k_mutex_unlock(&softap_mutex);
-
-		LOG_INF("NET_EVENT_WIFI_AP_STA_CONNECTED: mac=%s link_mode=%d clients=%d", mac_str,
-			sta->link_mode, sta_count);
 
 		k_sem_give(&station_connected_sem);
 
@@ -434,18 +460,18 @@ static void l2_softap_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 						 (char *)wstatus.ssid);
 				}
 
-				LOG_INF("Publishing connected event: mode=P2P_GO dk_ip=%s", dk_ip);
+				LOG_INF("L2-NET_EVENT_WIFI_AP_STA_CONNECTED: mac=%s mode=P2P_GO "
+					"ip=%s",
+					mac_str, dk_ip);
 			} else {
 				wifi_softap_cancel_remind_timer();
 				snprintf(ssid, sizeof(ssid), "%s", CONFIG_ZEGO_WIIF_SOFTAP_SSID);
-				LOG_INF("Publishing connected event: mode=SoftAP dk_ip=%s "
-					"clients=%d",
-					dk_ip, sta_count);
+				LOG_INF("L2-NET_EVENT_WIFI_AP_STA_CONNECTED: mac=%s mode=SoftAP "
+					"ip=%s clients=%d",
+					mac_str, dk_ip, sta_count);
 			}
 
-			zego_network_on_wifi_connected(is_p2p_go ? ZEGO_WIFI_MODE_P2P_GO
-								 : ZEGO_WIFI_MODE_SOFTAP,
-						       dk_ip, dk_mac, ssid);
+			zego_on_net_event_wifi_ap_sta_connected(sta_count);
 		}
 		break;
 	}
@@ -469,9 +495,9 @@ static void l2_softap_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 
 		k_mutex_unlock(&softap_mutex);
 
-		LOG_INF("NET_EVENT_WIFI_AP_STA_DISCONNECTED: mac=%s clients=%d", mac_str,
+		LOG_INF("L2-NET_EVENT_WIFI_AP_STA_DISCONNECTED: mac=%s clients=%d", mac_str,
 			rem_count);
-		zego_network_on_softap_sta_disconnected(rem_count);
+		zego_on_net_event_wifi_ap_sta_disconnected(rem_count);
 		break;
 	}
 
@@ -480,6 +506,28 @@ static void l2_softap_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 	}
 }
 #endif /* CONFIG_WIFI_NM_WPA_SUPPLICANT_AP */
+
+/* ============================================================================
+ * L3: WPA SUPPLICANT EVENT HANDLER  (SUPPLICANT_READY / NOT_READY)
+ * ============================================================================
+ */
+
+static void l3_wpa_supp_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
+				      struct net_if *iface)
+{
+	switch (mgmt_event) {
+	case NET_EVENT_SUPPLICANT_READY:
+		LOG_INF("L3-NET_EVENT_SUPPLICANT_READY");
+		k_work_submit(&start_mode_work);
+		break;
+	case NET_EVENT_SUPPLICANT_NOT_READY:
+		LOG_ERR("L3-NET_EVENT_SUPPLICANT_NOT_READY");
+		break;
+	default:
+		LOG_DBG("Unhandled WPA event: 0x%08" PRIx64, mgmt_event);
+		break;
+	}
+}
 
 /* ============================================================================
  * L3: DHCP BOUND HANDLER  (STA / P2P_CLIENT — invokes wifi_connected callback)
@@ -496,14 +544,19 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 #if defined(CONFIG_NET_DHCPV4)
 	const struct net_if_dhcpv4 *dhcpv4 = cb->info;
 	char ip[INET_ADDRSTRLEN] = "0.0.0.0";
+	char gw[INET_ADDRSTRLEN] = "0.0.0.0";
+	char mask[INET_ADDRSTRLEN] = "0.0.0.0";
+	struct in_addr gw_addr = net_if_ipv4_get_gw(iface);
+	struct in_addr mask_addr = net_if_ipv4_get_netmask_by_addr(iface, &dhcpv4->requested_ip);
 
 	net_addr_ntop(AF_INET, &dhcpv4->requested_ip, ip, sizeof(ip));
+	net_addr_ntop(AF_INET, &gw_addr, gw, sizeof(gw));
+	net_addr_ntop(AF_INET, &mask_addr, mask, sizeof(mask));
 #else
 	char ip[] = "0.0.0.0";
+	char gw[] = "0.0.0.0";
+	char mask[] = "0.0.0.0";
 #endif
-
-	/* Log full IP / netmask / gateway info */
-	wifi_print_dhcp_ip(iface, cb);
 
 	/* Re-query SSID at DHCP time — the iface status is fully settled here,
 	 * resolving the race where ssid_len == 0 at L4_CONNECTED time. */
@@ -515,8 +568,8 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 			 (char *)wstatus.ssid);
 	}
 
-	LOG_INF("NET_EVENT_IPV4_DHCP_BOUND: ip=%s ssid=%s mode=%s", ip,
-		sta_ssid[0] ? sta_ssid : "<unknown>", zego_mode_to_str(active_mode));
+	LOG_INF("L3-NET_EVENT_IPV4_DHCP_BOUND: mode=%s ip=%s mask=%s gw=%s",
+		zego_mode_to_str(active_mode), ip, mask, gw);
 
 	if (active_mode != ZEGO_WIFI_MODE_STA && active_mode != ZEGO_WIFI_MODE_P2P_GO &&
 	    active_mode != ZEGO_WIFI_MODE_P2P_CLIENT) {
@@ -525,55 +578,39 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 	}
 
 	network_connected = true;
+	wifi_print_status();
 
 	bool is_p2p_client = (strncmp(sta_ssid, "DIRECT-", 7) == 0);
 	char mac[18];
 
 	iface_mac_to_str(iface, mac);
 
-	LOG_INF("Publishing connected event: mode=%s ip=%s ssid=%s",
-		is_p2p_client ? "P2P_CLIENT" : "STA", ip, sta_ssid);
-
-	zego_network_on_wifi_connected(
-		is_p2p_client ? ZEGO_WIFI_MODE_P2P_CLIENT : ZEGO_WIFI_MODE_STA, ip, mac, sta_ssid);
+	zego_on_net_event_dhcp_bound(is_p2p_client ? ZEGO_WIFI_MODE_P2P_CLIENT : ZEGO_WIFI_MODE_STA,
+				     ip, mac, sta_ssid);
 }
 
 /* ============================================================================
- * L4: CONNECT / DISCONNECT HANDLER  (early SSID capture)
+ * L4: CONNECT / DISCONNECT HANDLER  (commented out — see L4_CONN_MASK note)
  * ============================================================================
  */
-
-static void l4_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
-			     struct net_if *iface)
-{
-	char ifname[IFNAMSIZ + 1] = {0};
-	int ret = net_if_get_name(iface, ifname, sizeof(ifname) - 1);
-
-	if (ret < 0) {
-		ifname[0] = '?';
-		ifname[1] = '\0';
-	}
-
-	ARG_UNUSED(cb);
-
-	switch (mgmt_event) {
-	case NET_EVENT_L4_CONNECTED: {
-		char ip_str[INET_ADDRSTRLEN] = "0.0.0.0";
-		struct in_addr *ifaddr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
-
-		if (ifaddr != NULL) {
-			net_addr_ntop(AF_INET, ifaddr, ip_str, sizeof(ip_str));
-		}
-		LOG_INF("NET_EVENT_L4_CONNECTED: iface=%s ip=%s", ifname, ip_str);
-		break;
-	}
-	case NET_EVENT_L4_DISCONNECTED:
-		LOG_INF("NET_EVENT_L4_DISCONNECTED: iface=%s", ifname);
-		break;
-	default:
-		break;
-	}
-}
+/*
+ * static void l4_event_handler(struct net_mgmt_event_callback *cb,
+ *                               uint64_t mgmt_event, struct net_if *iface)
+ * {
+ *     char ifname[IFNAMSIZ + 1] = {0};
+ *     net_if_get_name(iface, ifname, sizeof(ifname) - 1);
+ *     switch (mgmt_event) {
+ *     case NET_EVENT_L4_CONNECTED:
+ *         LOG_INF("L4-NET_EVENT_L4_CONNECTED: iface=%s", ifname);
+ *         break;
+ *     case NET_EVENT_L4_DISCONNECTED:
+ *         LOG_INF("L4-NET_EVENT_L4_DISCONNECTED: iface=%s", ifname);
+ *         break;
+ *     default:
+ *         break;
+ *     }
+ * }
+ */
 
 /* ============================================================================
  * MODE STARTUP WORK ITEM  (runs on system workqueue after WPA supp ready)
@@ -597,7 +634,7 @@ static void start_mode_work_handler(struct k_work *work)
 					"use 'wifi cred add' to provision",
 					rc);
 			} else {
-				LOG_INF("Auto-connecting with stored credentials...");
+				LOG_INF("Auto-connecting with stored credentials (if exists)...");
 			}
 		}
 		break;
@@ -655,9 +692,9 @@ int network_module_init(void)
 	net_mgmt_add_event_callback(&wifi_event_cb);
 
 #if IS_ENABLED(CONFIG_WIFI_NM_WPA_SUPPLICANT_AP)
-	/* L2: SoftAP events */
-	net_mgmt_init_event_callback(&softap_event_cb, l2_softap_event_handler, L2_SOFTAP_MASK);
-	net_mgmt_add_event_callback(&softap_event_cb);
+	/* L2: AP events (SoftAP + P2P_GO) */
+	net_mgmt_init_event_callback(&ap_event_cb, l2_ap_event_handler, L2_AP_MASK);
+	net_mgmt_add_event_callback(&ap_event_cb);
 #endif
 
 	/* L3: WPA supplicant */
@@ -668,9 +705,9 @@ int network_module_init(void)
 	net_mgmt_init_event_callback(&ipv4_event_cb, l3_ipv4_event_handler, L3_IPV4_MASK);
 	net_mgmt_add_event_callback(&ipv4_event_cb);
 
-	/* L4: connect/disconnect for early SSID capture */
-	net_mgmt_init_event_callback(&l4_event_cb, l4_event_handler, L4_CONN_MASK);
-	net_mgmt_add_event_callback(&l4_event_cb);
+	/* L4: uncomment if you need a unified "any interface routable" signal.
+	 * net_mgmt_init_event_callback(&l4_event_cb, l4_event_handler, L4_CONN_MASK);
+	 * net_mgmt_add_event_callback(&l4_event_cb); */
 
 	LOG_INF("All network event handlers initialized");
 	/* Mode startup is deferred to start_mode_work, submitted by NET_EVENT_SUPPLICANT_READY. */
