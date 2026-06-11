@@ -44,31 +44,4 @@ if(CONFIG_ZEGO_WIFI)
                 zephyr_compile_definitions(APP_VERSION_STRING="${_APP_VERSION_STRING}")
         endif()
 
-        # -----------------------------------------------------------------------
-        # PRD_VERSION — from docs/pm-prd/PRD.md (graceful fallback to "unknown")
-        # -----------------------------------------------------------------------
-        file(STRINGS ${APPLICATION_SOURCE_DIR}/docs/pm-prd/PRD.md _PRD_LINES
-                REGEX "\\| Version +\\|")
-        if(_PRD_LINES)
-                list(GET _PRD_LINES 0 _PRD_LINE)
-                string(REGEX REPLACE ".*\\| Version +\\| ([^ |]+) \\|.*" "\\1"
-                        _PRD_VERSION "${_PRD_LINE}")
-        else()
-                set(_PRD_VERSION "unknown")
-        endif()
-        zephyr_compile_definitions(PRD_VERSION="${_PRD_VERSION}")
-
-        # -----------------------------------------------------------------------
-        # SPECS_VERSION — from docs/dev-specs/overview.md (graceful fallback)
-        # -----------------------------------------------------------------------
-        file(STRINGS ${APPLICATION_SOURCE_DIR}/docs/dev-specs/overview.md _SPECS_LINES
-                REGEX "\\| Version +\\|")
-        if(_SPECS_LINES)
-                list(GET _SPECS_LINES 0 _SPECS_LINE)
-                string(REGEX REPLACE ".*\\| Version +\\| ([^ |]+) \\|.*" "\\1"
-                        _SPECS_VERSION "${_SPECS_LINE}")
-        else()
-                set(_SPECS_VERSION "unknown")
-        endif()
-        zephyr_compile_definitions(SPECS_VERSION="${_SPECS_VERSION}")
 endif()

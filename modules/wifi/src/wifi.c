@@ -97,7 +97,6 @@ void zego_banner_wifi_info(void)
 	}
 
 	LOG_INF("Current Wi-Fi Mode:  %s", mode_str);
-	LOG_INF("==============================================");
 
 #if CONFIG_NRF70_AP_MODE || CONFIG_NRF70_P2P_MODE
 	LOG_INF("Type 'app_wifi_mode ["
@@ -109,14 +108,13 @@ void zego_banner_wifi_info(void)
 		"|p2p_go|p2p_client"
 #endif
 		"]' to change mode.");
-	LOG_INF("==============================================");
 #endif
 
-	LOG_INF("Connection instructions:");
+	LOG_INF("----------------------------------------------");
 
 	switch (mode) {
 	case ZEGO_WIFI_MODE_STA:
-		LOG_INF("STA mode - connect using any available option:");
+		LOG_INF("Connect using any available option for the current Wi-Fi Mode:");
 
 #if CONFIG_NET_L2_WIFI_SHELL
 		LOG_INF("----------------------------------------------");
@@ -169,7 +167,7 @@ void zego_banner_wifi_info(void)
 
 #if CONFIG_NRF70_P2P_MODE
 	case ZEGO_WIFI_MODE_P2P_GO:
-		LOG_INF("P2P_GO mode: P2P group + WPS PIN auto-started at boot.");
+		LOG_INF("P2P_GO mode: P2P group owner + WPS PIN auto-started at boot.");
 		LOG_INF("1. P2P Peer: Turn on Wi-Fi, disconnect from other APs");
 		LOG_INF("2. P2P Peer: Wi-Fi Direct -> wait for DK, select it, enter PIN 12345678");
 		break;
@@ -267,11 +265,12 @@ static void print_banner(const char *version, const char *prd_version, const cha
 	}
 
 	LOG_INF("==============================================");
-	zego_banner_wifi_info();
 	zego_banner_app_extra();
+	zego_banner_wifi_info();
 }
 
 void zego_wifi_print_banner(void)
 {
-	print_banner(APP_VERSION_STRING, PRD_VERSION, SPECS_VERSION);
+	print_banner(APP_VERSION_STRING, CONFIG_ZEGO_APP_PRD_VERSION,
+		     CONFIG_ZEGO_APP_SPECS_VERSION);
 }

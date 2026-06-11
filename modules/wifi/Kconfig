@@ -66,6 +66,24 @@ endchoice
 
 endif # ZEGO_WIFI_MODE_SELECTOR
 
+config ZEGO_APP_PRD_VERSION
+	string "PRD version this firmware was implemented against"
+	default "unknown"
+	help
+	  Set to the PRD Changelog timestamp (YYYY-MM-DD-HH-MM) of the PRD version
+	  used when writing this firmware.  Updated by the developer in prj.conf
+	  whenever the implementation is synced to a new PRD revision.
+	  Printed in the boot banner as "PRD: <version>".
+
+config ZEGO_APP_SPECS_VERSION
+	string "Specs version this firmware was implemented against"
+	default "unknown"
+	help
+	  Set to the Specs Changelog timestamp (YYYY-MM-DD-HH-MM) of the
+	  overview.md version used when writing this firmware.  Updated by the
+	  developer in prj.conf whenever the implementation is synced to a new
+	  specs revision.  Printed in the boot banner as "Specs: <version>".
+
 module = ZEGO_WIFI
 module-str = zego_wifi
 source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
