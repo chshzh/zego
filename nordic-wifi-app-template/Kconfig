@@ -8,7 +8,7 @@ menu "Nordic Wi-Fi App Template"
 
 config APP_WIFI_SSID
 	string "Wi-Fi SoftAP SSID"
-	default "nRF_AP"
+	default "nRF7x_AP"
 	help
 	  SSID used when operating in SoftAP or P2P_GO mode.
 
