@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Product Name | Nordic Wi-Fi App Template |
-| Version | 2026-06-05-09-38 |
+| Version | 2026-06-09-17-25 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Draft |
@@ -20,6 +20,9 @@
 | 2026-06-04-18-00 | Added UX behaviors: Button 0 gestures (long-press mode cycle, double-click BLE prov toggle, single-click status), LED 0 Wi-Fi state feedback (rotate on boot/connecting, solid on connected, slow blink SoftAP, breathe BLE prov, fast blink error) |
 | 2026-06-04-22-00 | Updated LED 0 SoftAP behavior: ROTATE when AP is up with no clients connected (was slow BLINK); solid ON when a client connects; back to ROTATE when last client disconnects |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK as a target board: 5 buttons (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5), 9 LEDs (ROTATE over RGB1 only); BLE prov disabled (1 MB flash); DTS overlay required for nRF7002EK SPI pinout |
+| 2026-06-09-16-03 | nRF5340 Audio DK LED UX: ROTATE sweeps RGB1+RGB2 (6 LEDs) while connecting; solid green on RGB2 when connected (replaces plain solid-ON) |
+| 2026-06-09-16-12 | Corrected nRF5340 Audio DK ROTATE range to RGB2 only [3,4,5]; added developer capability: ROTATE accepts an explicit LED index array so any subset of LEDs can rotate |
+| 2026-06-09-17-25 | P2P_CLIENT mode: auto-start peer discovery at boot; try WPS PBC first, fall back to PIN 12345678; retry discovery every 30 s if no peer found; wait 5 s and re-discover on disconnect; added FR-107 |
 
 ---
 
@@ -67,7 +70,7 @@ Starting a new nRF7x Wi-Fi project from a blank Zephyr sample requires setting u
   - **BLE provisioning** (nRF54LM20DK only, `CONFIG_ZEGO_WIFI_BLE_PROV=y`): use the *nRF Wi-Fi Provisioner* phone app to push credentials over BLE; credentials saved to flash
 - [x] **SoftAP mode** — device creates its own Wi-Fi hotspot; clients can connect to `192.168.7.1`
 - [x] **P2P_GO mode** — device is the Wi-Fi Direct Group Owner; auto-starts at boot with WPS PIN `12345678`
-- [x] **P2P_CLIENT mode** — device joins a phone's P2P group via `wifi p2p connect <MAC> pbc`
+- [x] **P2P_CLIENT mode** — device auto-starts P2P peer discovery at boot; connects via WPS PBC first (peer pushes a button to accept), falling back to PIN `12345678` if PBC is not accepted; retries discovery every 30 s if no peer is found; waits 5 s and re-discovers automatically on disconnect
 - [x] **Runtime mode switching** — `app_wifi_mode [sta|softap|p2p_go|p2p_client]` saves to NVS and reboots
 - [x] **Default mode on fresh flash**: P2P_GO
 
@@ -100,11 +103,13 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 | BLE provisioning active | BREATHE | Matches BLE convention |
 | Disconnected / error | Fast BLINK (100 ms half-period) | Attention needed |
 
-> On nRF54LM20DK (4 LEDs) the ROTATE effect chases across all four. On nRF7002DK (2 LEDs) it chases across both LEDs. On nRF5340 Audio DK (9 LEDs) it chases across RGB1 only (indices 0–2), leaving RGB2 and mono LEDs off.
+> On nRF54LM20DK (4 LEDs) ROTATE chases across all four. On nRF7002DK (2 LEDs) it chases across both. On nRF5340 Audio DK (9 LEDs) ROTATE chases across **RGB2 only (indices 3–5)**; when connected, RGB2 lights solid **green** (green channel, index 4). RGB1 and mono LEDs remain off throughout, keeping RGB2 the dedicated Wi-Fi state indicator.
+>
+> **Developer capability**: `LED_CMD_CHAN` ROTATE commands accept an explicit LED index array, allowing any subset of LEDs (contiguous or not, e.g. `{0, 3, 7, 8}`) to participate in the rotation.
 
 ### 2.3 Application Customisation Point
 
-- [x] `src/modules/network/net_event_app.c` — weak-hook overrides `zego_network_on_wifi_connected()` and `zego_network_on_wifi_disconnected()`; contains TODO-annotated patterns for publishing app-level zbus channels.
+- [x] `src/modules/network/net_event_app.c` — weak-hook overrides `zego_on_net_event_dhcp_bound()` and `zego_on_net_event_wifi_disconnect()`; contains TODO-annotated patterns for publishing app-level zbus channels.
 
 ### 2.4 Developer Features
 
@@ -127,7 +132,7 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 | FR-005 | developer | switch to SoftAP mode and have a client connect | I can test AP mode | `app_wifi_mode softap` + reboot → client joins `192.168.7.1` |
 | FR-006 | developer | switch to P2P_GO mode | Device auto-starts P2P group at boot | WPS PIN logged; phone joins via Wi-Fi Direct |
 | FR-007 | developer | have mode persist across power cycles | I don't re-enter mode on every boot | `app_wifi_mode X` + power cycle → mode X at next boot |
-| FR-008 | developer | see connection events in `net_event_app.c` | I have a clear hook to start my application logic | `zego_network_on_wifi_connected()` called with correct `mode`, `ip_addr`, `mac_addr`, `ssid` |
+| FR-008 | developer | see connection events in `net_event_app.c` | I have a clear hook to start my application logic | `zego_on_net_event_dhcp_bound()` called with correct `mode`, `ip_addr`, `mac_addr`, `ssid` |
 
 ### P1 — Should Have
 
@@ -137,8 +142,9 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 | FR-102 | developer | control LEDs via `LED_CMD_CHAN` | I can add LED feedback immediately | `LED_CMD_CHAN` message changes LED state |
 | FR-103 | developer | see heap usage logged periodically | I detect memory leaks early | Heap high-water mark logged every N minutes |
 | FR-104 | evaluator | cycle Wi-Fi mode with a long button press | I can switch modes without a UART shell | Button 0 held ≥ 3 s → next mode saved to NVS → device reboots into new mode |
-| FR-105 | evaluator | see Wi-Fi connection state on LED 0 | I can tell at a glance whether the device is connected | ROTATE while connecting → solid ON when connected (STA/P2P) / ROTATE when SoftAP up with no clients / solid ON when SoftAP client connected / breathe in BLE prov / fast blink on error |
+| FR-105 | evaluator | see Wi-Fi connection state on LED 0 | I can tell at a glance whether the device is connected | ROTATE while connecting → solid ON when connected (STA/P2P) / ROTATE when SoftAP up with no clients / solid ON when SoftAP client connected / breathe in BLE prov / fast blink on error; on nRF5340 Audio DK ROTATE uses RGB2 only ([3,4,5]) and connected state shows solid green on RGB2 (index 4) |
 | FR-106 | evaluator | toggle BLE provisioning with a double-click (nRF54LM20DK) | I can enter/exit provisioning mode without the shell | Double-click on Button 0 toggles BLE provisioning advertising |
+| FR-107 | developer | switch to P2P_CLIENT mode and have the device auto-discover and connect to a P2P GO peer | I can test P2P client mode without manual shell commands | (1) `app_wifi_mode p2p_client` + reboot → device logs connection instructions and starts discovery automatically; (2) WPS PBC attempted first — if peer pushes its button, DHCP IP is assigned and `zego_on_net_event_dhcp_bound()` is called; (3) if PBC is not accepted within timeout, device falls back to PIN `12345678`; (4) if no peer found in 30 s, discovery restarts; (5) on disconnect, device waits 5 s then restarts discovery |
 
 ---
 
@@ -159,4 +165,4 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 |---|---|---|---|
 | nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002eb2` | Enabled | 3 buttons, 4 LEDs |
 | nRF7002DK | `nrf7002dk/nrf5340/cpuapp` + `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p` | Disabled (1 MB flash too tight) | 2 buttons, 2 LEDs |
-| nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002ek` | Disabled (1 MB flash too tight) | 5 buttons (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5), 9 LEDs; ROTATE on RGB1 only |
+| nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002ek` | Disabled (1 MB flash too tight) | 5 buttons (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5), 9 LEDs; ROTATE on RGB2 only [3,4,5]; solid green (index 4) when connected |

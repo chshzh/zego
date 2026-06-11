@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-05-09-38 |
-| PRD Version | 2026-06-05-09-38 |
+| Version | 2026-06-09-17-25 |
+| PRD Version | 2026-06-09-17-25 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -20,6 +20,7 @@
 | 2026-06-04-18-00 | Added UX module spec (ux.md); updated spec index and PRD mapping for FR-104/105/106; noted APP_WIFI_STATE_CHAN in architecture summary |
 | 2026-06-04-22-00 | Updated ux.md and PRD for revised SoftAP LED behavior (ROTATE/solid ON) |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK target; updated Target Board(s), architecture.md, and ux.md; added board conf + DTS overlay + hci_ipc netcore conf |
+| 2026-06-09-17-25 | Updated to PRD v2026-06-09-17-25: added FR-107 P2P_CLIENT auto-connect to PRD mapping; network-spec.md updated with auto-connect sequence, new API, Kconfig, test points |
 | 2026-06-04-17-09 | Initial overview — template extracted from nordic-wifi-webdash; webserver removed; all four Wi-Fi modes + three STA provisioning paths; architecture.md added |
 
 ---
@@ -39,7 +40,7 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 |---|---|---|
 | [architecture.md](architecture.md) | System overview, module map, Zbus channels, SYS_INIT boot sequence, memory budget | All |
 | [zego/wifi — wifi-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi/docs/wifi-spec.md) | Startup banner, Wi-Fi mode selector, `app_wifi_mode` shell command, NVS persistence, weak override hooks | FR-001, FR-006, FR-007 |
-| [zego/network — network-spec.md](https://github.com/chshzh/zego/blob/main/modules/network/docs/network-spec.md) | Wi-Fi event handling, STA/SoftAP/P2P_GO/P2P_CLIENT paths, net event mgmt, `zego_network_on_wifi_connected` weak hook | FR-002–FR-008 |
+| [zego/network — network-spec.md](https://github.com/chshzh/zego/blob/main/modules/network/docs/network-spec.md) | Wi-Fi event handling, STA/SoftAP/P2P_GO/P2P_CLIENT paths, net event mgmt, `zego_on_net_event_dhcp_bound` weak hook | FR-002–FR-008 |
 | [zego/wifi_ble_prov — wifi-ble-prov-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi_ble_prov/docs/wifi-ble-prov-spec.md) | BLE provisioning (nRF Wi-Fi Provisioner), `WIFI_CHAN` owner, rotating credential reconnect | FR-004 |
 | [zego/button — button-spec.md](https://github.com/chshzh/zego/blob/main/modules/button/docs/button-spec.md) | Gesture detection (click, double-click, long press), `BUTTON_CHAN` | FR-101 |
 | [zego/led — led-spec.md](https://github.com/chshzh/zego/blob/main/modules/led/docs/led-spec.md) | Per-LED state machine (static, blink, breathe, rotate), `LED_CMD_CHAN` | FR-102 |
@@ -83,6 +84,7 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | FR-104 Button 0 mode cycle | [ux.md](ux.md) | Specified |
 | FR-105 LED Wi-Fi state feedback | [ux.md](ux.md) | Specified |
 | FR-106 BLE prov double-click | [ux.md](ux.md) | Specified |
+| FR-107 P2P_CLIENT auto-connect | [network-spec.md](../../network/docs/network-spec.md) | Specified |
 
 ---
 

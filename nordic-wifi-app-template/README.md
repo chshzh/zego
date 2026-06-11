@@ -129,7 +129,7 @@ Once Wi-Fi connects, the template logs the event from `net_event_app.c`:
 Wi-Fi connected: mode=STA ip=192.168.1.42 mac=AA:BB:CC:DD:EE:FF ssid=MyNetwork
 ```
 
-This confirms the `zego_network_on_wifi_connected()` callback fired — the hook where you add your application logic.
+This confirms the `zego_on_net_event_dhcp_bound()` callback fired — the hook where you add your application logic.
 
 ---
 
@@ -172,7 +172,7 @@ External zego modules (referenced via `EXTRA_ZEPHYR_MODULES` in `CMakeLists.txt`
 
 ```text
 ../modules/wifi/          ← Wi-Fi mode selector, NVS persistence, `app_wifi_mode` shell command
-../modules/network/       ← Wi-Fi event dispatcher, DHCP handling, `zego_network_on_wifi_*` callbacks
+../modules/network/       ← Wi-Fi event dispatcher, DHCP handling, `zego_on_net_event_wifi_*` callbacks
 ../modules/button/        ← GPIO debounce, BUTTON_CHAN publish
 ../modules/led/           ← LED_CMD_CHAN subscriber, ROTATE/BLINK/BREATHE effects
 ../modules/wifi_ble_prov/ ← BLE provisioning server (nRF54LM20DK; optional overlay on others)
@@ -294,7 +294,7 @@ west flash -d build_nrf5340_audio_dk
 - **NVS erase resets everything.** `--erase` (nRF7002DK / nRF5340 Audio DK) and `--recover` (nRF54LM20DK) wipe NVS — the device wakes in P2P_GO mode and Wi-Fi credentials must be re-entered.
 - **nRF5340 Audio DK LED ROTATE** uses only RGB1 (channels idx 0–2) so RGB2 and the mono LEDs stay available for application use.
 - **nRF5340 Audio DK DTS overlay** (`boards/nrf5340_audio_dk_nrf5340_cpuapp.overlay`) maps the nRF7002EK SPI bus to the Audio DK's Arduino header — this is required; the nRF54LM20DK shield handles its own pinout without an overlay.
-- **Customisation entry point** is `src/modules/network/net_event_app.c`. Override `zego_network_on_wifi_connected()` and `zego_network_on_wifi_disconnected()` — the file contains inline TODO comments and a 4-step example for publishing a Zbus channel.
+- **Customisation entry point** is `src/modules/network/net_event_app.c`. Override `zego_on_net_event_dhcp_bound()` and `zego_on_net_event_wifi_disconnect()` — the file contains inline TODO comments and a 4-step example for publishing a Zbus channel.
 - **Heap monitor** logs the high-water mark periodically (interval configurable via `CONFIG_APP_HEAP_MONITOR_INTERVAL_S`). Watch for steady growth as an early sign of leaks.
 
 ---

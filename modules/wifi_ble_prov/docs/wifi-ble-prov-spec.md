@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/wifi_ble_prov` |
-| Version | 2026-06-05-09-31 |
+| Version | 2026-06-11-13-52 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -18,6 +18,7 @@
 |---|---|
 | 2026-06-04-17-10 | Initial spec — reverse-designed from source |
 | 2026-06-05-09-31 | Added Supported Hardware section; documented nRF5340 Audio DK + nRF7002EK + BLE network-core constraint |
+| 2026-06-11-13-52 | Updated hook name references: `zego_network_on_wifi_connected`→`zego_on_net_event_dhcp_bound`, `zego_network_on_wifi_disconnected`→`zego_on_net_event_wifi_disconnect` |
 
 ---
 
@@ -129,8 +130,8 @@ ZBUS_CHAN_DECLARE(WIFI_CHAN);   /* use in app files that publish or subscribe */
 - `WIFI_STA_DISCONNECTED` → schedules `update_adv_data_work` (K_NO_WAIT)
 
 **Application responsibility**: `net_event_app.c` must publish to `WIFI_CHAN` after calling
-`zbus_chan_pub(&WIFI_CHAN, &msg, K_NO_WAIT)` inside `zego_network_on_wifi_connected()` /
-`zego_network_on_wifi_disconnected()`. Without this publish, the BLE advertisement status
+`zbus_chan_pub(&WIFI_CHAN, &msg, K_NO_WAIT)` inside `zego_on_net_event_dhcp_bound()` /
+`zego_on_net_event_wifi_disconnect()`. Without this publish, the BLE advertisement status
 flags will not update.
 
 ---

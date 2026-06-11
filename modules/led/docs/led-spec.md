@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/led` |
-| Version | 2026-06-05-09-07 |
+| Version | 2026-06-09-16-19 |
 | PRD Version | N/A (standalone library module) |
 | Status | Stable |
 
@@ -20,6 +20,7 @@
 | 2026-06-02-11-38 | Hardware abstraction layer (`led_hw.h` + DK / Zephyr-LED backends); hardware-PWM breathe path for boards with PWM LEDs (`CONFIG_ZEGO_LED_USE_PWM`); `LED_STATE_CHAN` now publishes once per effect start, not per toggle; added `command` field to `led_state_msg`; thread-safe `atomic_t` effect state; T6 HW-PWM breathe test step in sample |
 | 2026-06-04-00-00 | **Full SMF redesign**: BLINK, BREATHE, and ROTATE are now proper SMF states (no bypass); zbus listener decoupled from SMF via `k_msgq` + `k_work` so all SMF transitions run on the system workqueue; `atomic_t` effect field removed; `CONFIG_ZEGO_LED_CMD_QUEUE_DEPTH` added; Mermaid state diagrams added |
 | 2026-06-05-09-07 | Added nRF5340 Audio DK support: 9 LEDs (RGB1 idx 0–2, RGB2 idx 3–5, mono idx 6–8); expanded NUM_LEDS range to 1–9; added `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS` to restrict rotate to a leading subset (Audio DK: 3, i.e. RGB1 only) |
+| 2026-06-09-16-19 | ROTATE index array: `struct led_msg` gains `rotate_count` (uint8_t) and `rotate_indices[NUM_LEDS]` (uint8_t[]); when `rotate_count > 0` the effect cycles through those specific indices instead of `0..ROTATE_NUM_LEDS-1`; backward-compatible (`rotate_count == 0` keeps old behaviour); `rotate` internal struct gains `count` + `indices[]`; `rotate_stop` and `rotate_work_fn` updated to dereference through index array |
 
 ---
 
@@ -55,7 +56,7 @@ software PWM for LEDs without a PWM channel.
 |-------|-------------|----------------|-------|
 | nRF54LM20DK | `nrf54lm20dk/nrf54lm20a/cpuapp` | LED0–LED3 (idx 0–3) | 4 LEDs |
 | nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | LED1 (idx 0), LED2 (idx 1) | 2 LEDs |
-| nRF5340 Audio DK | `nrf5340_audio_dk/nrf5340/cpuapp` | RGB1: led_0–led_2 (idx 0–2, PWM-capable); RGB2: led_3–led_5 (idx 3–5); mono: blue led_6, green led_7/led_8 (idx 6–8) | 9 LEDs total; DK backend drives all 9. ROTATE restricted to RGB1 (idx 0–2) via `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS=3` |
+| nRF5340 Audio DK | `nrf5340_audio_dk/nrf5340/cpuapp` | RGB1: led_0–led_2 (idx 0–2, PWM-capable); RGB2: led_3–led_5 (idx 3–5); mono: blue led_6, green led_7/led_8 (idx 6–8) | 9 LEDs total. Default ROTATE (`rotate_count==0`) covers idx 0–2 via `ROTATE_NUM_LEDS=3`. Pass `rotate_indices={3,4,5}` to sweep RGB2 only. |
 
 ---
 
@@ -96,8 +97,13 @@ enum led_msg_type {
 
 struct led_msg {
     enum led_msg_type type;
-    uint8_t  led_number; /* 0-based LED index; ignored for LED_COMMAND_ROTATE           */
-    uint16_t period_ms;  /* Effect period in ms; 0 = use Kconfig default                 */
+    uint8_t  led_number;                          /* 0-based LED index; ignored for ROTATE        */
+    uint16_t period_ms;                           /* Effect period in ms; 0 = Kconfig default     */
+    /* ROTATE index array — only used when type == LED_COMMAND_ROTATE.
+     * If rotate_count > 0: cycle through rotate_indices[0..rotate_count-1].
+     * If rotate_count == 0: fall back to default (indices 0..ROTATE_NUM_LEDS-1). */
+    uint8_t  rotate_count;                        /* Number of valid entries; 0 = use default     */
+    uint8_t  rotate_indices[CONFIG_ZEGO_LED_NUM_LEDS]; /* LED indices to include in the sweep   */
 };
 
 struct led_state_msg {
@@ -221,8 +227,11 @@ stateDiagram-v2
     ROTATE --> ROTATE : rotate.work tick\n→ hw_off(current)\n→ advance current\n→ hw_on(next)\n→ reschedule
 
     note right of ROTATE
-        entry: hw_on(LED[0]), schedule rotate.work
-        exit:  cancel rotate.work, hw_off(LED[current])
+        entry: build indices[] from msg or default,
+               hw_on(indices[0]), schedule rotate.work
+        tick:  hw_off(indices[cur]), cur++%count,
+               hw_on(indices[cur]), reschedule
+        exit:  cancel rotate.work, hw_off(indices[cur])
     end note
 ```
 
@@ -286,7 +295,7 @@ sequenceDiagram
 | `CONFIG_ZEGO_LED_BREATHE_PERIOD_MS` | int | `3000` | Breathe ramp duration per direction (ms); full cycle = 2× |
 | `CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS` | int | `20` | Software-PWM frame size for breathe (ms); steps per ramp = PERIOD/PWM |
 | `CONFIG_ZEGO_LED_ROTATE_PERIOD_MS` | int | `500` | Time each LED stays lit during rotate (ms) |
-| `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS` | int | `=ZEGO_LED_NUM_LEDS` | Number of LEDs (from idx 0) that participate in the rotate sweep. Defaults to all LEDs. Set smaller to restrict to a leading subset — e.g. Audio DK sets 3 to cycle RGB1 only (idx 0–2). Range 1–9. |
+| `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS` | int | `=ZEGO_LED_NUM_LEDS` | **Fallback** rotate count used when `led_msg.rotate_count == 0`. Selects indices `0..N-1`. Ignored when an explicit `rotate_indices[]` is supplied. Range 1–9. |
 
 Board-specific defaults (`boards/<board>.conf`):
 
@@ -294,7 +303,7 @@ Board-specific defaults (`boards/<board>.conf`):
 |-------|-----------|---------------------|
 | `nrf54lm20dk/nrf54lm20a/cpuapp` | 4 | 4 (default = NUM_LEDS) |
 | `nrf7002dk/nrf5340/cpuapp` | 2 | 2 (default = NUM_LEDS) |
-| `nrf5340_audio_dk/nrf5340/cpuapp` | 9 | 3 (RGB1: idx 0–2 only) |
+| `nrf5340_audio_dk/nrf5340/cpuapp` | 9 | 3 (fallback: idx 0–2; pass `rotate_indices={3,4,5}` to target RGB2) |
 
 ---
 
@@ -331,9 +340,26 @@ zbus_chan_pub(&LED_CMD_CHAN, &blink, K_NO_WAIT);
 struct led_msg breathe = { .type = LED_COMMAND_BREATHE, .led_number = 1 };
 zbus_chan_pub(&LED_CMD_CHAN, &breathe, K_NO_WAIT);
 
-/* Rotate all LEDs at 200 ms per step */
+/* Rotate all LEDs (default: 0..ROTATE_NUM_LEDS-1) at 200 ms per step */
 struct led_msg rotate = { .type = LED_COMMAND_ROTATE, .period_ms = 200 };
 zbus_chan_pub(&LED_CMD_CHAN, &rotate, K_NO_WAIT);
+
+/* Rotate a specific subset — e.g. RGB2 only (indices 3, 4, 5) */
+struct led_msg rotate_rgb2 = {
+    .type = LED_COMMAND_ROTATE,
+    .period_ms = 500,
+    .rotate_count = 3,
+    .rotate_indices = { 3, 4, 5 },
+};
+zbus_chan_pub(&LED_CMD_CHAN, &rotate_rgb2, K_NO_WAIT);
+
+/* Non-contiguous subset — e.g. corners of a 9-LED grid */
+struct led_msg rotate_corners = {
+    .type = LED_COMMAND_ROTATE,
+    .rotate_count = 4,
+    .rotate_indices = { 0, 3, 7, 8 },
+};
+zbus_chan_pub(&LED_CMD_CHAN, &rotate_corners, K_NO_WAIT);
 
 /* Stop any effect */
 struct led_msg stop = { .type = LED_COMMAND_OFF, .led_number = 0 };
@@ -389,7 +415,7 @@ CONFIG_ZEGO_LED=y
 | Breathe started (SW PWM) | `[zego_led] LED N BREATHE (SW PWM) ramp=X ms (N steps x M ms/step)` | INF |
 | Breathe started (HW PWM) | `[zego_led] LED N BREATHE (HW PWM) ramp=X ms (N steps x M ms/step)` | INF |
 | Breathe direction reversal | `[zego_led] LED N BREATHE direction -> UP/DOWN (step X/Y)` | DBG |
-| Rotate started | `[zego_led] Rotate started (period N ms, M LEDs)` | INF |
+| Rotate started | `[zego_led] Rotate started (period N ms, M LEDs, first=X)` | INF |
 | Invalid LED number | `[zego_led] Invalid LED number: N (max M)` | WRN |
 | LED_STATE_CHAN publish error | `[zego_led] Failed to publish LED_STATE_CHAN (led N): E` | ERR |
 

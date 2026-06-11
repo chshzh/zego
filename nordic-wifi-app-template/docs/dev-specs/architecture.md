@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-05-09-38 |
-| PRD Version | 2026-06-05-09-38 |
+| Version | 2026-06-09-17-25 |
+| PRD Version | 2026-06-09-17-25 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -19,6 +19,7 @@
 |---|---|
 | 2026-06-04-17-09 | Initial spec |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK to Board Differences table; updated BLE prov note |
+| 2026-06-09-17-25 | Updated to PRD v2026-06-09-17-25: fixed Board Differences — nRF5340 Audio DK ROTATE is RGB2 only [3–5], not RGB1 |
 
 ---
 
@@ -77,12 +78,12 @@ Plus one in-tree application file:
 ```c
 /* Defined as __weak no-ops in zego/network; override in net_event_app.c */
 
-void zego_network_on_wifi_connected(enum zego_wifi_mode mode,
+void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode,
                                     const char *ip_addr,
                                     const char *mac_addr,
                                     const char *ssid);
 
-void zego_network_on_wifi_disconnected(void);
+void zego_on_net_event_wifi_disconnect(void);
 ```
 
 **Trigger events by mode:**
@@ -156,7 +157,7 @@ combined flash of BLE host stack + P2P snippet + app exceeds the 1 MB limit. Re-
 | Flash | 2 MB | 1 MB | 1 MB |
 | RAM | 512 KB | 448 KB (app core) | 512 KB (app core) |
 | Buttons | 3 (BUTTON0–2) | 2 (SW0, SW1) | 5 (VOL-, VOL+, PLAY/PAUSE, BTN4, BTN5) |
-| LEDs | 4 | 2 | 9 (RGB1 + RGB2 + 3 mono; ROTATE on RGB1 only) |
+| LEDs | 4 | 2 | 9 (RGB1 idx 0–2, RGB2 idx 3–5, mono idx 6–8; ROTATE on **RGB2 only** [3–5]; solid green on idx 4 when connected) |
 | BLE provisioning | Enabled | Disabled (flash) | Disabled (flash) |
 | Network core | Single-core; `hci_ipc` build is harmless no-op | nRF5340 netcore runs `hci_ipc` for BLE | nRF5340 netcore runs `hci_ipc` for BLE |
 | Build shield | `-DSHIELD=nrf7002eb2` | — | `-DSHIELD=nrf7002ek` |

@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Module | app_ux |
-| Version | 2026-06-05-09-38 |
-| PRD Version | 2026-06-05-09-38 |
+| Version | 2026-06-09-17-25 |
+| PRD Version | 2026-06-09-17-25 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -18,8 +18,11 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-04-18-00 | Initial spec — Button 0 gestures, LED 0 Wi-Fi state feedback |
-| 2026-06-04-22-00 | SoftAP LED behavior: ROTATE when no clients (was slow BLINK); solid ON when client connected; ROTATE again when last client disconnects. Added `zego_network_on_softap_sta_disconnected()` hook. Updated APP_WIFI_STATE_CHAN table and state machine diagram. |
+| 2026-06-04-22-00 | SoftAP LED behavior: ROTATE when no clients (was slow BLINK); solid ON when client connected; ROTATE again when last client disconnects. Added `zego_on_net_event_softap_sta_disconnected()` hook. Updated APP_WIFI_STATE_CHAN table and state machine diagram. |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK: Button 0 = VOL-; ROTATE chases RGB1 only (3 LEDs); BLE prov double-click disabled (1 MB flash); board differences note added |
+| 2026-06-09-16-03 | nRF5340 Audio DK: ROTATE extends to RGB1+RGB2 (`CONFIG_ZEGO_LED_ROTATE_NUM_LEDS=6`); connected state drives LED 4 (green channel of RGB2) ON + LEDs 3 and 5 OFF, replacing plain LED_COMMAND_ON; new Kconfig `CONFIG_APP_UX_CONNECTED_LED` and `CONFIG_APP_UX_CONNECTED_LED_GREEN_ONLY` |
+| 2026-06-09-16-23 | Corrected nRF5340 Audio DK ROTATE to RGB2 only (indices 3–5); added `CONFIG_APP_UX_ROTATE_FIRST_LED` and `CONFIG_APP_UX_ROTATE_COUNT` Kconfig symbols; `ux.c` now uses `led_rotate()` + `led_connected()` helpers; long-press ack uses first rotate LED; removed `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS=3` from board conf |
+| 2026-06-09-17-25 | PRD Version sync to v2026-06-09-17-25 (FR-107 P2P_CLIENT added to PRD; no UX spec change required — P2P_CLIENT uses same ROTATE→solid-ON LED transitions as STA mode) |
 
 ---
 
@@ -37,6 +40,10 @@ Enable with `CONFIG_APP_UX_MODULE=y`.
 |--------|---------|-------------|
 | `CONFIG_APP_UX_MODULE` | `n` | Enable the UX module |
 | `CONFIG_APP_UX_INIT_PRIORITY` | `95` | `SYS_INIT` priority; must be > `ZEGO_LED_INIT_PRIORITY` (91) |
+| `CONFIG_APP_UX_ROTATE_FIRST_LED` | `0` | First LED index in the Wi-Fi ROTATE sweep; consecutive indices used up to `ROTATE_COUNT`. |
+| `CONFIG_APP_UX_ROTATE_COUNT` | `0` | Number of LEDs in the ROTATE sweep. `0` = LED module default (`ROTATE_NUM_LEDS` from idx 0). |
+| `CONFIG_APP_UX_CONNECTED_LED` | `0` | LED index turned ON for the CONNECTED state. Set to `4` on nRF5340 Audio DK (green channel of RGB2). |
+| `CONFIG_APP_UX_CONNECTED_LED_GREEN_ONLY` | `n` | When `y`, also send OFF to `CONNECTED_LED-1` and `CONNECTED_LED+1` for a pure-colour indicator. Set `y` on nRF5340 Audio DK. |
 
 ---
 
@@ -90,7 +97,9 @@ Double-click (nRF54LM20DK, CONFIG_ZEGO_WIFI_BLE_PROV=y):
 | `ERROR` (disconnected) | BLINK | 100 ms |
 | BLE prov active (local toggle) | BREATHE | Kconfig default |
 
-> **ROTATE LED count**: On nRF54LM20DK (4 LEDs) ROTATE chases across all four. On nRF7002DK (2 LEDs) it chases across both LEDs. On nRF5340 Audio DK (9 LEDs total) ROTATE chases across **RGB1 only (indices 0–2)**, controlled by `CONFIG_ZEGO_LED_ROTATE_NUM_LEDS=3`; RGB2 and mono LEDs remain off during the effect.
+> **ROTATE LED count**: On nRF54LM20DK (4 LEDs) ROTATE chases across all four. On nRF7002DK (2 LEDs) it chases across both. On nRF5340 Audio DK (9 LEDs total) ROTATE chases across **RGB2 only (indices 3–5)**, controlled by `CONFIG_APP_UX_ROTATE_FIRST_LED=3` and `CONFIG_APP_UX_ROTATE_COUNT=3`. RGB1 and mono LEDs remain off during the effect.
+>
+> **Connected state on nRF5340 Audio DK**: the UX module sends `LED_COMMAND_ON` to LED 4 (green channel of RGB2) and `LED_COMMAND_OFF` to LEDs 3 and 5 (red and blue channels), producing a solid-green indicator. Controlled by `CONFIG_APP_UX_CONNECTED_LED=4` and `CONFIG_APP_UX_CONNECTED_LED_GREEN_ONLY=y`.
 
 ---
 
@@ -100,13 +109,13 @@ Defined in `src/modules/network/net_event_app.c`. Declared in `src/modules/messa
 
 | Event | Published when |
 |-------|----------------|
-| `APP_WIFI_STATE_CONNECTED` | `zego_network_on_wifi_connected()` — any mode (STA, P2P_CLIENT, SoftAP client joined) |
-| `APP_WIFI_STATE_SOFTAP` | `zego_network_on_softap_ready()` (AP enabled) or `zego_network_on_softap_sta_disconnected()` with `remaining_clients == 0` |
-| `APP_WIFI_STATE_ERROR` | `zego_network_on_wifi_disconnected()` |
+| `APP_WIFI_STATE_CONNECTED` | `zego_on_net_event_dhcp_bound()` — any mode (STA, P2P_CLIENT, SoftAP client joined) |
+| `APP_WIFI_STATE_SOFTAP` | `zego_on_net_event_wifi_ap_enabled()` (AP enabled) or `zego_on_net_event_wifi_ap_sta_disconnected()` with `remaining_clients == 0` |
+| `APP_WIFI_STATE_ERROR` | `zego_on_net_event_wifi_disconnect()` |
 
 > `APP_WIFI_STATE_CONNECTING` is not published explicitly — the UX module's `SYS_INIT` starts ROTATE at boot unconditionally.
 
-> In SoftAP mode the state machine follows: ROTATE (AP enabled, no clients) → Solid ON (client joins) → ROTATE (last client leaves). The `zego_network_on_softap_sta_disconnected(remaining_clients)` hook triggers the revert to SOFTAP state when `remaining_clients == 0`.
+> In SoftAP mode the state machine follows: ROTATE (AP enabled, no clients) → Solid ON (client joins) → ROTATE (last client leaves). The `zego_on_net_event_wifi_ap_sta_disconnected(remaining_clients)` hook triggers the revert to SOFTAP state when `remaining_clients == 0`.
 
 ---
 

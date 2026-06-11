@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/network` |
-| Version | 2026-06-05-09-31 |
+| Version | 2026-06-11-13-52 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -18,6 +18,9 @@
 |---|---|
 | 2026-06-04-17-10 | Initial spec — reverse-designed from source |
 | 2026-06-05-09-31 | Added Supported Hardware section; documented nRF5340 Audio DK + nRF7002EK |
+| 2026-06-09-17-25 | P2P_CLIENT auto-connect: `wifi_run_p2p_client_mode()` starts peer discovery at boot; PBC first then PIN 12345678 fallback; 30 s retry, 5 s reconnect delay; added Kconfig, API table entry, test points |
+| 2026-06-10-00-00 | Clarified P2P_GO/SoftAP shared AP handler; renamed `l2_softap_event_handler`→`l2_ap_event_handler`, `L2_SOFTAP_MASK`→`L2_AP_MASK`, `softap_event_cb`→`ap_event_cb`, `zego_on_net_event_softap_ready`→`zego_on_net_event_wifi_ap_enabled`, `zego_on_net_event_softap_sta_disconnected`→`zego_on_net_event_wifi_ap_sta_disconnected`; added P2P_GO vs SoftAP comparison table |
+| 2026-06-11-13-52 | Expanded Weak-hook API section to all 6 hooks; added `zego_on_net_event_wifi_connect`, `zego_on_net_event_wifi_ap_sta_connected`, `zego_on_net_event_wifi_ap_enabled`, `zego_on_net_event_wifi_ap_sta_disconnected` with full signatures and trigger context |
 
 ---
 
@@ -26,7 +29,7 @@
 `zego/network` is the unified Wi-Fi / network event management layer for all zego-based
 applications. It handles the full lifecycle of all four Wi-Fi modes (SoftAP, STA, P2P_GO,
 P2P_CLIENT): waits for WPA supplicant ready, dispatches the selected mode's startup sequence,
-monitors network events across all layers (L2–L4), and fires two `__weak` callback hooks
+monitors network events across all layers (L2–L4), and fires six `__weak` callback hooks
 that applications override to publish app-specific zbus channels.
 
 The module has no application-specific logic and contains no zbus channels of its own. It is
@@ -78,36 +81,65 @@ and WPA supplicant is supported. Tested combinations:
 
 ### Weak-hook API
 
+All hooks are `__weak` no-ops in `net_event_mgmt.c`. Override with strong definitions in
+`src/modules/network/net_event_app.c`.
+
 ```c
-/* net_event_mgmt.h — override both in src/modules/network/net_event_app.c */
+/* net_event_mgmt.h — override in src/modules/network/net_event_app.c */
 
 /**
- * Called when Wi-Fi connectivity is established.
- *   STA / P2P_CLIENT  →  DHCP bound (IP assigned by AP or GO)
- *   SoftAP / P2P_GO   →  first client station associated
+ * Called when STA / P2P_CLIENT association succeeds (L2 connected, before DHCP).
+ * Device is associated but has no routable IP yet.
  */
-void zego_network_on_wifi_connected(enum zego_wifi_mode mode,
-                                    const char *ip_addr,   /* NUL-terminated dotted decimal */
-                                    const char *mac_addr,  /* "XX:XX:XX:XX:XX:XX" */
-                                    const char *ssid);     /* NUL-terminated, max 32 chars */
+void zego_on_net_event_wifi_connect(enum zego_wifi_mode mode);
+
+/**
+ * Called when STA / P2P_CLIENT obtains a DHCP-assigned IP, or when the first
+ * SoftAP / P2P_GO client associates (static IP).
+ */
+void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode,
+                                  const char *ip_addr,   /* NUL-terminated dotted decimal */
+                                  const char *mac_addr,  /* "XX:XX:XX:XX:XX:XX" */
+                                  const char *ssid);     /* NUL-terminated, max 32 chars */
 
 /**
  * Called when Wi-Fi connectivity is lost (DISCONNECT_RESULT received).
  */
-void zego_network_on_wifi_disconnected(void);
+void zego_on_net_event_wifi_disconnect(void);
+
+/**
+ * Called when the SoftAP or P2P_GO access point is enabled and ready to accept
+ * clients (NET_EVENT_WIFI_AP_ENABLE_RESULT success). Fired before any client connects.
+ * ssid is empty for P2P_GO (SSID not yet negotiated at AP_ENABLE time).
+ */
+void zego_on_net_event_wifi_ap_enabled(enum zego_wifi_mode mode,
+                                       const char *ip_addr,  /* gateway IP, static */
+                                       const char *ssid);
+
+/**
+ * Called after a SoftAP / P2P_GO client joins. sta_count reflects the count after
+ * the new connection (≥ 1).
+ */
+void zego_on_net_event_wifi_ap_sta_connected(int sta_count);
+
+/**
+ * Called after a SoftAP / P2P_GO client disconnects. remaining_clients reflects
+ * the count after removal (0 = no clients remain).
+ */
+void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients);
 ```
 
-Default implementations are `__weak` no-ops in `net_event_mgmt.c`. Override with strong
-definitions in the application.
+**Hook trigger map:**
 
-**Trigger events by mode:**
-
-| Mode | Hook called when… | IP source |
+| Hook | Trigger event | Mode(s) |
 |---|---|---|
-| STA | `NET_EVENT_IPV4_DHCP_BOUND` | DHCP from AP |
-| P2P_CLIENT | `NET_EVENT_IPV4_DHCP_BOUND` (SSID starts with `DIRECT-`) | DHCP from GO |
-| SoftAP | `NET_EVENT_WIFI_AP_STA_CONNECTED` (first client) | Static (`CONFIG_NET_CONFIG_MY_IPV4_ADDR`) |
-| P2P_GO | `NET_EVENT_WIFI_AP_STA_CONNECTED` (first client) | Static (`CONFIG_NET_CONFIG_MY_IPV4_ADDR`) |
+| `zego_on_net_event_wifi_connect` | `NET_EVENT_WIFI_CONNECT_RESULT` success | STA, P2P_CLIENT |
+| `zego_on_net_event_dhcp_bound` | `NET_EVENT_IPV4_DHCP_BOUND` | STA, P2P_CLIENT |
+| `zego_on_net_event_dhcp_bound` | `NET_EVENT_WIFI_AP_STA_CONNECTED` (first client) | SoftAP, P2P_GO |
+| `zego_on_net_event_wifi_disconnect` | `NET_EVENT_WIFI_DISCONNECT_RESULT` | STA, P2P_CLIENT |
+| `zego_on_net_event_wifi_ap_enabled` | `NET_EVENT_WIFI_AP_ENABLE_RESULT` success | SoftAP, P2P_GO |
+| `zego_on_net_event_wifi_ap_sta_connected` | `NET_EVENT_WIFI_AP_STA_CONNECTED` | SoftAP, P2P_GO |
+| `zego_on_net_event_wifi_ap_sta_disconnected` | `NET_EVENT_WIFI_AP_STA_DISCONNECTED` | SoftAP, P2P_GO |
 
 > P2P_CLIENT detection: the module inspects the SSID at DHCP_BOUND time; if it starts with
 > `DIRECT-`, the mode is reported as `ZEGO_WIFI_MODE_P2P_CLIENT`.
@@ -127,8 +159,35 @@ definitions in the application.
    SoftAP      → wifi_run_softap_mode()
    STA         → NET_REQUEST_WIFI_CONNECT_STORED
    P2P_GO      → wifi_run_p2p_go_mode()
-   P2P_CLIENT  → (no action; user runs 'wifi p2p find' + 'wifi p2p connect')
+   P2P_CLIENT  → wifi_run_p2p_client_mode()
 ```
+
+---
+
+## P2P_CLIENT Auto-Connect Sequence
+
+`wifi_run_p2p_client_mode()` drives peer discovery and connection without any shell interaction.
+
+```
+1. Start P2P peer discovery (WIFI_P2P_FIND, type=WIFI_P2P_FIND_START_WITH_FULL,
+                              timeout=P2P_CLIENT_FIND_TIMEOUT_S)
+2. NET_EVENT_WIFI_P2P_DEVICE_FOUND received → store peer MAC
+   → attempt WPS PBC (WIFI_P2P_CONNECT, method=WIFI_P2P_METHOD_PBC)
+3a. NET_EVENT_IPV4_DHCP_BOUND (SSID starts with DIRECT-) → CONNECTED
+    → zego_on_net_event_dhcp_bound() called
+3b. PBC not accepted (no DHCP within PBC window) →
+    → fall back to WPS PIN keypad (WIFI_P2P_CONNECT, method=WIFI_P2P_METHOD_KEYPAD,
+                                    pin=P2P_CLIENT_WPS_PIN)
+4a. NET_EVENT_IPV4_DHCP_BOUND → CONNECTED
+4b. PIN connection failed / no DHCP → restart from step 1 after P2P_CLIENT_FIND_TIMEOUT_S
+5. NET_EVENT_WIFI_DISCONNECT_RESULT in P2P_CLIENT mode →
+   → k_sleep(K_SECONDS(P2P_CLIENT_RECONNECT_DELAY_S))
+   → restart from step 1
+```
+
+LED feedback flows through `APP_WIFI_STATE_CHAN` in `net_event_app.c` — the UX module sees
+`APP_WIFI_STATE_CONNECTING` during discovery and `APP_WIFI_STATE_CONNECTED` after DHCP bound,
+driving the same ROTATE → solid-ON LED transitions as STA mode.
 
 ---
 
@@ -141,15 +200,23 @@ definitions in the application.
 | `NET_EVENT_SUPPLICANT_NOT_READY` | `l3_wpa_supp_event_handler` | Log error |
 | `NET_EVENT_WIFI_CONNECT_RESULT` success | `l2_wifi_conn_event_handler` | Log; if P2P_GO, start DHCP server |
 | `NET_EVENT_WIFI_CONNECT_RESULT` failure | `l2_wifi_conn_event_handler` | Log error with reason code |
-| `NET_EVENT_WIFI_DISCONNECT_RESULT` | `l2_wifi_conn_event_handler` | Clear `network_connected`; call `zego_network_on_wifi_disconnected()` |
-| `NET_EVENT_WIFI_AP_ENABLE_RESULT` success | `l2_softap_event_handler` (AP guard) | Re-assert static IP; log |
-| `NET_EVENT_WIFI_AP_STA_CONNECTED` | `l2_softap_event_handler` (AP guard) | Track station; `k_sem_give(&station_connected_sem)`; call `zego_network_on_wifi_connected()` |
-| `NET_EVENT_WIFI_AP_STA_DISCONNECTED` | `l2_softap_event_handler` (AP guard) | Remove station from table; log |
-| `NET_EVENT_IPV4_DHCP_BOUND` | `l3_ipv4_event_handler` | Log IP; re-query SSID; call `zego_network_on_wifi_connected()` |
+| `NET_EVENT_WIFI_DISCONNECT_RESULT` | `l2_wifi_conn_event_handler` | Clear `network_connected`; call `zego_on_net_event_wifi_disconnect()` |
+| `NET_EVENT_WIFI_AP_ENABLE_RESULT` success | `l2_ap_event_handler` (AP guard) | Re-assert static IP; call `zego_on_net_event_wifi_ap_enabled()` |
+| `NET_EVENT_WIFI_AP_STA_CONNECTED` | `l2_ap_event_handler` (AP guard) | Track station; `k_sem_give(&station_connected_sem)`; call `zego_on_net_event_dhcp_bound()` |
+| `NET_EVENT_WIFI_AP_STA_DISCONNECTED` | `l2_ap_event_handler` (AP guard) | Remove station from table; call `zego_on_net_event_wifi_ap_sta_disconnected()` |
+| `NET_EVENT_WIFI_P2P_DEVICE_FOUND` | `l2_wifi_conn_event_handler` (P2P_CLIENT only) | Store peer MAC; attempt PBC, then PIN fallback |
+| `NET_EVENT_WIFI_DISCONNECT_RESULT` (P2P_CLIENT) | `l2_wifi_conn_event_handler` | Wait `P2P_CLIENT_RECONNECT_DELAY_S` s then restart discovery |
+| `NET_EVENT_IPV4_DHCP_BOUND` | `l3_ipv4_event_handler` | Log IP; re-query SSID; call `zego_on_net_event_dhcp_bound()` |
 | `NET_EVENT_L4_CONNECTED` | `l4_event_handler` | Log (early SSID capture placeholder) |
 | `NET_EVENT_L4_DISCONNECTED` | `l4_event_handler` | Log |
 
-> `l2_softap_event_handler` and the station table are compiled only when
+> **P2P_GO shares the SoftAP AP handler.** At the 802.11 level a P2P Group Owner is an AP —
+> WPA supplicant implements P2P_GO using the same hostapd code path as SoftAP. The kernel
+> therefore fires `NET_EVENT_WIFI_AP_*` events for both `ZEGO_WIFI_MODE_SOFTAP` and
+> `ZEGO_WIFI_MODE_P2P_GO`. `l2_ap_event_handler` handles both, branching internally on
+> `is_p2p_go`. See [P2P_GO and SoftAP — Shared AP Code Path](#p2p_go-and-softap--shared-ap-code-path) below.
+
+> `l2_ap_event_handler` and the station table are compiled only when
 > `CONFIG_WIFI_NM_WPA_SUPPLICANT_AP=y`.
 
 ---
@@ -186,6 +253,7 @@ int network_wait_for_station_connected(k_timeout_t timeout);
 | `wifi_utils_get_last_ssid()` | Return last connected SSID string |
 | `wifi_softap_cancel_remind_timer()` | Cancel SoftAP periodic reminder work |
 | `wifi_p2p_go_cancel_wps_timer()` | Cancel P2P_GO WPS re-arm timer |
+| `wifi_run_p2p_client_mode()` | Start P2P peer discovery; handle PBC→PIN connection and 5 s reconnect loop |
 | `wifi_print_status()` | Print Wi-Fi interface status to log |
 | `wifi_print_dhcp_ip()` | Print DHCP IP / netmask / GW to log |
 
@@ -203,6 +271,31 @@ int network_wait_for_station_connected(k_timeout_t timeout);
 | `CONFIG_ZEGO_WIIF_SOFTAP_BAND_5_GHZ` | bool (choice) | n | Use 5 GHz band |
 | `CONFIG_ZEGO_WIIF_SOFTAP_CHANNEL` | int (1–196) | 1 | SoftAP / P2P_GO channel |
 | `CONFIG_ZEGO_NETWORK_LOG_LEVEL` | choice | INF | Module log level |
+| `CONFIG_ZEGO_NETWORK_P2P_CLIENT_FIND_TIMEOUT_S` | int | 30 | P2P peer discovery window (seconds); restarts if no peer found |
+| `CONFIG_ZEGO_NETWORK_P2P_CLIENT_WPS_PIN` | string | `"12345678"` | WPS PIN used when PBC is not accepted by the GO |
+| `CONFIG_ZEGO_NETWORK_P2P_CLIENT_RECONNECT_DELAY_S` | int | 5 | Seconds to wait after disconnect before restarting discovery |
+
+---
+
+## P2P_GO and SoftAP — Shared AP Code Path
+
+A P2P Group Owner is an Access Point at the 802.11 / hostapd level. WPA supplicant runs the
+same AP bringup code for both SoftAP and P2P_GO, which means the Zephyr kernel fires
+`NET_EVENT_WIFI_AP_*` events for both modes identically.
+
+`l2_ap_event_handler` handles both. The `is_p2p_go` flag gates the
+small differences:
+
+| Aspect | SoftAP | P2P_GO |
+|--------|--------|--------|
+| SSID | Fixed: `CONFIG_ZEGO_WIIF_SOFTAP_SSID` | Negotiated by WPS; always starts `DIRECT-` |
+| IP assignment | Static only | Static IP; DHCP server started at `CONNECT_RESULT` |
+| On first client | Cancel SoftAP remind timer | Cancel WPS re-arm timer |
+| Typical client count | 1–4 | 1 |
+| `NET_EVENT_WIFI_AP_*` events | Yes | Yes (same events, same handler) |
+
+Common logic (station table bookkeeping, `station_connected_sem`, MAC logging) runs
+unconditionally for both modes.
 
 ---
 
@@ -211,7 +304,7 @@ int network_wait_for_station_connected(k_timeout_t timeout);
 A static array of `MAX_SOFTAP_STATIONS` (4) entries tracks connected clients. Protected by
 `K_MUTEX_DEFINE(softap_mutex)`. Compiled in only when `CONFIG_WIFI_NM_WPA_SUPPLICANT_AP=y`.
 The table is used to count connected stations and to track MAC addresses for proper
-remove-on-disconnect bookkeeping.
+remove-on-disconnect bookkeeping. It is shared between SoftAP and P2P_GO modes.
 
 ---
 
@@ -223,7 +316,7 @@ remove-on-disconnect bookkeeping.
 | `WIFI_MODE_CHAN` read fails at boot | Log warning; default to SoftAP |
 | `NET_EVENT_WIFI_CONNECT_RESULT` failure | Log error + status code (0=generic, 2=auth timeout, 3=auth fail, 15=AP not found, 16=assoc timeout) |
 | `NET_EVENT_WIFI_AP_ENABLE_RESULT` failure | Log error; app notification not sent |
-| DHCP bound in unexpected mode | Skip `zego_network_on_wifi_connected()` call; log debug |
+| DHCP bound in unexpected mode | Skip `zego_on_net_event_dhcp_bound()` call; log debug |
 
 ---
 
@@ -247,3 +340,8 @@ remove-on-disconnect bookkeeping.
 | SoftAP enabled | `[zego_net_event_mgmt] SoftAP enabled: SSID='...' IP='192.168.7.1' waiting for client` |
 | STA connected (DHCP) | `[zego_net_event_mgmt] NET_EVENT_IPV4_DHCP_BOUND: ip=... ssid=...` |
 | Wi-Fi disconnected | `[zego_net_event_mgmt] NET_EVENT_WIFI_DISCONNECT_RESULT: status=... reason=...` |
+| P2P_CLIENT discovery start | `[zego_wifi_utils] P2P_CLIENT mode: scanning for peers (timeout: 30 s)...` |
+| P2P peer found → PBC | `[zego_wifi_utils] P2P_CLIENT: peer found, trying WPS PBC...` |
+| PBC fallback to PIN | `[zego_wifi_utils] P2P_CLIENT: PBC not accepted, trying PIN 12345678` |
+| P2P_CLIENT connected | `[zego_net_event_mgmt] Wi-Fi connected: mode=P2P_CLIENT ip=... ssid=DIRECT-...` |
+| P2P_CLIENT reconnect | `[zego_wifi_utils] P2P_CLIENT: disconnected, retrying in 5 s...` |
