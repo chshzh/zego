@@ -59,7 +59,9 @@ enum led_msg_type {
 	LED_COMMAND_TOGGLE,  /**< Toggle LED state. */
 	LED_COMMAND_BLINK,   /**< Blink: equal on/off at period_ms each. */
 	LED_COMMAND_BREATHE, /**< Linear fade: ramps from 0% to 100% brightness over period_ms, then 100% back to 0% over period_ms. Full cycle = 2 × period_ms. */
-	LED_COMMAND_ROTATE, /**< Cycle all LEDs in sequence at period_ms per step. led_number ignored. */
+	LED_COMMAND_ROTATE, /**< Cycle a set of LEDs in sequence at period_ms per step. led_number ignored.
+			     *   If rotate_count > 0, cycle through rotate_indices[0..rotate_count-1].
+			     *   If rotate_count == 0, fall back to indices 0..ROTATE_NUM_LEDS-1. */
 };
 
 /**
@@ -71,6 +73,26 @@ struct led_msg {
 	enum led_msg_type type;
 	uint8_t led_number;  /**< 0-based LED index. Ignored for LED_COMMAND_ROTATE. */
 	uint16_t period_ms;  /**< Effect period in ms. 0 = use Kconfig default. */
+	/**
+	 * ROTATE index array — only used when type == LED_COMMAND_ROTATE.
+	 *
+	 * Set rotate_count to the number of valid entries in rotate_indices[].
+	 * The effect will cycle through those specific LED indices.
+	 *
+	 * Leave rotate_count == 0 to fall back to the Kconfig default behaviour
+	 * (sweep indices 0..CONFIG_ZEGO_LED_ROTATE_NUM_LEDS-1).
+	 *
+	 * Example — rotate RGB2 only on nRF5340 Audio DK:
+	 * @code
+	 *   struct led_msg r = {
+	 *       .type = LED_COMMAND_ROTATE,
+	 *       .rotate_count = 3,
+	 *       .rotate_indices = { 3, 4, 5 },
+	 *   };
+	 * @endcode
+	 */
+	uint8_t rotate_count;
+	uint8_t rotate_indices[CONFIG_ZEGO_LED_NUM_LEDS];
 };
 
 /**

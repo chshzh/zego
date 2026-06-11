@@ -9,6 +9,7 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(zego_led, CONFIG_ZEGO_LED_LOG_LEVEL);
 
+#include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/smf.h>
 #include <zephyr/zbus/zbus.h>
@@ -107,8 +108,10 @@ static struct led_sm_object led_sm[NUM_LEDS];
 static struct {
 	struct k_work_delayable work;
 	uint16_t period_ms;
-	uint8_t current;
+	uint8_t current; /* index into indices[], not a raw LED number */
 	bool active;
+	uint8_t count;
+	uint8_t indices[NUM_LEDS];
 } rotate;
 
 /* ============================================================================
@@ -185,13 +188,17 @@ static void rotate_work_fn(struct k_work *work)
 		return;
 	}
 
-	led_hw_set(rotate.current, false);
-	led_sm[rotate.current].is_on = false;
+	uint8_t old_led = rotate.indices[rotate.current];
 
-	rotate.current = (uint8_t)((rotate.current + 1) % ROTATE_NUM_LEDS);
+	led_hw_set(old_led, false);
+	led_sm[old_led].is_on = false;
 
-	led_hw_set(rotate.current, true);
-	led_sm[rotate.current].is_on = true;
+	rotate.current = (uint8_t)((rotate.current + 1) % rotate.count);
+
+	uint8_t new_led = rotate.indices[rotate.current];
+
+	led_hw_set(new_led, true);
+	led_sm[new_led].is_on = true;
 
 	k_work_schedule(&rotate.work, K_MSEC(rotate.period_ms));
 }
@@ -492,8 +499,10 @@ static void rotate_stop(void)
 	}
 	rotate.active = false;
 	k_work_cancel_delayable(&rotate.work);
-	led_hw_set(rotate.current, false);
-	led_sm[rotate.current].is_on = false;
+	uint8_t led = rotate.indices[rotate.current];
+
+	led_hw_set(led, false);
+	led_sm[led].is_on = false;
 }
 
 /* Cancel all per-LED effect timers without changing SMF state. */
@@ -519,12 +528,25 @@ static void process_led_command(const struct led_msg *msg)
 			msg->period_ms > 0 ? msg->period_ms : CONFIG_ZEGO_LED_ROTATE_PERIOD_MS;
 		rotate.current = 0;
 		rotate.active = true;
-		led_hw_set(0, true);
-		led_sm[0].is_on = true;
-		publish_state(0, true, LED_COMMAND_ROTATE);
+
+		if (msg->rotate_count > 0) {
+			rotate.count = MIN(msg->rotate_count, (uint8_t)NUM_LEDS);
+			memcpy(rotate.indices, msg->rotate_indices, rotate.count);
+		} else {
+			rotate.count = (uint8_t)ROTATE_NUM_LEDS;
+			for (uint8_t i = 0; i < rotate.count; i++) {
+				rotate.indices[i] = i;
+			}
+		}
+
+		uint8_t first = rotate.indices[0];
+
+		led_hw_set(first, true);
+		led_sm[first].is_on = true;
+		publish_state(first, true, LED_COMMAND_ROTATE);
 		k_work_schedule(&rotate.work, K_MSEC(rotate.period_ms));
-		LOG_INF("Rotate started (period %u ms, %d LEDs)", (unsigned)rotate.period_ms,
-			ROTATE_NUM_LEDS);
+		LOG_INF("Rotate started (period %u ms, %d LEDs, first=%d)",
+			(unsigned)rotate.period_ms, rotate.count, first);
 		return;
 	}
 
@@ -642,6 +664,10 @@ static int led_module_init(void)
 	k_work_init_delayable(&rotate.work, rotate_work_fn);
 	rotate.active = false;
 	rotate.current = 0;
+	rotate.count = (uint8_t)ROTATE_NUM_LEDS;
+	for (uint8_t i = 0; i < rotate.count; i++) {
+		rotate.indices[i] = i;
+	}
 
 	LOG_INF("zego_led initialized");
 	return 0;
