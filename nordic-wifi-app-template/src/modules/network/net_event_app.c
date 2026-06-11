@@ -53,13 +53,13 @@ void zego_on_net_event_wifi_ap_enabled(enum zego_wifi_mode mode, const char *ip_
 
 	/* TODO: AP is up, no client connected yet.
 	 * Add application logic here — e.g. start mDNS, advertise a service. */
-	LOG_INF("TODO: AP is up, no client connected yet — add your application logic in src/modules/network/net_event_app.c/zego_on_net_event_wifi_ap_enabled()");
+	LOG_INF("TODO: AP is up, no client connected yet — add your application logic in "
+		"src/modules/network/net_event_app.c/zego_on_net_event_wifi_ap_enabled()");
 }
 
 void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
 				  const char *mac_addr, const char *ssid)
 {
-
 
 	struct led_msg led = {.type = LED_COMMAND_ON, .led_number = 0};
 
@@ -75,7 +75,8 @@ void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
 	/* TODO: Device has an IP address — start your application here.
 	 * ip_addr, mac_addr, ssid are available as function arguments.
 	 * Example: connect to MQTT broker, start HTTP client, send telemetry. */
-	LOG_INF("TODO: Device has IP %s (mac=%s ssid=%s) — start your application in src/modules/network/net_event_app.c/zego_on_net_event_dhcp_bound()",
+	LOG_INF("TODO: Device has IP %s (mac=%s ssid=%s) — start your application in "
+		"src/modules/network/net_event_app.c/zego_on_net_event_dhcp_bound()",
 		ip_addr, mac_addr, ssid);
 }
 
@@ -97,7 +98,10 @@ void zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 		/* TODO: First (or additional) client connected to SoftAP/P2P_GO.
 		 * sta_count is the total number of connected stations.
 		 * Example: start a provisioning server, send a welcome packet. */
-		LOG_INF("TODO: SoftAP/P2P_GO client connected (total=%d) — add your application logic in src/modules/network/net_event_app.c/zego_on_net_event_wifi_ap_sta_connected()",
+		LOG_INF("TODO: SoftAP/P2P_GO client connected (total=%d) — add your application "
+			"logic in "
+			"src/modules/network/net_event_app.c/"
+			"zego_on_net_event_wifi_ap_sta_connected()",
 			sta_count);
 	}
 }
@@ -118,7 +122,8 @@ void zego_on_net_event_wifi_disconnect(void)
 
 	/* TODO: Wi-Fi link lost — clean up application state here.
 	 * Example: disconnect MQTT, cancel pending requests, flush buffers. */
-	LOG_INF("TODO: Wi-Fi link lost — clean up your application state in src/modules/network/net_event_app.c/zego_on_net_event_wifi_disconnect()");
+	LOG_INF("TODO: Wi-Fi link lost — clean up your application state in "
+		"src/modules/network/net_event_app.c/zego_on_net_event_wifi_disconnect()");
 }
 
 void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
@@ -137,6 +142,8 @@ void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 
 		/* TODO: Last client left the SoftAP/P2P_GO — no stations connected.
 		 * Example: stop provisioning server, re-arm WPS, update cloud status. */
-		LOG_INF("TODO: Last SoftAP/P2P_GO client left — add your application logic in src/modules/network/net_event_app.c/zego_on_net_event_wifi_ap_sta_disconnected()");
+		LOG_INF("TODO: Last SoftAP/P2P_GO client left — add your application logic in "
+			"src/modules/network/net_event_app.c/"
+			"zego_on_net_event_wifi_ap_sta_disconnected()");
 	}
 }
