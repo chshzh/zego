@@ -36,13 +36,6 @@ int wifi_setup_dhcp_server(void);
  */
 int wifi_print_status(void);
 
-/**
- * @brief Print DHCP-assigned IP address, netmask, and gateway to the log.
- *
- * @param iface Pointer to the network interface.
- * @param cb    Network management event callback containing DHCP info.
- */
-void wifi_print_dhcp_ip(struct net_if *iface, struct net_mgmt_event_callback *cb);
 
 /**
  * @brief Get the last connected SSID string.

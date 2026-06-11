@@ -239,7 +239,6 @@ static int wifi_set_softap(const char *ssid, const char *psk)
 		return ret;
 	}
 
-	LOG_INF("SoftAP mode enabled (band %d, channel %d)", params.band, params.channel);
 	return 0;
 }
 
@@ -251,6 +250,8 @@ int wifi_setup_dhcp_server(void)
 	struct in_addr pool_start;
 	struct in_addr gw_addr, netmask;
 	int ret;
+
+	LOG_INF("DHCP server setup starting...");
 
 	if (dhcp_server_started) {
 		LOG_WRN("DHCP server already started");
@@ -327,7 +328,10 @@ int wifi_run_softap_mode(void)
 {
 	int ret;
 
-	LOG_INF("Setting up SoftAP mode");
+	LOG_INF("Setting up SoftAP mode: SSID='%s' band=%s channel=%d",
+		CONFIG_ZEGO_WIIF_SOFTAP_SSID,
+		IS_ENABLED(CONFIG_ZEGO_WIIF_SOFTAP_BAND_5_GHZ) ? "5 GHz" : "2.4 GHz",
+		CONFIG_ZEGO_WIIF_SOFTAP_CHANNEL);
 
 	ret = wifi_set_reg_domain();
 	if (ret) {
@@ -416,36 +420,6 @@ int wifi_print_status(void)
 
 	return 0;
 }
-
-#if defined(CONFIG_NET_DHCPV4)
-void wifi_print_dhcp_ip(struct net_if *iface, struct net_mgmt_event_callback *cb)
-{
-	const struct net_if_dhcpv4 *dhcpv4 = cb->info;
-	const struct in_addr *addr = &dhcpv4->requested_ip;
-	char ip_str[INET_ADDRSTRLEN];
-	char netmask_str[INET_ADDRSTRLEN];
-	char gw_str[INET_ADDRSTRLEN];
-
-	net_addr_ntop(AF_INET, addr, ip_str, sizeof(ip_str));
-
-	struct in_addr netmask = net_if_ipv4_get_netmask_by_addr(iface, addr);
-
-	net_addr_ntop(AF_INET, &netmask, netmask_str, sizeof(netmask_str));
-
-	struct in_addr gw = net_if_ipv4_get_gw(iface);
-
-	net_addr_ntop(AF_INET, &gw, gw_str, sizeof(gw_str));
-
-	LOG_INF("\r\nDevice IP: %s\r\nSubnet:    %s\r\nGateway:   %s\r\n", ip_str, netmask_str,
-		gw_str);
-}
-#else
-void wifi_print_dhcp_ip(struct net_if *iface, struct net_mgmt_event_callback *cb)
-{
-	ARG_UNUSED(iface);
-	ARG_UNUSED(cb);
-}
-#endif
 
 /* ============================================================================
  * P2P_GO AUTO-START: group_add + WPS PIN + 5-minute wait timer
