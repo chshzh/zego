@@ -33,15 +33,15 @@ Capabilities are composed by enabling Kconfig symbols — no code copying.
 
 ---
 
-## Modules
+## Bricks
 
-| Module | Directory | zbus channels | Spec |
-|--------|-----------|---------------|------|
-| button | `zego/modules/button/` | `BUTTON_CHAN` (out) | [button-spec.md](modules/button/docs/button-spec.md) |
-| led | `zego/modules/led/` | `LED_CMD_CHAN` (in) · `LED_STATE_CHAN` (out) | [led-spec.md](modules/led/docs/led-spec.md) |
-| wifi | `zego/modules/wifi/` | `WIFI_MODE_CHAN` (out) | [wifi-spec.md](modules/wifi/docs/wifi-spec.md) |
-| network | `zego/modules/network/` | — (weak-hook API) | [network-spec.md](modules/network/docs/network-spec.md) |
-| wifi_ble_prov | `zego/modules/wifi_ble_prov/` | — | [wifi-ble-prov-spec.md](modules/wifi_ble_prov/docs/wifi-ble-prov-spec.md) |
+| Brick | Directory | zbus channels | Spec |
+|-------|-----------|---------------|------|
+| button | `zego/bricks/button/` | `BUTTON_CHAN` (out) | [button-spec.md](bricks/button/docs/button-spec.md) |
+| led | `zego/bricks/led/` | `LED_CMD_CHAN` (in) · `LED_STATE_CHAN` (out) | [led-spec.md](bricks/led/docs/led-spec.md) |
+| wifi | `zego/bricks/wifi/` | `WIFI_MODE_CHAN` (out) | [wifi-spec.md](bricks/wifi/docs/wifi-spec.md) |
+| network | `zego/bricks/network/` | — (weak-hook API) | [network-spec.md](bricks/network/docs/network-spec.md) |
+| wifi_ble_prov | `zego/bricks/wifi_ble_prov/` | — | [wifi-ble-prov-spec.md](bricks/wifi_ble_prov/docs/wifi-ble-prov-spec.md) |
 
 See each spec for the full API, Kconfig reference, and hardware test guide.
 
@@ -104,8 +104,8 @@ Kconfig is wired automatically — no `rsource` needed.
 ```cmake
 cmake_minimum_required(VERSION 3.20.0)
 
-get_filename_component(ZEGO_BUTTON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../zego/modules/button REALPATH)
-get_filename_component(ZEGO_LED_DIR   ${CMAKE_CURRENT_SOURCE_DIR}/../zego/modules/led    REALPATH)
+get_filename_component(ZEGO_BUTTON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../zego/bricks/button REALPATH)
+get_filename_component(ZEGO_LED_DIR   ${CMAKE_CURRENT_SOURCE_DIR}/../zego/bricks/led    REALPATH)
 list(APPEND EXTRA_ZEPHYR_MODULES ${ZEGO_BUTTON_DIR} ${ZEGO_LED_DIR})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
@@ -150,7 +150,7 @@ CONFIG_ZEGO_LED_BACKEND_ZEPHYR=y
 
 ```
 zego/
-├── modules/
+├── bricks/
 │   ├── button/        ← GPIO button driver, gesture detection, BUTTON_CHAN publisher
 │   ├── led/           ← per-LED state machine, LED_CMD_CHAN subscriber
 │   ├── wifi/          ← Wi-Fi mode selector + NVS persistence

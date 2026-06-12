@@ -168,14 +168,14 @@ nordic-wifi-app-template/
     └── hci_ipc/                      ← netcore config for nRF5340 dual-core boards
 ```
 
-External zego modules (referenced via `EXTRA_ZEPHYR_MODULES` in `CMakeLists.txt`):
+External zego bricks (referenced via `EXTRA_ZEPHYR_MODULES` in `CMakeLists.txt`):
 
 ```text
-../modules/wifi/          ← Wi-Fi mode selector, NVS persistence, `app_wifi_mode` shell command
-../modules/network/       ← Wi-Fi event dispatcher, DHCP handling, `zego_on_net_event_wifi_*` callbacks
-../modules/button/        ← GPIO debounce, BUTTON_CHAN publish
-../modules/led/           ← LED_CMD_CHAN subscriber, ROTATE/BLINK/BREATHE effects
-../modules/wifi_ble_prov/ ← BLE provisioning server (nRF54LM20DK; optional overlay on others)
+../bricks/wifi/          ← Wi-Fi mode selector, NVS persistence, `app_wifi_mode` shell command
+../bricks/network/       ← Wi-Fi event dispatcher, DHCP handling, `zego_on_net_event_wifi_*` callbacks
+../bricks/button/        ← GPIO debounce, BUTTON_CHAN publish
+../bricks/led/           ← LED_CMD_CHAN subscriber, ROTATE/BLINK/BREATHE effects
+../bricks/wifi_ble_prov/ ← BLE provisioning server (nRF54LM20DK; optional overlay on others)
 ```
 
 ### Workspace Setup
@@ -309,11 +309,11 @@ The full design documentation lives under `docs/`. Start with [docs/dev-specs/ov
 | [docs/dev-specs/overview.md](docs/dev-specs/overview.md) | **Start here** — technical spec index, PRD-to-spec mapping, architecture summary, design decisions |
 | [docs/dev-specs/architecture.md](docs/dev-specs/architecture.md) | System architecture — module map, Zbus channels, SYS_INIT boot sequence, memory budget |
 | [docs/dev-specs/ux.md](docs/dev-specs/ux.md) | UX spec — button gesture state machine, LED effect definitions per Wi-Fi state |
-| [zego/wifi ↗](https://github.com/chshzh/zego/blob/main/modules/wifi/docs/wifi-spec.md) | Wi-Fi mode selector — NVS persistence, `app_wifi_mode` command, mode lifecycle |
-| [zego/network ↗](https://github.com/chshzh/zego/blob/main/modules/network/docs/network-spec.md) | Network module — Wi-Fi event dispatch, DHCP handling, callback contract |
-| [zego/wifi_ble_prov ↗](https://github.com/chshzh/zego/blob/main/modules/wifi_ble_prov/docs/wifi-ble-prov-spec.md) | BLE provisioning — GATT service, credential storage, nRF Wi-Fi Provisioner integration |
-| [zego/button ↗](https://github.com/chshzh/zego/blob/main/modules/button/docs/button-spec.md) | Button module — GPIO debounce, BUTTON_CHAN publish, gesture detection |
-| [zego/led ↗](https://github.com/chshzh/zego/blob/main/modules/led/docs/led-spec.md) | LED module — LED_CMD_CHAN subscriber, ROTATE/BLINK/BREATHE effect engine |
+| [zego/wifi ↗](https://github.com/chshzh/zego/blob/main/bricks/wifi/docs/wifi-spec.md) | Wi-Fi mode selector — NVS persistence, `app_wifi_mode` command, mode lifecycle |
+| [zego/network ↗](https://github.com/chshzh/zego/blob/main/bricks/network/docs/network-spec.md) | Network module — Wi-Fi event dispatch, DHCP handling, callback contract |
+| [zego/wifi_ble_prov ↗](https://github.com/chshzh/zego/blob/main/bricks/wifi_ble_prov/docs/wifi-ble-prov-spec.md) | BLE provisioning — GATT service, credential storage, nRF Wi-Fi Provisioner integration |
+| [zego/button ↗](https://github.com/chshzh/zego/blob/main/bricks/button/docs/button-spec.md) | Button module — GPIO debounce, BUTTON_CHAN publish, gesture detection |
+| [zego/led ↗](https://github.com/chshzh/zego/blob/main/bricks/led/docs/led-spec.md) | LED module — LED_CMD_CHAN subscriber, ROTATE/BLINK/BREATHE effect engine |
 
 ---
 

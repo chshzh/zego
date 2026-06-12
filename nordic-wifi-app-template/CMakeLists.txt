@@ -6,14 +6,14 @@
 
 cmake_minimum_required(VERSION 3.20.0)
 
-# Register zego modules: button, led, wifi, network, wifi_ble_prov.
+# Register zego bricks: button, led, wifi, network, wifi_ble_prov.
 # Paths are relative to this CMakeLists.txt which lives inside zego/, so
-# sibling modules are under ../modules/<name>/.
-get_filename_component(ZEGO_BUTTON_DIR       ${CMAKE_CURRENT_SOURCE_DIR}/../modules/button       REALPATH)
-get_filename_component(ZEGO_LED_DIR          ${CMAKE_CURRENT_SOURCE_DIR}/../modules/led          REALPATH)
-get_filename_component(ZEGO_WIFI_DIR         ${CMAKE_CURRENT_SOURCE_DIR}/../modules/wifi         REALPATH)
-get_filename_component(ZEGO_NETWORK_DIR      ${CMAKE_CURRENT_SOURCE_DIR}/../modules/network      REALPATH)
-get_filename_component(ZEGO_WIFI_BLE_PROV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../modules/wifi_ble_prov REALPATH)
+# sibling bricks are under ../bricks/<name>/.
+get_filename_component(ZEGO_BUTTON_DIR       ${CMAKE_CURRENT_SOURCE_DIR}/../bricks/button       REALPATH)
+get_filename_component(ZEGO_LED_DIR          ${CMAKE_CURRENT_SOURCE_DIR}/../bricks/led          REALPATH)
+get_filename_component(ZEGO_WIFI_DIR         ${CMAKE_CURRENT_SOURCE_DIR}/../bricks/wifi         REALPATH)
+get_filename_component(ZEGO_NETWORK_DIR      ${CMAKE_CURRENT_SOURCE_DIR}/../bricks/network      REALPATH)
+get_filename_component(ZEGO_WIFI_BLE_PROV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../bricks/wifi_ble_prov REALPATH)
 list(APPEND EXTRA_ZEPHYR_MODULES
   ${ZEGO_BUTTON_DIR}
   ${ZEGO_LED_DIR}
@@ -27,7 +27,7 @@ project(nordic_wifi_app_template)
 
 target_include_directories(app PUBLIC ${ZEPHYR_BASE}/subsys/net/ip)
 
-# All modules are provided via EXTRA_ZEPHYR_MODULES above (zego/wifi,
+# All bricks are provided via EXTRA_ZEPHYR_MODULES above (zego/wifi,
 # zego/network, zego/button, zego/led, zego/wifi_ble_prov).
 # Add application modules below as the project grows.
 
