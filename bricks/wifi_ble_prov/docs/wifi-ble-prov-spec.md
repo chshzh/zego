@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/wifi_ble_prov` |
-| Version | 2026-06-11-13-52 |
+| Version | 2026-06-14-00-21 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -19,6 +19,7 @@
 | 2026-06-04-17-10 | Initial spec — reverse-designed from source |
 | 2026-06-05-09-31 | Added Supported Hardware section; documented nRF5340 Audio DK + nRF7002EK + BLE network-core constraint |
 | 2026-06-11-13-52 | Updated hook name references: `zego_network_on_wifi_connected`→`zego_on_net_event_dhcp_bound`, `zego_network_on_wifi_disconnected`→`zego_on_net_event_wifi_disconnect` |
+| 2026-06-14-00-21 | `wifi_ble_prov_init()` now checks `zego_wifi_get_mode()` at SYS_INIT and skips the entire BLE provisioning stack when not in STA mode; prevents BLE GATT notification spam in P2P / SoftAP modes |
 
 ---
 
@@ -198,15 +199,19 @@ Dependencies: `ZEGO_NETWORK && ZBUS && WIFI_CREDENTIALS`
 the Wi-Fi stack is operational.
 
 `wifi_ble_prov_init()` sequence:
-1. Check `wifi_credentials_is_empty()` — set boot flag to skip duplicate auto-connect.
-2. Start ADV daemon work queue.
-3. Init `k_work_delayable` items: `wifi_connect_work`, `update_adv_param_work`, `update_adv_data_work`.
-4. Register BT auth callbacks.
-5. `bt_enable(NULL)` — blocks until BT stack ready.
-6. `wifi_prov_init()` — start GATT provisioning service.
-7. Derive device name from MAC and call `bt_set_name()`.
-8. `bt_le_adv_start()` — begin advertising.
-9. Register `wifi_mgmt_cb` for connect/disconnect events.
+1. **Mode guard**: call `zego_wifi_get_mode()`; if mode ≠ `ZEGO_WIFI_MODE_STA`, log debug
+   `"Skipping BLE provisioner init (mode=X, STA only)"` and return 0 immediately.
+   This prevents BLE GATT notification spam (`"BT not connected. Ignore notification request."`)
+   in P2P and SoftAP modes where no BLE central is expected.
+2. Check `wifi_credentials_is_empty()` — set boot flag to skip duplicate auto-connect.
+3. Start ADV daemon work queue.
+4. Init `k_work_delayable` items: `wifi_connect_work`, `update_adv_param_work`, `update_adv_data_work`.
+5. Register BT auth callbacks.
+6. `bt_enable(NULL)` — blocks until BT stack ready.
+7. `wifi_prov_init()` — start GATT provisioning service.
+8. Derive device name from MAC and call `bt_set_name()`.
+9. `bt_le_adv_start()` — begin advertising.
+10. Register `wifi_mgmt_cb` for connect/disconnect events.
 
 ---
 

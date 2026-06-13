@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-09-17-25 |
-| PRD Version | 2026-06-09-17-25 |
+| Version | 2026-06-14-00-21 |
+| PRD Version | 2026-06-14-00-21 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -21,6 +21,7 @@
 | 2026-06-04-22-00 | Updated ux.md and PRD for revised SoftAP LED behavior (ROTATE/solid ON) |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK target; updated Target Board(s), architecture.md, and ux.md; added board conf + DTS overlay + hci_ipc netcore conf |
 | 2026-06-09-17-25 | Updated to PRD v2026-06-09-17-25: added FR-107 P2P_CLIENT auto-connect to PRD mapping; network-spec.md updated with auto-connect sequence, new API, Kconfig, test points |
+| 2026-06-14-00-21 | Updated to PRD v2026-06-14-00-21: P2P_CLIENT --join auto-connect, static IP, 90 s timeout, 15 s reconnect; P2P_GO PBC auto-rearm; BLE provisioner STA-only init; network-spec.md and wifi-ble-prov-spec.md updated |
 | 2026-06-04-17-09 | Initial overview — template extracted from nordic-wifi-webdash; webserver removed; all four Wi-Fi modes + three STA provisioning paths; architecture.md added |
 
 ---
@@ -63,6 +64,9 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | Default mode | P2P_GO | Enables out-of-box demo with no network infrastructure |
 | All modules from zego | No in-tree application modules except `net_event_app.c` and `ux.c` | Template stays minimal; feature modules are shared across all zego apps |
 | `APP_WIFI_STATE_CHAN` | Defined in `net_event_app.c`; declared in `messages.h` | Decouples network events from LED/UX logic without making the UX module depend on `zego/network` internals |
+| P2P_CLIENT auto-connect strategy | Direct `--join` to known GO MAC (`CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC`) instead of P2P discovery | Discovery+PBC+PIN sequence is unreliable on nRF7002; `--join` is deterministic and avoids scan race conditions |
+| P2P_CLIENT static IP | 192.168.7.2/24 assigned at `CONNECT_RESULT` instead of waiting for DHCP | `wpa_supplicant` on nRF7002 does not issue a DHCP lease for P2P_CLIENT; static assignment is instant and avoids a 15 s `SIGNAL_POLL` timeout |
+| BLE provisioner mode gate | `wifi_ble_prov_init()` exits early when mode ≠ STA | Prevents BLE GATT notification spam in P2P and SoftAP modes; module remains compiled-in so runtime mode switch to STA still works |
 
 ---
 

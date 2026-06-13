@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/network` |
-| Version | 2026-06-11-13-52 |
+| Version | 2026-06-14-00-21 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -21,6 +21,7 @@
 | 2026-06-09-17-25 | P2P_CLIENT auto-connect: `wifi_run_p2p_client_mode()` starts peer discovery at boot; PBC first then PIN 12345678 fallback; 30 s retry, 5 s reconnect delay; added Kconfig, API table entry, test points |
 | 2026-06-10-00-00 | Clarified P2P_GO/SoftAP shared AP handler; renamed `l2_softap_event_handler`→`l2_ap_event_handler`, `L2_SOFTAP_MASK`→`L2_AP_MASK`, `softap_event_cb`→`ap_event_cb`, `zego_on_net_event_softap_ready`→`zego_on_net_event_wifi_ap_enabled`, `zego_on_net_event_softap_sta_disconnected`→`zego_on_net_event_wifi_ap_sta_disconnected`; added P2P_GO vs SoftAP comparison table |
 | 2026-06-11-13-52 | Expanded Weak-hook API section to all 6 hooks; added `zego_on_net_event_wifi_connect`, `zego_on_net_event_wifi_ap_sta_connected`, `zego_on_net_event_wifi_ap_enabled`, `zego_on_net_event_wifi_ap_sta_disconnected` with full signatures and trigger context |
+| 2026-06-14-00-21 | P2P_CLIENT: replaced discovery+PBC+PIN flow with direct --join using CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC; static IP 192.168.7.2/24 assigned at CONNECT_RESULT; connect retry 90 s; reconnect delay 15 s. P2P_GO: added PBC auto-rearm on client disconnect and every 110 s. Hook trigger map: zego_on_net_event_dhcp_bound for P2P_CLIENT now triggered from CONNECT_RESULT success (not DHCP_BOUND). Kconfig updated |
 
 ---
 
@@ -141,8 +142,8 @@ void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients);
 | `zego_on_net_event_wifi_ap_sta_connected` | `NET_EVENT_WIFI_AP_STA_CONNECTED` | SoftAP, P2P_GO |
 | `zego_on_net_event_wifi_ap_sta_disconnected` | `NET_EVENT_WIFI_AP_STA_DISCONNECTED` | SoftAP, P2P_GO |
 
-> P2P_CLIENT detection: the module inspects the SSID at DHCP_BOUND time; if it starts with
-> `DIRECT-`, the mode is reported as `ZEGO_WIFI_MODE_P2P_CLIENT`.
+> P2P_CLIENT detection: the mode is known at boot from `WIFI_MODE_CHAN`; `zego_on_net_event_dhcp_bound()`
+> is called with `mode=ZEGO_WIFI_MODE_P2P_CLIENT` directly from the `CONNECT_RESULT` handler.
 
 ---
 
@@ -166,27 +167,49 @@ void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients);
 
 ## P2P_CLIENT Auto-Connect Sequence
 
-`wifi_run_p2p_client_mode()` drives peer discovery and connection without any shell interaction.
+`wifi_run_p2p_client_mode()` drives connection to a known P2P_GO without any shell interaction.
+The target GO MAC is specified at compile time via `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC`.
 
 ```
-1. Start P2P peer discovery (WIFI_P2P_FIND, type=WIFI_P2P_FIND_START_WITH_FULL,
-                              timeout=P2P_CLIENT_FIND_TIMEOUT_S)
-2. NET_EVENT_WIFI_P2P_DEVICE_FOUND received → store peer MAC
-   → attempt WPS PBC (WIFI_P2P_CONNECT, method=WIFI_P2P_METHOD_PBC)
-3a. NET_EVENT_IPV4_DHCP_BOUND (SSID starts with DIRECT-) → CONNECTED
-    → zego_on_net_event_dhcp_bound() called
-3b. PBC not accepted (no DHCP within PBC window) →
-    → fall back to WPS PIN keypad (WIFI_P2P_CONNECT, method=WIFI_P2P_METHOD_KEYPAD,
-                                    pin=P2P_CLIENT_WPS_PIN)
-4a. NET_EVENT_IPV4_DHCP_BOUND → CONNECTED
-4b. PIN connection failed / no DHCP → restart from step 1 after P2P_CLIENT_FIND_TIMEOUT_S
-5. NET_EVENT_WIFI_DISCONNECT_RESULT in P2P_CLIENT mode →
-   → k_sleep(K_SECONDS(P2P_CLIENT_RECONNECT_DELAY_S))
-   → restart from step 1
+1. Issue WIFI_P2P_CONNECT to target MAC using method=PBC and flag=--join
+   ("wifi p2p connect <MAC> pbc --join")
+   → set p2p_client_pending = true; schedule p2p_client_timeout_work in 90 s
+
+2a. NET_EVENT_WIFI_CONNECT_RESULT success →
+    → wifi_p2p_client_setup_static_ip(): assign 192.168.7.2/24 to wlan0
+    → zego_on_net_event_dhcp_bound(P2P_CLIENT, "192.168.7.2", mac, "P2P") called
+    → cancel timeout work; p2p_client_pending = false
+    → schedule dhcp_diag_work(100 ms) to stop any lingering DHCP client
+
+2b. NET_EVENT_WIFI_CONNECT_RESULT failure (GO not found) →
+    → log warning; timeout work still armed
+
+3.  p2p_client_timeout_work fires after P2P_CLIENT_CONNECT_TIMEOUT_S (90 s) →
+    → wpa_supplicant has exhausted its 10 internal join-scan attempts and is idle
+    → p2p_client_pending = false; go back to step 1 (fresh P2P_CONNECT)
+
+4.  NET_EVENT_WIFI_DISCONNECT_RESULT in P2P_CLIENT mode →
+    → cancel any pending connect timeout
+    → zego_on_net_event_wifi_disconnect() called
+    → schedule reconnect in P2P_CLIENT_RECONNECT_DELAY_S (15 s) to allow wpa_supplicant
+      background cleanup scan to drain before next connect attempt
+    → go back to step 1
 ```
+
+> **Why 90 s timeout?** `wpa_supplicant` attempts `P2P_MAX_JOIN_SCAN_ATTEMPTS` (10) scans
+> of ~8–9 s each before silently giving up. 90 s gives the 10-scan cycle a safe margin so
+> we never race with an in-progress scan when re-issuing `P2P_CONNECT`.
+
+> **Why 15 s reconnect delay?** After a clean GO deauth, `wpa_supplicant` starts a background
+> cleanup scan (5–17 s on nRF7002). Issuing `P2P_CONNECT` inside this window causes
+> `nrf_wifi_wpa_supp_scan2: Scan already in progress` errors and a stuck state.
+
+> **Static IP instead of DHCP**: P2P_CLIENT always uses 192.168.7.2/24 (GO is 192.168.7.1).
+> `NET_EVENT_IPV4_DHCP_BOUND` is **not** used for P2P_CLIENT; `zego_on_net_event_dhcp_bound()`
+> is called directly from the `CONNECT_RESULT` success handler.
 
 LED feedback flows through `APP_WIFI_STATE_CHAN` in `net_event_app.c` — the UX module sees
-`APP_WIFI_STATE_CONNECTING` during discovery and `APP_WIFI_STATE_CONNECTED` after DHCP bound,
+`APP_WIFI_STATE_CONNECTING` during discovery and `APP_WIFI_STATE_CONNECTED` after CONNECT_RESULT,
 driving the same ROTATE → solid-ON LED transitions as STA mode.
 
 ---
@@ -204,8 +227,8 @@ driving the same ROTATE → solid-ON LED transitions as STA mode.
 | `NET_EVENT_WIFI_AP_ENABLE_RESULT` success | `l2_ap_event_handler` (AP guard) | Re-assert static IP; call `zego_on_net_event_wifi_ap_enabled()` |
 | `NET_EVENT_WIFI_AP_STA_CONNECTED` | `l2_ap_event_handler` (AP guard) | Track station; `k_sem_give(&station_connected_sem)`; call `zego_on_net_event_dhcp_bound()` |
 | `NET_EVENT_WIFI_AP_STA_DISCONNECTED` | `l2_ap_event_handler` (AP guard) | Remove station from table; call `zego_on_net_event_wifi_ap_sta_disconnected()` |
-| `NET_EVENT_WIFI_P2P_DEVICE_FOUND` | `l2_wifi_conn_event_handler` (P2P_CLIENT only) | Store peer MAC; attempt PBC, then PIN fallback |
-| `NET_EVENT_WIFI_DISCONNECT_RESULT` (P2P_CLIENT) | `l2_wifi_conn_event_handler` | Wait `P2P_CLIENT_RECONNECT_DELAY_S` s then restart discovery |
+| `NET_EVENT_WIFI_CONNECT_RESULT` success (P2P_CLIENT) | `l2_wifi_conn_event_handler` | Assign static IP 192.168.7.2/24; call `zego_on_net_event_dhcp_bound()`; cancel timeout work |
+| `NET_EVENT_WIFI_DISCONNECT_RESULT` (P2P_CLIENT) | `l2_wifi_conn_event_handler` | Cancel timeout work; call `zego_on_net_event_wifi_disconnect()`; reschedule connect in 15 s |
 | `NET_EVENT_IPV4_DHCP_BOUND` | `l3_ipv4_event_handler` | Log IP; re-query SSID; call `zego_on_net_event_dhcp_bound()` |
 | `NET_EVENT_L4_CONNECTED` | `l4_event_handler` | Log (early SSID capture placeholder) |
 | `NET_EVENT_L4_DISCONNECTED` | `l4_event_handler` | Log |
@@ -271,9 +294,9 @@ int network_wait_for_station_connected(k_timeout_t timeout);
 | `CONFIG_ZEGO_WIIF_SOFTAP_BAND_5_GHZ` | bool (choice) | n | Use 5 GHz band |
 | `CONFIG_ZEGO_WIIF_SOFTAP_CHANNEL` | int (1–196) | 1 | SoftAP / P2P_GO channel |
 | `CONFIG_ZEGO_NETWORK_LOG_LEVEL` | choice | INF | Module log level |
-| `CONFIG_ZEGO_NETWORK_P2P_CLIENT_FIND_TIMEOUT_S` | int | 30 | P2P peer discovery window (seconds); restarts if no peer found |
-| `CONFIG_ZEGO_NETWORK_P2P_CLIENT_WPS_PIN` | string | `"12345678"` | WPS PIN used when PBC is not accepted by the GO |
-| `CONFIG_ZEGO_NETWORK_P2P_CLIENT_RECONNECT_DELAY_S` | int | 5 | Seconds to wait after disconnect before restarting discovery |
+| `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` | string | `""` | Target P2P_GO MAC address ("XX:XX:XX:XX:XX:XX"); required for auto-connect --join mode |
+| `CONFIG_ZEGO_NETWORK_P2P_CLIENT_CONNECT_TIMEOUT_S` | int | 90 | Seconds to wait for CONNECT_RESULT before re-issuing P2P_CONNECT; must be > wpa_supplicant's internal join-scan cycle (~80 s for 10 attempts) |
+| `CONFIG_ZEGO_NETWORK_P2P_CLIENT_RECONNECT_DELAY_S` | int | 15 | Seconds to wait after disconnect before reconnecting; allows wpa_supplicant cleanup scan to drain |
 
 ---
 
