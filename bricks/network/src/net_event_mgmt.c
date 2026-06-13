@@ -29,6 +29,16 @@
  *   On link loss:       zego_on_net_event_wifi_disconnect() is called.
  *   All are __weak and defined as no-ops here; each app overrides them in its
  *   own net_event_app.c to publish app-specific zbus channels.
+ *
+ *   DHCP client lifecycle (STA / P2P_CLIENT)
+ *   ─────────────────────────────────────────
+ *   net_config_init (boot) calls net_dhcpv4_start() immediately, before the
+ *   WiFi interface is connected. By the time STA or P2P_CLIENT actually connects
+ *   (potentially tens of seconds later), DHCP is deep into exponential-backoff
+ *   retries.  net_dhcpv4_start() is a no-op in any state other than DISABLED,
+ *   so a plain re-call does nothing.
+ *   Fix: on CONNECT_RESULT success, stop DHCP (→ DISABLED) then start it again
+ *   so the state machine runs a fresh cycle on the now-live WiFi link.
  */
 
 #include <zephyr/logging/log.h>
@@ -38,6 +48,7 @@
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/wifi_nm.h>
+#include <zephyr/net/dhcpv4.h>
 #include <zephyr/net/dhcpv4_server.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/zbus/zbus.h>
@@ -117,6 +128,29 @@ static int softap_station_count(void)
 static K_SEM_DEFINE(station_connected_sem, 0, 1); /* SoftAP: first STA joined  */
 
 /* ============================================================================
+ * DEFERRED DHCP STOP (P2P_CLIENT)
+ * ============================================================================
+ * driver_zephyr.c calls net_dhcpv4_restart() from the hostap_handler thread
+ * a few ms AFTER the CONNECT_RESULT callback fires.  Stopping DHCP directly
+ * in the callback is therefore undone almost immediately.  This work item is
+ * scheduled 100 ms after the static IP is assigned, ensuring it fires AFTER
+ * the supplicant's restart and keeps DHCP permanently stopped for P2P_CLIENT.
+ */
+static struct k_work_delayable dhcp_diag_work;
+
+static void dhcp_diag_handler(struct k_work *work)
+{
+	struct net_if *iface = net_if_get_first_wifi();
+
+	if (!iface) {
+		return;
+	}
+
+	net_dhcpv4_stop(iface);
+	LOG_DBG("P2P_CLIENT: deferred DHCP stop done (state=%d)", (int)iface->config.dhcpv4.state);
+}
+
+/* ============================================================================
  * EVENT CALLBACK STRUCTURES
  * ============================================================================
  */
@@ -126,6 +160,9 @@ static struct net_mgmt_event_callback wpa_event_cb;
 static struct net_mgmt_event_callback wifi_event_cb;
 #if IS_ENABLED(CONFIG_WIFI_NM_WPA_SUPPLICANT_AP)
 static struct net_mgmt_event_callback ap_event_cb;
+#endif
+#if IS_ENABLED(CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P)
+static struct net_mgmt_event_callback p2p_event_cb;
 #endif
 static struct net_mgmt_event_callback ipv4_event_cb;
 /* static struct net_mgmt_event_callback l4_event_cb; */
@@ -293,6 +330,37 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 				if (ret < 0) {
 					LOG_WRN("P2P_GO: DHCP server start failed (%d)", ret);
 				}
+			} else if (active_mode == ZEGO_WIFI_MODE_P2P_CLIENT) {
+				wifi_p2p_client_on_connect_result(true);
+				/* Assign a static IP instead of relying on DHCPv4.
+				 * DHCPv4 packet creation fails on this platform in P2P mode
+				 * (net_ipv4_create returns -ENOBUFS).  The P2P_GO runs a
+				 * DHCP server on 192.168.7.1/24 with pool start at .2, so
+				 * using a fixed 192.168.7.2/24 address is safe and reliable. */
+				if (wifi_p2p_client_setup_static_ip(iface) == 0) {
+					char mac[18];
+
+					iface_mac_to_str(iface, mac);
+					network_connected = true;
+					// wifi_print_status();
+					/* Skip NET_REQUEST_WIFI_IFACE_STATUS here: it triggers
+					 * SIGNAL_POLL internally which times out (~15 s) on the
+					 * first P2P connection while wpa_supplicant is still
+					 * initialising.  The SSID is always "DIRECT-xx" in P2P
+					 * mode; notify immediately with the known static IP. */
+					zego_on_net_event_dhcp_bound(ZEGO_WIFI_MODE_P2P_CLIENT,
+								     "192.168.7.2", mac, "P2P");
+					/* Schedule a deferred DHCP stop to counteract the
+					 * net_dhcpv4_restart() that driver_zephyr.c fires
+					 * a few ms later from the hostap_handler thread. */
+					k_work_reschedule(&dhcp_diag_work, K_MSEC(100));
+				}
+			} else if (active_mode == ZEGO_WIFI_MODE_STA) {
+				/* Same immediate restart pattern for STA. */
+				LOG_INF("STA: restarting DHCP on %s",
+					net_if_get_device(iface) ? net_if_get_device(iface)->name
+								 : "?");
+				net_dhcpv4_restart(iface);
 			}
 		} else if (!initial_scan_done && status->status == 1) {
 			/* Status=1 before the first scan completes is the normal
@@ -338,6 +406,9 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 			status ? status->status : -1, reason, wifi_disconn_reason_str(reason),
 			wifi_utils_get_last_ssid() ? wifi_utils_get_last_ssid() : "<unknown>");
 		network_connected = false;
+		if (active_mode == ZEGO_WIFI_MODE_P2P_CLIENT) {
+			wifi_p2p_client_on_disconnect();
+		}
 		zego_on_net_event_wifi_disconnect();
 		break;
 	}
@@ -349,6 +420,34 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 		break;
 	}
 }
+
+/* ============================================================================
+ * L2: P2P EVENT HANDLER  (P2P_CLIENT peer discovery)
+ * ============================================================================
+ */
+
+#if IS_ENABLED(CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P)
+static void l2_p2p_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
+				 struct net_if *iface)
+{
+	ARG_UNUSED(iface);
+
+	if (mgmt_event != NET_EVENT_WIFI_P2P_DEVICE_FOUND) {
+		return;
+	}
+	if (active_mode != ZEGO_WIFI_MODE_P2P_CLIENT) {
+		return;
+	}
+
+	const struct wifi_p2p_device_info *info = (const struct wifi_p2p_device_info *)cb->info;
+
+	if (!info) {
+		return;
+	}
+
+	wifi_p2p_client_on_peer_found(info->mac);
+}
+#endif /* CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P */
 
 /* ============================================================================
  * L2: AP EVENT HANDLER  (SOFTAP/P2P_GO enable result, STA join/leave)
@@ -497,6 +596,9 @@ static void l2_ap_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgm
 
 		LOG_INF("L2-NET_EVENT_WIFI_AP_STA_DISCONNECTED: mac=%s clients=%d", mac_str,
 			rem_count);
+		if (active_mode == ZEGO_WIFI_MODE_P2P_GO) {
+			wifi_p2p_go_rearm_pbc();
+		}
 		zego_on_net_event_wifi_ap_sta_disconnected(rem_count);
 		break;
 	}
@@ -580,7 +682,8 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 	network_connected = true;
 	wifi_print_status();
 
-	bool is_p2p_client = (strncmp(sta_ssid, "DIRECT-", 7) == 0);
+	bool is_p2p_client = (active_mode == ZEGO_WIFI_MODE_P2P_CLIENT) ||
+			     (strncmp(sta_ssid, "DIRECT-", 7) == 0);
 	char mac[18];
 
 	iface_mac_to_str(iface, mac);
@@ -643,7 +746,7 @@ static void start_mode_work_handler(struct k_work *work)
 		wifi_run_p2p_go_mode();
 		break;
 	case ZEGO_WIFI_MODE_P2P_CLIENT:
-		/* User initiates via shell: 'wifi p2p find' then 'wifi p2p connect' */
+		wifi_run_p2p_client_mode();
 		break;
 	default:
 		LOG_WRN("Unsupported mode, falling back to SoftAP");
@@ -701,6 +804,13 @@ int network_module_init(void)
 	net_mgmt_init_event_callback(&wpa_event_cb, l3_wpa_supp_event_handler, L3_WPA_SUPP_MASK);
 	net_mgmt_add_event_callback(&wpa_event_cb);
 
+	/* L2: P2P peer discovery (CLIENT only — fires NET_EVENT_WIFI_P2P_DEVICE_FOUND) */
+#if IS_ENABLED(CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P)
+	net_mgmt_init_event_callback(&p2p_event_cb, l2_p2p_event_handler,
+				     NET_EVENT_WIFI_P2P_DEVICE_FOUND);
+	net_mgmt_add_event_callback(&p2p_event_cb);
+#endif
+
 	/* L3: DHCP bound → notify app */
 	net_mgmt_init_event_callback(&ipv4_event_cb, l3_ipv4_event_handler, L3_IPV4_MASK);
 	net_mgmt_add_event_callback(&ipv4_event_cb);
@@ -708,6 +818,8 @@ int network_module_init(void)
 	/* L4: uncomment if you need a unified "any interface routable" signal.
 	 * net_mgmt_init_event_callback(&l4_event_cb, l4_event_handler, L4_CONN_MASK);
 	 * net_mgmt_add_event_callback(&l4_event_cb); */
+
+	k_work_init_delayable(&dhcp_diag_work, dhcp_diag_handler);
 
 	LOG_INF("All network event handlers initialized");
 	/* Mode startup is deferred to start_mode_work, submitted by NET_EVENT_SUPPLICANT_READY. */
