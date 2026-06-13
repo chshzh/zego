@@ -4,17 +4,17 @@
  */
 
 /*
- * net_event_app.c — application-side Wi-Fi event hooks.
+ * net_event_app.c - application-side Wi-Fi event hooks.
  *
  * zego/network fires weak callbacks when connectivity changes:
  *
- *   zego_on_net_event_wifi_ap_enabled()       — SoftAP/P2P_GO AP enabled (before any client)
- *   zego_on_net_event_dhcp_bound()        — IP assigned via DHCP (STA/P2P_CLIENT)
- *   zego_on_net_event_wifi_ap_sta_connected()  — station joined SoftAP/P2P_GO
- *   zego_on_net_event_wifi_disconnect() — link lost
+ *   zego_on_net_event_wifi_ap_enabled()       - SoftAP/P2P_GO AP enabled (before any client)
+ *   zego_on_net_event_dhcp_bound()        - IP assigned via DHCP (STA/P2P_CLIENT)
+ *   zego_on_net_event_wifi_ap_sta_connected()  - station joined SoftAP/P2P_GO
+ *   zego_on_net_event_wifi_disconnect() - link lost
  *
  * Override them here (strong definitions beat the weak no-ops in
- * zego/network) to react to network events — e.g. publish a zbus channel,
+ * zego/network) to react to network events - e.g. publish a zbus channel,
  * start an MQTT client, or kick off an HTTP request.
  *
  * APP_WIFI_STATE_CHAN is published here so app_ux can drive LED 0.
@@ -37,7 +37,7 @@
 
 LOG_MODULE_REGISTER(net_event_app, LOG_LEVEL_INF);
 
-/* Define APP_WIFI_STATE_CHAN here — declared in messages.h. */
+/* Define APP_WIFI_STATE_CHAN here - declared in messages.h. */
 ZBUS_CHAN_DEFINE(APP_WIFI_STATE_CHAN, struct app_wifi_state_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY,
 		 ZBUS_MSG_INIT(.state = APP_WIFI_STATE_CONNECTING, .mode = ZEGO_WIFI_MODE_STA));
 
@@ -52,8 +52,8 @@ void zego_on_net_event_wifi_ap_enabled(enum zego_wifi_mode mode, const char *ip_
 	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 
 	/* TODO: AP is up, no client connected yet.
-	 * Add application logic here — e.g. start mDNS, advertise a service. */
-	LOG_INF("TODO: AP is up, no client connected yet — add your application logic in "
+	 * Add application logic here - e.g. start mDNS, advertise a service. */
+	LOG_INF("TODO: AP is up, no client connected yet - add your application logic in "
 		"src/modules/network/net_event_app.c/zego_on_net_event_wifi_ap_enabled()");
 }
 
@@ -72,10 +72,10 @@ void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
 
 	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 
-	/* TODO: Device has an IP address — start your application here.
+	/* TODO: Device has an IP address - start your application here.
 	 * ip_addr, mac_addr, ssid are available as function arguments.
 	 * Example: connect to MQTT broker, start HTTP client, send telemetry. */
-	LOG_INF("TODO: Device has IP %s (mac=%s ssid=%s) — start your application in "
+	LOG_INF("TODO: Device has IP %s (mac=%s ssid=%s) - start your application in "
 		"src/modules/network/net_event_app.c/zego_on_net_event_dhcp_bound()",
 		ip_addr, mac_addr, ssid);
 }
@@ -98,7 +98,7 @@ void zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 		/* TODO: First (or additional) client connected to SoftAP/P2P_GO.
 		 * sta_count is the total number of connected stations.
 		 * Example: start a provisioning server, send a welcome packet. */
-		LOG_INF("TODO: SoftAP/P2P_GO client connected (total=%d) — add your application "
+		LOG_INF("TODO: SoftAP/P2P_GO client connected (total=%d) - add your application "
 			"logic in "
 			"src/modules/network/net_event_app.c/"
 			"zego_on_net_event_wifi_ap_sta_connected()",
@@ -120,9 +120,9 @@ void zego_on_net_event_wifi_disconnect(void)
 
 	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 
-	/* TODO: Wi-Fi link lost — clean up application state here.
+	/* TODO: Wi-Fi link lost - clean up application state here.
 	 * Example: disconnect MQTT, cancel pending requests, flush buffers. */
-	LOG_INF("TODO: Wi-Fi link lost — clean up your application state in "
+	LOG_INF("TODO: Wi-Fi link lost - clean up your application state in "
 		"src/modules/network/net_event_app.c/zego_on_net_event_wifi_disconnect()");
 }
 
@@ -140,9 +140,9 @@ void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 
 		zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 
-		/* TODO: Last client left the SoftAP/P2P_GO — no stations connected.
+		/* TODO: Last client left the SoftAP/P2P_GO - no stations connected.
 		 * Example: stop provisioning server, re-arm WPS, update cloud status. */
-		LOG_INF("TODO: Last SoftAP/P2P_GO client left — add your application logic in "
+		LOG_INF("TODO: Last SoftAP/P2P_GO client left - add your application logic in "
 			"src/modules/network/net_event_app.c/"
 			"zego_on_net_event_wifi_ap_sta_disconnected()");
 	}
