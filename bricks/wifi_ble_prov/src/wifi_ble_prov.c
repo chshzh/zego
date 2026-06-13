@@ -26,6 +26,7 @@
 
 #include <net/wifi_prov_core/wifi_prov_core.h>
 #include <bluetooth/services/wifi_provisioning.h>
+#include <wifi.h>
 
 LOG_MODULE_REGISTER(zego_wifi_ble_prov, CONFIG_ZEGO_WIFI_BLE_PROV_LOG_LEVEL);
 
@@ -494,6 +495,15 @@ static void update_dev_name(struct net_linkaddr *mac_addr)
 
 static int wifi_ble_prov_init(void)
 {
+	/* BLE provisioning is only meaningful in STA mode.
+	 * In P2P / SoftAP modes the provisioner's Wi-Fi event listener would
+	 * spam "BT not connected. Ignore notification request." on every
+	 * connect/disconnect — skip the entire init to keep the log clean. */
+	if (zego_wifi_get_mode() != ZEGO_WIFI_MODE_STA) {
+		LOG_DBG("Skipping BLE provisioner init (mode=%d, STA only)", zego_wifi_get_mode());
+		return 0;
+	}
+
 	int rc;
 	struct net_if *iface = net_if_get_default();
 	struct net_linkaddr *mac_addr = iface ? net_if_get_link_addr(iface) : NULL;
