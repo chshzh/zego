@@ -4,17 +4,17 @@
  */
 
 /*
- * wifi.c — application banner callbacks and banner callbacks.
+ * wifi.c - application banner callbacks and banner callbacks.
  *
  * Overrides zego_banner_wifi_info() and zego_banner_app_extra() with
  * Kconfig-conditional content, then calls zego_banner_print() and sleeps.
  *
  * Feature gates:
- *   NRF70_AP_MODE          — SoftAP mode available
- *   NRF70_P2P_MODE         — P2P_GO / P2P_CLIENT modes available
- *   NET_L2_WIFI_SHELL      — 'wifi connect' shell command available
- *   WIFI_CREDENTIALS       — 'wifi cred' persistent credentials available
- *   ZEGO_WIFI_BLE_PROV — BLE provisioning available
+ *   NRF70_AP_MODE          - SoftAP mode available
+ *   NRF70_P2P_MODE         - P2P_GO / P2P_CLIENT modes available
+ *   NET_L2_WIFI_SHELL      - 'wifi connect' shell command available
+ *   WIFI_CREDENTIALS       - 'wifi cred' persistent credentials available
+ *   ZEGO_WIFI_BLE_PROV - BLE provisioning available
  */
 
 #include "wifi.h"
@@ -166,19 +166,52 @@ void zego_banner_wifi_info(void)
 #endif /* CONFIG_NRF70_AP_MODE */
 
 #if CONFIG_NRF70_P2P_MODE
-	case ZEGO_WIFI_MODE_P2P_GO:
-		LOG_INF("P2P_GO mode: P2P group owner + WPS PIN auto-started at boot.");
-		LOG_INF("1. P2P Peer: Turn on Wi-Fi, disconnect from other APs");
-		LOG_INF("2. P2P Peer: Wi-Fi Direct -> wait for DK, select it, enter PIN 12345678");
+	case ZEGO_WIFI_MODE_P2P_GO: {
+		struct net_if *_iface = net_if_get_first_wifi();
+		struct net_linkaddr *_mac = _iface ? net_if_get_link_addr(_iface) : NULL;
+		char mac_str[18] = "XX:XX:XX:XX:XX:XX";
+
+		if (_mac && _mac->len >= 6) {
+			snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+				 _mac->addr[0], _mac->addr[1], _mac->addr[2], _mac->addr[3],
+				 _mac->addr[4], _mac->addr[5]);
+		}
+		LOG_INF("P2P_GO mode: group up, PBC armed - this DK's MAC: %s", mac_str);
+		if (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC[0] != '\0') {
+			LOG_INF("P2P_CLIENT DK is configured to auto-connect to this GO.");
+			LOG_INF("  Just power on the CLIENT DK — it connects automatically.");
+		} else {
+			LOG_INF("P2P_CLIENT can connect via PBC using one of the options below.");
+			LOG_INF("[ Option 1: DK as P2P_CLIENT ]");
+			LOG_INF("  1. P2P_CLIENT DK:  wifi p2p find       (wait ~10 s)");
+			LOG_INF("  2. P2P_CLIENT DK:  wifi p2p peer       (confirm GO appears)");
+			LOG_INF("  3. P2P_CLIENT DK:  wifi p2p connect %s pbc --join", mac_str);
+			LOG_INF("[ Option 2: Phone as P2P_CLIENT ]");
+			LOG_INF("  1. PHONE: Enable Wi-Fi Direct");
+			LOG_INF("  2. PHONE: Wait for '%s' in the device list", mac_str);
+			LOG_INF("  3. PHONE: Select it — connects automatically (PBC)");
+		}
 		break;
+	}
 
 	case ZEGO_WIFI_MODE_P2P_CLIENT:
-		LOG_INF("P2P_CLIENT mode: DK joins P2P Peer's P2P group:");
-		LOG_INF("1. DK:    wifi p2p find              -- search for peers");
-		LOG_INF("2. Phone: Enable Wi-Fi Direct, wait for DK MAC to appear");
-		LOG_INF("3. DK:    wifi p2p peer              -- list peers, find P2P Peer MAC");
-		LOG_INF("4. DK:    wifi p2p connect <P2P Peer MAC> pbc -g 0  -- connect");
-		LOG_INF("5. Phone: Press ACCEPT on the Wi-Fi Direct invitation");
+		if (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC[0] != '\0') {
+			LOG_INF("P2P_CLIENT mode: auto-connecting to GO %s (pbc --join, retry "
+				"every 90 s)",
+				CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC);
+		} else {
+			LOG_INF("P2P_CLIENT mode: connect to a P2P_GO DK or phone via PBC:");
+			LOG_INF("[ DK GO ]");
+			LOG_INF("  1. wifi p2p find");
+			LOG_INF("  2. wifi p2p peer       (note GO MAC)");
+			LOG_INF("  3. wifi p2p connect <GO MAC> pbc --join");
+			LOG_INF("[ Phone GO ]");
+			LOG_INF("  1. Phone: enable Wi-Fi Direct");
+			LOG_INF("  2. wifi p2p find");
+			LOG_INF("  3. wifi p2p peer       (find phone MAC)");
+			LOG_INF("  4. wifi p2p connect <phone MAC> pbc --join");
+			LOG_INF("  5. Phone: accept the invitation");
+		}
 		break;
 #endif /* CONFIG_NRF70_P2P_MODE */
 
