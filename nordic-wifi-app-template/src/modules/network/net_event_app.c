@@ -82,7 +82,7 @@ void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
 
 void zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 {
-	LOG_INF("SoftAP client connected: total=%d", sta_count);
+	LOG_INF("AP client connected: total=%d", sta_count);
 
 	if (sta_count >= 1) {
 		struct led_msg led = {.type = LED_COMMAND_ON, .led_number = 0};
@@ -98,7 +98,7 @@ void zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 		/* TODO: First (or additional) client connected to SoftAP/P2P_GO.
 		 * sta_count is the total number of connected stations.
 		 * Example: start a provisioning server, send a welcome packet. */
-		LOG_INF("TODO: SoftAP/P2P_GO client connected (total=%d) - add your application "
+		LOG_INF("TODO: AP/P2P_GO client connected (total=%d) - add your application "
 			"logic in "
 			"src/modules/network/net_event_app.c/"
 			"zego_on_net_event_wifi_ap_sta_connected()",
@@ -106,6 +106,26 @@ void zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 	}
 }
 
+/*
+ * NOTE: zego_on_net_event_wifi_ap_sta_disconnected() may fire up to 5 minutes
+ * after a P2P_CLIENT (or SoftAP client) loses power or crashes.
+ *
+ * Reason: when a client disappears without sending a deauth/disassoc frame
+ * (power cut, battery pull, crash), the GO/AP has no immediate indication.
+ * wpa_supplicant (hostapd) detects the loss via the AP inactivity timer:
+ * it sends keepalive null-data frames; once all retries fail it evicts the
+ * station.  The default timeout is ap_max_inactivity = 300 s (5 minutes).
+ *
+ * A clean client shutdown (e.g. normal reboot) sends a deauth frame and the
+ * disconnect event fires immediately.
+ *
+ * To reduce the detection window, lower ap_max_inactivity at runtime:
+ *
+ *   uart:~$ wpa_cli -i wlan0 set ap_max_inactivity 30
+ *
+ * There is no Zephyr Kconfig for this value; it can also be set via a custom
+ * wpa_supplicant config or by calling wpa_cli from application code.
+ */
 void zego_on_net_event_wifi_disconnect(void)
 {
 
@@ -142,7 +162,8 @@ void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 
 		/* TODO: Last client left the SoftAP/P2P_GO - no stations connected.
 		 * Example: stop provisioning server, re-arm WPS, update cloud status. */
-		LOG_INF("TODO: Last SoftAP/P2P_GO client left - add your application logic in "
+		LOG_INF("TODO: Last SoftAP/P2P_GO client left (total=0) - add your application "
+			"logic in "
 			"src/modules/network/net_event_app.c/"
 			"zego_on_net_event_wifi_ap_sta_disconnected()");
 	}

@@ -248,6 +248,26 @@ void __weak zego_on_net_event_wifi_connect(enum zego_wifi_mode mode)
 	ARG_UNUSED(mode);
 }
 
+/*
+ * NOTE: zego_on_net_event_wifi_ap_sta_disconnected() may fire up to 5 minutes
+ * after a P2P_CLIENT (or SoftAP client) loses power or crashes.
+ *
+ * Reason: when a client disappears without sending a deauth/disassoc frame
+ * (power cut, battery pull, crash), the GO/AP has no immediate indication.
+ * wpa_supplicant (hostapd) detects the loss via the AP inactivity timer:
+ * it sends keepalive null-data frames; once all retries fail it evicts the
+ * station.  The default timeout is ap_max_inactivity = 300 s (5 minutes).
+ *
+ * A clean client shutdown (e.g. normal reboot) sends a deauth frame and the
+ * disconnect event fires immediately.
+ *
+ * To reduce the detection window, lower ap_max_inactivity at runtime:
+ *
+ *   uart:~$ wpa_cli -i wlan0 set ap_max_inactivity 30
+ *
+ * There is no Zephyr Kconfig for this value; it can also be set via a custom
+ * wpa_supplicant config or by calling wpa_cli from application code.
+ */
 void __weak zego_on_net_event_wifi_disconnect(void)
 {
 }
@@ -445,7 +465,7 @@ static void l2_p2p_event_handler(struct net_mgmt_event_callback *cb, uint64_t mg
 		return;
 	}
 
-	wifi_p2p_client_on_peer_found(info->mac);
+	wifi_p2p_client_on_peer_found(info->mac, info->rssi);
 }
 #endif /* CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P */
 

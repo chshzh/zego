@@ -36,7 +36,6 @@ int wifi_setup_dhcp_server(void);
  */
 int wifi_print_status(void);
 
-
 /**
  * @brief Get the last connected SSID string.
  *
@@ -158,16 +157,19 @@ void wifi_p2p_client_on_disconnect(void);
 /**
  * @brief Notify P2P_CLIENT that a P2P peer was found during the pre-discovery scan.
  *
- * Called from the NET_EVENT_WIFI_P2P_DEVICE_FOUND handler.  If @p mac matches
- * CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC, the function immediately cancels
- * the find phase and schedules the WIFI_P2P_CONNECT command.  wpa_supplicant
- * will use the peer's known operating channel for a targeted single-channel
- * BSS scan instead of the default full multi-channel scan, cutting connection
- * time from ~30 s to ~3-8 s.
+ * Called from the NET_EVENT_WIFI_P2P_DEVICE_FOUND handler.
  *
- * @param mac 6-byte P2P device address from the discovery event.
+ * In **exact-MAC mode**: if @p mac matches CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC,
+ * immediately cancels the find phase and schedules WIFI_P2P_CONNECT.
+ *
+ * In **prefix mode** (last 3 bytes of target MAC are 00:00:00): accumulates all
+ * discovered peers whose MAC matches the configured 3-byte OUI prefix, then
+ * connects to the one with the best (highest) @p rssi once the find completes.
+ *
+ * @param mac  6-byte P2P device address from the discovery event.
+ * @param rssi Signal strength reported in the discovery event (dBm).
  */
-void wifi_p2p_client_on_peer_found(const uint8_t *mac);
+void wifi_p2p_client_on_peer_found(const uint8_t *mac, int8_t rssi);
 
 /**
  * @brief Assign a static IP (192.168.7.2/24) to the P2P_CLIENT Wi-Fi interface.
