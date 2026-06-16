@@ -462,7 +462,7 @@ int wifi_print_status(void)
 }
 
 /* ============================================================================
- * P2P_GO AUTO-START: group_add + WPS PBC + wifi p2p find
+ * P2P_GO AUTO-START: group_add + WPS PBC
  * ============================================================================
  *
  * Boot sequence:
@@ -471,8 +471,12 @@ int wifi_print_status(void)
  *                    starts the DHCP server there.
  *   2. wps_pbc     - arm WPS Push-Button mode (120 s window).  Clients join with:
  *                      wifi p2p connect <THIS_MAC> pbc --join
- *   3. wifi p2p find - also enter P2P device discovery so clients can discover
- *                    this device via 'wifi p2p peer' without knowing the MAC.
+ *
+ * NOTE: P2P_FIND (discovery scan) must NOT be called on a running GO.
+ * A GO is already beaconing on its operating channel; clients find it by
+ * scanning social channels (1/6/11) and reading the P2P IE in the Probe
+ * Response.  Calling P2P_FIND while a GO is active always fails with
+ * "Failed to start p2p_scan" because the radio is anchored to the GO channel.
  *
  * wps_pbc calls deep into wpa_supplicant and overflows the 2 KB sysworkq
  * stack.  A dedicated 4 KB work queue is used for that call.
@@ -505,23 +509,15 @@ static void p2p_go_arm_pbc_and_find(struct k_work *work)
 	if (ret) {
 		LOG_ERR("P2P_GO: WPS PBC arm failed (%d)", ret);
 	} else {
-		LOG_INF("P2P_GO: WPS PBC armed (120 s)");
+		LOG_INF("P2P_GO: WPS PBC armed (120 s window, re-arms every %d s)",
+			P2P_GO_PBC_REARM_INTERVAL_S);
+		LOG_INF("P2P_GO: GO is beaconing - clients discover via Wi-Fi Direct scan");
 	}
 
-	struct wifi_p2p_params p2p = {
-		.oper = WIFI_P2P_FIND,
-		.discovery_type = WIFI_P2P_FIND_ONLY_SOCIAL,
-		.timeout = 0,
-	};
-
-	ret = net_mgmt(NET_REQUEST_WIFI_P2P_OPER, iface, &p2p, sizeof(p2p));
-	if (ret) {
-		LOG_WRN("P2P_GO: p2p find failed (%d)", ret);
-	} else {
-		LOG_INF("P2P_GO: Peer discovery started, can also be found by other P2P peers.");
-	}
-
-	/* Re-arm PBC before the window expires so the GO is always connectable. */
+	/* Re-arm PBC before the window expires so the GO is always connectable.
+	 * DO NOT call P2P_FIND here - it always fails on a running GO because the
+	 * radio is anchored to the group channel and cannot scan social channels.
+	 * Clients find this GO by scanning ch1/6/11 and reading the Probe Response. */
 	k_work_reschedule_for_queue(&p2p_wps_workq, k_work_delayable_from_work(work),
 				    K_SECONDS(P2P_GO_PBC_REARM_INTERVAL_S));
 }

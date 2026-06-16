@@ -177,19 +177,15 @@ void zego_banner_wifi_info(void)
 				 _mac->addr[4], _mac->addr[5]);
 		}
 		LOG_INF("P2P_GO mode: group up, PBC armed - this DK's MAC: %s", mac_str);
+		LOG_INF("NOTE: Phone as P2P client is NOT supported - DK clients only.");
 		if (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC[0] != '\0') {
 			LOG_INF("P2P_CLIENT DK is configured to auto-connect to this GO.");
-			LOG_INF("  Just power on the CLIENT DK — it connects automatically.");
 		} else {
-			LOG_INF("P2P_CLIENT can connect via PBC using one of the options below.");
-			LOG_INF("[ Option 1: DK as P2P_CLIENT ]");
+			LOG_INF("P2P_CLIENT can connect via PBC using one of the guidance below.");
+			LOG_INF("[ DK as P2P_CLIENT ]");
 			LOG_INF("  1. P2P_CLIENT DK:  wifi p2p find       (wait ~10 s)");
 			LOG_INF("  2. P2P_CLIENT DK:  wifi p2p peer       (confirm GO appears)");
 			LOG_INF("  3. P2P_CLIENT DK:  wifi p2p connect %s pbc --join", mac_str);
-			LOG_INF("[ Option 2: Phone as P2P_CLIENT ]");
-			LOG_INF("  1. PHONE: Enable Wi-Fi Direct");
-			LOG_INF("  2. PHONE: Wait for '%s' in the device list", mac_str);
-			LOG_INF("  3. PHONE: Select it — connects automatically (PBC)");
 		}
 		break;
 	}
@@ -209,7 +205,7 @@ void zego_banner_wifi_info(void)
 			LOG_INF("  1. Phone: enable Wi-Fi Direct");
 			LOG_INF("  2. wifi p2p find");
 			LOG_INF("  3. wifi p2p peer       (find phone MAC)");
-			LOG_INF("  4. wifi p2p connect <phone MAC> pbc --join");
+			LOG_INF("  4. wifi p2p connect <phone MAC> pbc -g 0");
 			LOG_INF("  5. Phone: accept the invitation");
 		}
 		break;
