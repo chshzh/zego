@@ -300,7 +300,10 @@ west flash -d build_nrf5340_audio_dk
 - **nRF5340 Audio DK DTS overlay** (`boards/nrf5340_audio_dk_nrf5340_cpuapp.overlay`) maps the nRF7002EK SPI bus to the Audio DK's Arduino header — this is required; the nRF54LM20DK shield handles its own pinout without an overlay.
 - **Customisation entry point** is `src/modules/network/net_event_app.c`. Override `zego_on_net_event_dhcp_bound()` and `zego_on_net_event_wifi_disconnect()` — the file contains inline TODO comments and a 4-step example for publishing a Zbus channel.
 - **Heap monitor** logs the high-water mark periodically (interval configurable via `CONFIG_APP_HEAP_MONITOR_INTERVAL_S`). Watch for steady growth as an early sign of leaks.
-- **Live memory and thread watermark monitoring with ZView (nRF54LM20DK):**
+- **Live memory and thread watermark monitoring with ZView:**
+  Run ZView from the project root while the board is live. Replace the `-s` serial with your board's J-Link serial number (`nrfjprog --ids`).
+
+  **nRF54LM20DK + nRF7002EB2:**
   ```bash
   west zview live \
     -e build_nrf54lm20dk/nordic-wifi-app-template/zephyr/zephyr.elf \
@@ -308,16 +311,45 @@ west flash -d build_nrf5340_audio_dk
     -t nRF54LM20A_M33 \
     -s 1051869687
   ```
-  Replace `-s 1051869687` with your board's J-Link serial number (`nrfjprog --ids`). Shows live thread stack usage, heap high-water marks, and kernel object counts without halting the CPU.
-- **Live memory and thread watermark monitoring with ZView (nRF7002DK):**
+
+  **nRF7002DK:**
   ```bash
   west zview live \
     -e build_nrf7002dk/nordic-wifi-app-template/zephyr/zephyr.elf \
     -r jlink \
     -t nRF5340_xxAA \
-    -s 1050787962
+    -s 1050793110
   ```
-  Replace `-s 1050793110` with your board's J-Link serial number (`nrfjprog --ids`). Targets the application core (M33); the network core runs `hci_ipc` and has no Zephyr kernel objects to monitor.
+  Targets the application core (M33); the network core runs `hci_ipc` which has no Zephyr kernel objects to monitor.
+
+  **How to get representative watermarks:** Exercise all modes in one session before reading peak values. A typical sequence:
+  1. Boot in SoftAP → connect 3 clients → disconnect one by one
+  2. Switch to STA (`app_wifi_mode sta`) → `wifi connect` → `wifi disconnect`
+  3. Switch to P2P_GO (`app_wifi_mode p2p_go`) → connect DK client
+  4. Switch to P2P_CLIENT (`app_wifi_mode p2p_client`) → `wifi p2p connect <GO MAC> pbc --join`
+
+  ZView accumulates **high-water marks** (HWM) across the session — the peaks shown after this full cycle represent worst-case usage across all modes.
+
+  **Key threads to watch on nRF7002DK (nRF54LM20DK values are higher due to BLE):**
+
+  | Thread | Expected HWM | Note |
+  |---|---|---|
+  | `hostap_handler` | ~7500 / 8304 (90 %) | High by design — drives WPA supplicant. Monitor for growth across firmware versions. |
+  | `hostap_iface_wq` | ~3552 / 3952 (90 %) | WPA supplicant work queue. Stable. |
+  | `nrf70_bh_wq` | ~1168 / 1304 (90 %) | nRF70 bottom half. Peaks in P2P_GO when client connects. |
+  | `sysworkq` | ~4096 / 5072 (SoftAP peak) | Peaks in SoftAP/P2P mode; lower in STA-idle. |
+  | `net_mgmt` | ~2536 / 3272 (STA peak) | Peaks during DHCP in STA mode. |
+  | `net_socket_service` | ~1960 / 2400 (SoftAP) | Peaks in SoftAP when serving DHCP leases. |
+
+  **Key heaps on nRF54LM20DK:**
+
+  | Heap | Peak mode | HWM observed |
+  |---|---|---|
+  | `_system_heap` | P2P_GO (DK client connected) | ~94 KB / 110 KB |
+  | `_system_heap` | SoftAP (3 clients) | ~89 KB / 110 KB |
+  | `_system_heap` | STA (connected) | ~66 KB / 110 KB |
+
+  **Stack sizing rule:** `CONFIG_<THREAD>_STACK_SIZE = HWM / 0.9` (10 % headroom). Update `prj.conf` or `boards/nrf54lm20dk_nrf54lm20a_cpuapp.conf` with new measurements after each firmware change that touches network paths.
 
 ---
 
