@@ -96,9 +96,10 @@ void zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 		zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 
 		/* TODO: First (or additional) client connected to SoftAP/P2P_GO.
-		 * sta_count is the total number of connected stations.
+		 * sta_count is the total number of connected stations (max 3).
 		 * Example: start a provisioning server, send a welcome packet. */
-		LOG_INF("TODO: AP/P2P_GO client connected (total=%d) - add your application "
+		LOG_INF("TODO: AP/P2P_GO client connected (now %d/3 devices connected) - add your "
+			"application "
 			"logic in "
 			"src/modules/network/net_event_app.c/"
 			"zego_on_net_event_wifi_ap_sta_connected()",
@@ -148,6 +149,13 @@ void zego_on_net_event_wifi_disconnect(void)
 
 void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 {
+	LOG_INF("TODO: AP/P2P_GO client disconnected (now %d/3 devices connected) - add your "
+		"application "
+		"logic in "
+		"src/modules/network/net_event_app.c/"
+		"zego_on_net_event_wifi_ap_sta_disconnected()",
+		remaining_clients);
+
 	if (remaining_clients == 0) {
 		struct led_msg led = {.type = LED_COMMAND_ROTATE, .led_number = 0};
 
@@ -162,9 +170,5 @@ void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 
 		/* TODO: Last client left the SoftAP/P2P_GO - no stations connected.
 		 * Example: stop provisioning server, re-arm WPS, update cloud status. */
-		LOG_INF("TODO: Last SoftAP/P2P_GO client left (total=0) - add your application "
-			"logic in "
-			"src/modules/network/net_event_app.c/"
-			"zego_on_net_event_wifi_ap_sta_disconnected()");
 	}
 }

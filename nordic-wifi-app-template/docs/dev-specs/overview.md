@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-16-11-26 |
-| PRD Version | 2026-06-16-11-26 |
+| Version | 2026-06-16-13-30 |
+| PRD Version | 2026-06-16-13-30 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -21,6 +21,7 @@
 | 2026-06-04-22-00 | Updated ux.md and PRD for revised SoftAP LED behavior (ROTATE/solid ON) |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK target; updated Target Board(s), architecture.md, and ux.md; added board conf + DTS overlay + hci_ipc netcore conf |
 | 2026-06-09-17-25 | Updated to PRD v2026-06-09-17-25: added FR-107 P2P_CLIENT auto-connect to PRD mapping; network-spec.md updated with auto-connect sequence, new API, Kconfig, test points |
+| 2026-06-16-13-30 | Updated to PRD v2026-06-16-13-30: FR-005 SoftAP max 3 clients — `CONFIG_WIFI_MGMT_AP_MAX_NUM_STA=3` added to architecture.md; TODO log format specified for connect/disconnect events |
 | 2026-06-16-11-26 | Updated to PRD v2026-06-16-11-26: FR-108 MAC-prefix auto-select added; network-spec.md updated with prefix sequence, Kconfig, test points |
 | 2026-06-16-11-21 | Updated to PRD v2026-06-16-11-21: P2P_GO phone-as-client dropped; FR-006 acceptance criteria updated; network-spec.md updated |
 | 2026-06-14-00-21 | Updated to PRD v2026-06-14-00-21: P2P_CLIENT --join auto-connect, static IP, 90 s timeout, 15 s reconnect; P2P_GO PBC auto-rearm; BLE provisioner STA-only init; network-spec.md and wifi-ble-prov-spec.md updated |

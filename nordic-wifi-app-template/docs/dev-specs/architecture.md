@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-09-17-25 |
-| PRD Version | 2026-06-09-17-25 |
+| Version | 2026-06-16-13-30 |
+| PRD Version | 2026-06-16-13-30 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -20,6 +20,7 @@
 | 2026-06-04-17-09 | Initial spec |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK to Board Differences table; updated BLE prov note |
 | 2026-06-09-17-25 | Updated to PRD v2026-06-09-17-25: fixed Board Differences — nRF5340 Audio DK ROTATE is RGB2 only [3–5], not RGB1 |
+| 2026-06-16-13-30 | Updated to PRD v2026-06-16-13-30: FR-005 — SoftAP max 3 clients (`CONFIG_WIFI_MGMT_AP_MAX_NUM_STA=3`); net_event_app TODO log format specified for connect/disconnect events |
 
 ---
 
@@ -91,9 +92,23 @@ void zego_on_net_event_wifi_disconnect(void);
 | Mode | Hook called when… |
 |---|---|
 | STA | DHCP bound (IPv4 address assigned) |
-| SoftAP | First client station associates |
+| SoftAP | First client station associates (up to `CONFIG_WIFI_MGMT_AP_MAX_NUM_STA` = **3** clients; 4th is rejected) |
 | P2P_GO | First P2P client associates |
 | P2P_CLIENT | DHCP bound (IPv4 address assigned from GO) |
+
+**SoftAP max-client limit — required `prj.conf` entry:**
+
+```kconfig
+# Limit SoftAP to 3 simultaneous clients (Zephyr default is 4)
+CONFIG_WIFI_MGMT_AP_MAX_NUM_STA=3
+```
+
+**Required TODO log format in `net_event_app.c`:**
+
+| Callback | Required `LOG_INF` format |
+|---|---|
+| `zego_on_net_event_wifi_ap_sta_connected(sta_count)` | `"AP client connected: now %d/3 devices connected"` |
+| `zego_on_net_event_wifi_ap_sta_disconnected(remaining_clients)` | `"AP client disconnected: now %d/3 devices connected"` |
 
 ### 3.2 Extending with a custom Zbus channel
 

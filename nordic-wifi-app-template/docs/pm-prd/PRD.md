@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Product Name | Nordic Wi-Fi App Template |
-| Version | 2026-06-16-11-26 |
+| Version | 2026-06-16-13-30 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Draft |
@@ -25,6 +25,7 @@
 | 2026-06-09-17-25 | P2P_CLIENT mode: auto-start peer discovery at boot; try WPS PBC first, fall back to PIN 12345678; retry discovery every 30 s if no peer found; wait 5 s and re-discover on disconnect; added FR-107 |
 | 2026-06-16-11-21 | P2P_GO: phone-as-P2P-client dropped — Android Wi-Fi Direct cannot connect to the DK acting as GO (WPS negotiation fails); P2P_GO only supports other DKs as clients. P2P_CLIENT mode still supports connecting to a phone acting as GO. Updated FR-006 |
 | 2026-06-14-00-21 | P2P_CLIENT: revised auto-connect using target GO MAC (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC Kconfig); direct --join connect skips discovery; static IP 192.168.7.2/24 assigned immediately; 90 s retry timeout; 15 s reconnect delay after disconnect. P2P_GO: PBC auto re-armed on client disconnect and every 110 s. BLE provisioner: init skipped in non-STA modes. Updated FR-107 |
+| 2026-06-16-13-30 | SoftAP: max 3 simultaneous clients (FR-005 updated); net_event_app TODO log messages must clearly show clients now connected and remaining count for both connect and disconnect events |
 | 2026-06-16-11-26 | P2P_CLIENT: added FR-108 MAC-prefix auto-select mode — when CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC ends in :00:00:00, device scans for all P2P GOs matching the 3-byte OUI prefix and connects to the one with the highest RSSI; exact-MAC mode unchanged |
 
 ---
@@ -134,7 +135,7 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 | FR-002 | developer | connect in STA mode via the shell | I can verify basic Wi-Fi connectivity | `wifi connect -s <SSID> -p <pass> -k 1` → DHCP IP logged |
 | FR-003 | developer | connect in STA mode with saved credentials | Credentials survive reboot | `wifi cred add` → power cycle → auto-reconnect |
 | FR-004 | developer | connect in STA mode via BLE provisioning (nRF54LM20DK) | No serial shell needed for provisioning | nRF Wi-Fi Provisioner app pushes credentials → device connects |
-| FR-005 | developer | switch to SoftAP mode and have a client connect | I can test AP mode | `app_wifi_mode softap` + reboot → client joins `192.168.7.1` |
+| FR-005 | developer | switch to SoftAP mode and have up to 3 clients connect | I can test AP mode with multiple devices | (1) `app_wifi_mode softap` + reboot → up to 3 clients can join `192.168.7.1` simultaneously; (2) a 4th client is rejected by the AP; (3) on every client connect event the TODO log line clearly states the current count, e.g. `AP client connected: now 2/3 devices connected`; (4) on every client disconnect event the TODO log line clearly states remaining count, e.g. `AP client disconnected: now 1/3 devices connected` |
 | FR-006 | developer | switch to P2P_GO mode | Device auto-starts P2P group at boot | P2P group created at boot; WPS PBC armed; another DK running P2P_CLIENT mode connects within ~30 s; phone-as-P2P-client is not supported |
 | FR-007 | developer | have mode persist across power cycles | I don't re-enter mode on every boot | `app_wifi_mode X` + power cycle → mode X at next boot |
 | FR-008 | developer | see connection events in `net_event_app.c` | I have a clear hook to start my application logic | `zego_on_net_event_dhcp_bound()` called with correct `mode`, `ip_addr`, `mac_addr`, `ssid` |
