@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/network` |
-| Version | 2026-06-14-00-21 |
+| Version | 2026-06-16-11-21 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -21,6 +21,7 @@
 | 2026-06-09-17-25 | P2P_CLIENT auto-connect: `wifi_run_p2p_client_mode()` starts peer discovery at boot; PBC first then PIN 12345678 fallback; 30 s retry, 5 s reconnect delay; added Kconfig, API table entry, test points |
 | 2026-06-10-00-00 | Clarified P2P_GO/SoftAP shared AP handler; renamed `l2_softap_event_handler`→`l2_ap_event_handler`, `L2_SOFTAP_MASK`→`L2_AP_MASK`, `softap_event_cb`→`ap_event_cb`, `zego_on_net_event_softap_ready`→`zego_on_net_event_wifi_ap_enabled`, `zego_on_net_event_softap_sta_disconnected`→`zego_on_net_event_wifi_ap_sta_disconnected`; added P2P_GO vs SoftAP comparison table |
 | 2026-06-11-13-52 | Expanded Weak-hook API section to all 6 hooks; added `zego_on_net_event_wifi_connect`, `zego_on_net_event_wifi_ap_sta_connected`, `zego_on_net_event_wifi_ap_enabled`, `zego_on_net_event_wifi_ap_sta_disconnected` with full signatures and trigger context |
+| 2026-06-16-11-21 | P2P_GO: phone-as-P2P-client dropped — WPS negotiation with Android fails; GO only accepts DK P2P_CLIENT connections. `wifi_run_p2p_go_mode()` description updated (PBC, no 5-min PIN timer). P2P_FIND removed from PBC arm path (always fails on running GO — radio is anchored to group channel) |
 | 2026-06-14-00-21 | P2P_CLIENT: replaced discovery+PBC+PIN flow with direct --join using CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC; static IP 192.168.7.2/24 assigned at CONNECT_RESULT; connect retry 90 s; reconnect delay 15 s. P2P_GO: added PBC auto-rearm on client disconnect and every 110 s. Hook trigger map: zego_on_net_event_dhcp_bound for P2P_CLIENT now triggered from CONNECT_RESULT success (not DHCP_BOUND). Kconfig updated |
 
 ---
@@ -269,7 +270,7 @@ int network_wait_for_station_connected(k_timeout_t timeout);
 | Function | Purpose |
 |---|---|
 | `wifi_run_softap_mode()` | Set regulatory domain, start DHCP server, enable AP |
-| `wifi_run_p2p_go_mode()` | Create P2P group, activate WPS PIN, start 5-min timer |
+| `wifi_run_p2p_go_mode()` | Create P2P group, arm WPS PBC (re-arms every 110 s); only DK P2P_CLIENT connections supported |
 | `wifi_setup_dhcp_server()` | Assign static IP + start DHCPv4 server (idempotent) |
 | `wifi_utils_auto_connect_stored()` | Trigger `NET_REQUEST_WIFI_CONNECT_STORED` |
 | `wifi_utils_ensure_gateway_softap_credentials()` | Write default SoftAP creds to settings if absent |
