@@ -296,6 +296,24 @@ west flash -d build_nrf5340_audio_dk
 - **nRF5340 Audio DK DTS overlay** (`boards/nrf5340_audio_dk_nrf5340_cpuapp.overlay`) maps the nRF7002EK SPI bus to the Audio DK's Arduino header — this is required; the nRF54LM20DK shield handles its own pinout without an overlay.
 - **Customisation entry point** is `src/modules/network/net_event_app.c`. Override `zego_on_net_event_dhcp_bound()` and `zego_on_net_event_wifi_disconnect()` — the file contains inline TODO comments and a 4-step example for publishing a Zbus channel.
 - **Heap monitor** logs the high-water mark periodically (interval configurable via `CONFIG_APP_HEAP_MONITOR_INTERVAL_S`). Watch for steady growth as an early sign of leaks.
+- **Live memory and thread watermark monitoring with ZView (nRF54LM20DK):**
+  ```bash
+  west zview live \
+    -e build_nrf54lm20dk/nordic-wifi-app-template/zephyr/zephyr.elf \
+    -r jlink \
+    -t nRF54LM20A_M33 \
+    -s 1051869687
+  ```
+  Replace `-s 1051869687` with your board's J-Link serial number (`nrfjprog --ids`). Shows live thread stack usage, heap high-water marks, and kernel object counts without halting the CPU.
+- **Live memory and thread watermark monitoring with ZView (nRF7002DK):**
+  ```bash
+  west zview live \
+    -e build_nrf7002dk/nordic-wifi-app-template/zephyr/zephyr.elf \
+    -r jlink \
+    -t nRF5340_xxAA \
+    -s 1050787962
+  ```
+  Replace `-s 1050793110` with your board's J-Link serial number (`nrfjprog --ids`). Targets the application core (M33); the network core runs `hci_ipc` and has no Zephyr kernel objects to monitor.
 
 ---
 

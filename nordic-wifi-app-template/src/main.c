@@ -8,5 +8,6 @@
 int main(void)
 {
 	zego_wifi_print_banner();
+	k_sleep(K_FOREVER);
 	return 0;
 }
