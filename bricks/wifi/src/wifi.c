@@ -198,6 +198,9 @@ void zego_banner_wifi_info(void)
 		} else {
 			LOG_INF("P2P_CLIENT mode: connect to a P2P_GO DK or phone via PBC:");
 			LOG_INF("[ DK GO ]");
+			LOG_INF("  If you have the GO's MAC(see GO logs), run directly:");
+			LOG_INF("    wifi p2p connect <GO MAC> pbc --join");
+			LOG_INF("  Otherwise, discover first:");
 			LOG_INF("  1. wifi p2p find");
 			LOG_INF("  2. wifi p2p peer       (note GO MAC)");
 			LOG_INF("  3. wifi p2p connect <GO MAC> pbc --join");

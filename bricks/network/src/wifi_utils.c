@@ -931,10 +931,8 @@ int wifi_run_p2p_client_mode(void)
 	const char *mac_str = CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC;
 
 	if (mac_str[0] == '\0') {
-		LOG_INF("P2P_CLIENT: no target GO MAC - connect manually via shell:");
-		LOG_INF("  wifi p2p find");
-		LOG_INF("  wifi p2p peer");
-		LOG_INF("  wifi p2p connect <GO MAC> pbc --join");
+		LOG_INF("P2P_CLIENT: no target GO MAC set for auto-connect, follow guide to "
+			"connect manually.");
 		return 0;
 	}
 
