@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/network` |
-| Version | 2026-06-16-11-21 |
+| Version | 2026-06-16-13-02 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -21,6 +21,8 @@
 | 2026-06-09-17-25 | P2P_CLIENT auto-connect: `wifi_run_p2p_client_mode()` starts peer discovery at boot; PBC first then PIN 12345678 fallback; 30 s retry, 5 s reconnect delay; added Kconfig, API table entry, test points |
 | 2026-06-10-00-00 | Clarified P2P_GO/SoftAP shared AP handler; renamed `l2_softap_event_handler`→`l2_ap_event_handler`, `L2_SOFTAP_MASK`→`L2_AP_MASK`, `softap_event_cb`→`ap_event_cb`, `zego_on_net_event_softap_ready`→`zego_on_net_event_wifi_ap_enabled`, `zego_on_net_event_softap_sta_disconnected`→`zego_on_net_event_wifi_ap_sta_disconnected`; added P2P_GO vs SoftAP comparison table |
 | 2026-06-11-13-52 | Expanded Weak-hook API section to all 6 hooks; added `zego_on_net_event_wifi_connect`, `zego_on_net_event_wifi_ap_sta_connected`, `zego_on_net_event_wifi_ap_enabled`, `zego_on_net_event_wifi_ap_sta_disconnected` with full signatures and trigger context |
+| 2026-06-16-11-26 | P2P_CLIENT: added MAC-prefix auto-select mode (FR-108) — when CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC ends in :00:00:00, device runs P2P peer discovery, collects all GOs matching the 3-byte OUI prefix, and connects to the one with the highest RSSI; exact 6-byte MAC mode unchanged. New sequence section and test points added. Kconfig description updated |
+| 2026-06-16-13-02 | P2P_CLIENT prefix mode: corrected implementation to Find+Query design — after P2P_FIND window (10 s), peer table is queried directly via WIFI_P2P_PEER+broadcast MAC instead of relying on NET_EVENT_WIFI_P2P_DEVICE_FOUND events (which silently skip cached peers). Updated sequence and test point logs. Parameters: P2P_PREFIX_FIND_TIMEOUT_S=10, P2P_PREFIX_MAX_CANDIDATES=5, reschedule at +12 s |
 | 2026-06-16-11-21 | P2P_GO: phone-as-P2P-client dropped — WPS negotiation with Android fails; GO only accepts DK P2P_CLIENT connections. `wifi_run_p2p_go_mode()` description updated (PBC, no 5-min PIN timer). P2P_FIND removed from PBC arm path (always fails on running GO — radio is anchored to group channel) |
 | 2026-06-14-00-21 | P2P_CLIENT: replaced discovery+PBC+PIN flow with direct --join using CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC; static IP 192.168.7.2/24 assigned at CONNECT_RESULT; connect retry 90 s; reconnect delay 15 s. P2P_GO: added PBC auto-rearm on client disconnect and every 110 s. Hook trigger map: zego_on_net_event_dhcp_bound for P2P_CLIENT now triggered from CONNECT_RESULT success (not DHCP_BOUND). Kconfig updated |
 
@@ -215,6 +217,56 @@ driving the same ROTATE → solid-ON LED transitions as STA mode.
 
 ---
 
+## P2P_CLIENT MAC-Prefix Auto-Select Sequence
+
+When `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` ends in `:00:00:00` (e.g. `F4:CE:36:00:00:00`),
+`wifi_run_p2p_client_mode()` operates in **prefix mode** instead of exact-MAC mode.
+
+**Prefix detection**: at startup, the function checks whether bytes [3..5] of the configured
+MAC are all zero. If so, prefix mode is selected; otherwise exact-MAC mode runs unchanged.
+
+```
+Prefix mode sequence:
+
+1. Issue WIFI_P2P_FIND (WIFI_P2P_FIND_ONLY_SOCIAL, timeout=P2P_PREFIX_FIND_TIMEOUT_S=10 s)
+   Set p2p_find_running=true; reschedule work item in (10 + 2) s.
+
+   NOTE: NET_EVENT_WIFI_P2P_DEVICE_FOUND events are NOT used for candidate collection.
+   That event fires only for newly-discovered peers; cached peers (present in
+   wpa_supplicant's internal peer table from a prior session or scan) never re-fire the
+   event even though `wifi p2p peer` shows them. Using events would silently miss
+   already-known GOs.
+
+2. After find window elapses (+2 s margin, p2p_find_running=true):
+   Set p2p_find_running=false.
+   Query peer table: WIFI_P2P_PEER + broadcast MAC (0xFF:FF:FF:FF:FF:FF) via
+   NET_REQUEST_WIFI_P2P_OPER — equivalent to `wifi p2p peer` shell command.
+   Buffer: static peer_buf[P2P_PREFIX_MAX_CANDIDATES=5] (BSS; cleared with memset before
+   each query).
+
+3. Filter and select:
+   → for each entry in peer table: if MAC[0..2] matches the 3-byte prefix, log it
+   → keep the entry with highest RSSI (best=-1 if none match)
+   → if no match: log warning; schedule retry in P2P_CLIENT_CONNECT_TIMEOUT_S (90 s)
+   → if match found: issue WIFI_P2P_CONNECT (method=PBC, --join) to best RSSI MAC
+
+4. Issue WIFI_P2P_CONNECT to selected MAC using method=PBC and flag=--join
+   → same flow as exact-MAC mode from this point
+
+5. On failure/disconnect:
+   → re-run from step 1 (fresh find+query, re-select best RSSI)
+   → this automatically follows a GO that moves channels or a better GO that appears
+```
+
+> **Why RSSI?** In a multi-GO deployment all GOs share the same OUI prefix. Connecting to
+> the strongest signal minimises latency and reduces retransmissions. On each reconnect the
+> scan is re-run so the client migrates to a closer GO if the layout changes.
+
+> **Peer buffer**: `peer_buf` is `static` (BSS allocation, not stack). It is `memset` to zero
+> before every query, so no stale data from prior find cycles is carried over.
+
+---
+
 ## Event Handler Map
 
 | Event | Handler | Action |
@@ -277,7 +329,7 @@ int network_wait_for_station_connected(k_timeout_t timeout);
 | `wifi_utils_get_last_ssid()` | Return last connected SSID string |
 | `wifi_softap_cancel_remind_timer()` | Cancel SoftAP periodic reminder work |
 | `wifi_p2p_go_cancel_wps_timer()` | Cancel P2P_GO WPS re-arm timer |
-| `wifi_run_p2p_client_mode()` | Start P2P peer discovery; handle PBC→PIN connection and 5 s reconnect loop |
+| `wifi_run_p2p_client_mode()` | Start P2P connection to target GO; supports two modes: **exact MAC** (direct `--join`) and **MAC-prefix** (discover all matching GOs, connect to best RSSI) |
 | `wifi_print_status()` | Print Wi-Fi interface status to log |
 | `wifi_print_dhcp_ip()` | Print DHCP IP / netmask / GW to log |
 
@@ -295,7 +347,7 @@ int network_wait_for_station_connected(k_timeout_t timeout);
 | `CONFIG_ZEGO_WIIF_SOFTAP_BAND_5_GHZ` | bool (choice) | n | Use 5 GHz band |
 | `CONFIG_ZEGO_WIIF_SOFTAP_CHANNEL` | int (1–196) | 1 | SoftAP / P2P_GO channel |
 | `CONFIG_ZEGO_NETWORK_LOG_LEVEL` | choice | INF | Module log level |
-| `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` | string | `""` | Target P2P_GO MAC address ("XX:XX:XX:XX:XX:XX"); required for auto-connect --join mode |
+| `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` | string | `""` | Target P2P_GO MAC address. **Exact mode** (`XX:XX:XX:YY:YY:YY` where last 3 bytes are non-zero): connects directly to that MAC using `--join`, no discovery. **Prefix mode** (`XX:XX:XX:00:00:00`): runs P2P peer discovery, collects all GOs whose MAC starts with the first 3 bytes, connects to the one with highest RSSI |
 | `CONFIG_ZEGO_NETWORK_P2P_CLIENT_CONNECT_TIMEOUT_S` | int | 90 | Seconds to wait for CONNECT_RESULT before re-issuing P2P_CONNECT; must be > wpa_supplicant's internal join-scan cycle (~80 s for 10 attempts) |
 | `CONFIG_ZEGO_NETWORK_P2P_CLIENT_RECONNECT_DELAY_S` | int | 15 | Seconds to wait after disconnect before reconnecting; allows wpa_supplicant cleanup scan to drain |
 
@@ -364,8 +416,11 @@ remove-on-disconnect bookkeeping. It is shared between SoftAP and P2P_GO modes.
 | SoftAP enabled | `[zego_net_event_mgmt] SoftAP enabled: SSID='...' IP='192.168.7.1' waiting for client` |
 | STA connected (DHCP) | `[zego_net_event_mgmt] NET_EVENT_IPV4_DHCP_BOUND: ip=... ssid=...` |
 | Wi-Fi disconnected | `[zego_net_event_mgmt] NET_EVENT_WIFI_DISCONNECT_RESULT: status=... reason=...` |
-| P2P_CLIENT discovery start | `[zego_wifi_utils] P2P_CLIENT mode: scanning for peers (timeout: 30 s)...` |
-| P2P peer found → PBC | `[zego_wifi_utils] P2P_CLIENT: peer found, trying WPS PBC...` |
-| PBC fallback to PIN | `[zego_wifi_utils] P2P_CLIENT: PBC not accepted, trying PIN 12345678` |
+| P2P_CLIENT exact-MAC connect | `[zego_wifi_utils] P2P_CLIENT: connecting to GO F4:CE:36:00:AE:EC (--join)` |
+| P2P_CLIENT prefix scan start | `[zego_wifi_utils] P2P_CLIENT: prefix mode F4:CE:36:* - peer discovery (10 s)` |
+| P2P prefix peer table query | `[zego_wifi_utils] P2P_CLIENT: peer table has N entries, filtering for prefix F4:CE:36` |
+| P2P prefix candidate | `[zego_wifi_utils] P2P_CLIENT:   [N] F4:CE:36:XX:XX:XX RSSI=-NN` |
+| P2P_CLIENT best GO selected | `[zego_wifi_utils] P2P_CLIENT: best GO F4:CE:36:XX:XX:XX RSSI=-NN dBm, connecting` |
+| P2P_CLIENT no prefix match | `[zego_wifi_utils] P2P_CLIENT: no GO with configured prefix found, retry in 90 s` |
 | P2P_CLIENT connected | `[zego_net_event_mgmt] Wi-Fi connected: mode=P2P_CLIENT ip=... ssid=DIRECT-...` |
-| P2P_CLIENT reconnect | `[zego_wifi_utils] P2P_CLIENT: disconnected, retrying in 5 s...` |
+| P2P_CLIENT reconnect | `[zego_wifi_utils] P2P_CLIENT: disconnected, retrying in 15 s...` |

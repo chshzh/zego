@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Product Name | Nordic Wi-Fi App Template |
-| Version | 2026-06-16-11-21 |
+| Version | 2026-06-16-11-26 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Draft |
@@ -25,6 +25,7 @@
 | 2026-06-09-17-25 | P2P_CLIENT mode: auto-start peer discovery at boot; try WPS PBC first, fall back to PIN 12345678; retry discovery every 30 s if no peer found; wait 5 s and re-discover on disconnect; added FR-107 |
 | 2026-06-16-11-21 | P2P_GO: phone-as-P2P-client dropped — Android Wi-Fi Direct cannot connect to the DK acting as GO (WPS negotiation fails); P2P_GO only supports other DKs as clients. P2P_CLIENT mode still supports connecting to a phone acting as GO. Updated FR-006 |
 | 2026-06-14-00-21 | P2P_CLIENT: revised auto-connect using target GO MAC (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC Kconfig); direct --join connect skips discovery; static IP 192.168.7.2/24 assigned immediately; 90 s retry timeout; 15 s reconnect delay after disconnect. P2P_GO: PBC auto re-armed on client disconnect and every 110 s. BLE provisioner: init skipped in non-STA modes. Updated FR-107 |
+| 2026-06-16-11-26 | P2P_CLIENT: added FR-108 MAC-prefix auto-select mode — when CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC ends in :00:00:00, device scans for all P2P GOs matching the 3-byte OUI prefix and connects to the one with the highest RSSI; exact-MAC mode unchanged |
 
 ---
 
@@ -72,7 +73,9 @@ Starting a new nRF7x Wi-Fi project from a blank Zephyr sample requires setting u
   - **BLE provisioning** (nRF54LM20DK only, `CONFIG_ZEGO_WIFI_BLE_PROV=y`): use the *nRF Wi-Fi Provisioner* phone app to push credentials over BLE; credentials saved to flash
 - [x] **SoftAP mode** — device creates its own Wi-Fi hotspot; clients can connect to `192.168.7.1`
 - [x] **P2P_GO mode** — device is the Wi-Fi Direct Group Owner; auto-starts at boot with WPS PBC (push-button); only other DKs (running P2P_CLIENT mode) can connect — Android/iOS phones as P2P clients are not supported
-- [x] **P2P_CLIENT mode** — device auto-connects to a known P2P_GO at boot using `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` (compile-time MAC address); skips discovery and uses WPS PBC `--join` mode directly; retries every 90 s until the GO is found; waits 15 s and reconnects automatically on disconnect; static IP 192.168.7.2/24 is assigned immediately
+- [x] **P2P_CLIENT mode** — device auto-connects to a P2P_GO at boot using `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC`:
+  - **Exact MAC** (e.g. `F4:CE:36:00:AE:EC`): connects directly to that specific GO; no discovery scan; retries every 90 s; reconnects after 15 s on disconnect; static IP 192.168.7.2/24
+  - **MAC prefix** (last 3 bytes = `00:00:00`, e.g. `F4:CE:36:00:00:00`): scans for all P2P GOs whose MAC starts with that 3-byte prefix, then connects to the one with the strongest RSSI; same retry/reconnect logic as exact-MAC mode
 - [x] **Runtime mode switching** — `app_wifi_mode [sta|softap|p2p_go|p2p_client]` saves to NVS and reboots
 - [x] **Default mode on fresh flash**: P2P_GO
 
@@ -147,6 +150,7 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 | FR-105 | evaluator | see Wi-Fi connection state on LED 0 | I can tell at a glance whether the device is connected | ROTATE while connecting → solid ON when connected (STA/P2P) / ROTATE when SoftAP up with no clients / solid ON when SoftAP client connected / breathe in BLE prov / fast blink on error; on nRF5340 Audio DK ROTATE uses RGB2 only ([3,4,5]) and connected state shows solid green on RGB2 (index 4) |
 | FR-106 | evaluator | toggle BLE provisioning with a double-click (nRF54LM20DK) | I can enter/exit provisioning mode without the shell | Double-click on Button 0 toggles BLE provisioning advertising |
 | FR-107 | developer | switch to P2P_CLIENT mode and have the device auto-connect to a known P2P_GO | I can test P2P client mode without manual shell commands | (1) `app_wifi_mode p2p_client` + reboot → device logs "auto-connecting to GO <MAC>"; (2) WPS PBC `--join` attempted directly (no discovery scan) → if GO is reachable, static IP 192.168.7.2/24 is assigned and `zego_on_net_event_dhcp_bound()` is called within ~30 s; (3) if GO not reachable, retry every 90 s automatically; (4) on disconnect, device waits 15 s then reconnects |
+| FR-108 | developer | configure P2P_CLIENT with a MAC prefix (last 3 bytes = 00:00:00) to auto-select the strongest nearby P2P_GO | I can deploy multiple interchangeable GO DKs without recompiling for each MAC | (1) `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC="F4:CE:36:00:00:00"` → device detects prefix mode at boot; (2) P2P peer discovery runs and collects all GOs whose MAC starts with `F4:CE:36`; (3) device connects to the GO with the highest RSSI using WPS PBC `--join`; (4) on failure or disconnect, re-scans and picks the best RSSI again; (5) exact-MAC mode (`F4:CE:36:00:AE:EC`) is unaffected |
 
 ---
 

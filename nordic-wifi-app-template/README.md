@@ -79,7 +79,11 @@ The firmware then starts the Wi-Fi subsystem and LED 0 begins ROTATING. Connecti
 - **P2P_GO** (default on fresh flash): device starts its own Wi-Fi Direct group automatically — connect your phone via *Wi-Fi Direct* settings using WPS PIN `12345678`; look for `DIRECT-xx` in your phone's network list.
 - **STA**: run `wifi connect -s <SSID> -p <pass> -k 1` in the UART shell; on success the terminal logs `Wi-Fi connected: mode=STA ip=192.168.x.x`.
 - **SoftAP**: phone connects to the hotspot advertised by the device; device IP is `192.168.7.1`.
-- **P2P_CLIENT**: run `wifi p2p find`, then `wifi p2p connect <phone-MAC> pbc` when the peer appears.
+- **P2P_CLIENT**: connects to a P2P_GO (another DK or phone acting as GO).
+  - **Auto-connect (recommended)**: set `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` in `prj.conf` and rebuild. Two modes:
+    - **Exact MAC** (`F4:CE:36:00:AE:EC`): issues `--join` directly at boot; retries every 90 s.
+    - **MAC-prefix** (`F4:CE:36:00:00:00` — last 3 bytes = `00:00:00`): runs a 10 s social-channel scan, then queries the wpa_supplicant peer table; connects to the GO with the strongest RSSI that matches the 3-byte OUI prefix; useful for multi-GO deployments where all GOs share the same manufacturer OUI.
+  - **Manual**: run `wifi p2p find`, then `wifi p2p peer` to list discovered peers, then `wifi p2p connect <GO-MAC> pbc --join`.
 
 Switch mode with `app_wifi_mode [sta|softap|p2p_go|p2p_client]` — the device reboots into the new mode and persists the setting.
 

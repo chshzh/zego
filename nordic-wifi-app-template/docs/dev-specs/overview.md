@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-16-11-21 |
-| PRD Version | 2026-06-14-00-21 |
+| Version | 2026-06-16-11-26 |
+| PRD Version | 2026-06-16-11-26 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -21,6 +21,7 @@
 | 2026-06-04-22-00 | Updated ux.md and PRD for revised SoftAP LED behavior (ROTATE/solid ON) |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK target; updated Target Board(s), architecture.md, and ux.md; added board conf + DTS overlay + hci_ipc netcore conf |
 | 2026-06-09-17-25 | Updated to PRD v2026-06-09-17-25: added FR-107 P2P_CLIENT auto-connect to PRD mapping; network-spec.md updated with auto-connect sequence, new API, Kconfig, test points |
+| 2026-06-16-11-26 | Updated to PRD v2026-06-16-11-26: FR-108 MAC-prefix auto-select added; network-spec.md updated with prefix sequence, Kconfig, test points |
 | 2026-06-16-11-21 | Updated to PRD v2026-06-16-11-21: P2P_GO phone-as-client dropped; FR-006 acceptance criteria updated; network-spec.md updated |
 | 2026-06-14-00-21 | Updated to PRD v2026-06-14-00-21: P2P_CLIENT --join auto-connect, static IP, 90 s timeout, 15 s reconnect; P2P_GO PBC auto-rearm; BLE provisioner STA-only init; network-spec.md and wifi-ble-prov-spec.md updated |
 | 2026-06-04-17-09 | Initial overview — template extracted from nordic-wifi-webdash; webserver removed; all four Wi-Fi modes + three STA provisioning paths; architecture.md added |
@@ -90,6 +91,7 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | FR-105 LED Wi-Fi state feedback | [ux.md](ux.md) | Specified |
 | FR-106 BLE prov double-click | [ux.md](ux.md) | Specified |
 | FR-107 P2P_CLIENT auto-connect | [network-spec.md](../../network/docs/network-spec.md) | Specified |
+| FR-108 P2P_CLIENT MAC-prefix auto-select | [network-spec.md](../../network/docs/network-spec.md) | Specified |
 
 ---
 
