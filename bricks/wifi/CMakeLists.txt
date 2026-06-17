@@ -21,8 +21,13 @@ if(CONFIG_ZEGO_WIFI)
         elseif(DEFINED CONFIG_MEMFAULT_NCS_FW_VERSION AND NOT CONFIG_MEMFAULT_NCS_FW_VERSION STREQUAL "")
                 zephyr_compile_definitions(APP_VERSION_STRING="${CONFIG_MEMFAULT_NCS_FW_VERSION}")
         else()
-                # Read NCS version from the application's west.yml
-                file(STRINGS ${APPLICATION_SOURCE_DIR}/west.yml _WEST_NCS_LINE
+                # Read NCS version from west.yml — app dir first, then repo root
+                if(EXISTS ${APPLICATION_SOURCE_DIR}/west.yml)
+                        set(_WEST_YML ${APPLICATION_SOURCE_DIR}/west.yml)
+                else()
+                        set(_WEST_YML ${APPLICATION_SOURCE_DIR}/../west.yml)
+                endif()
+                file(STRINGS ${_WEST_YML} _WEST_NCS_LINE
                         REGEX "revision: v[0-9]+\\.[0-9]+\\.[0-9]+")
                 list(GET _WEST_NCS_LINE 0 _WEST_NCS_LINE)
                 string(REGEX REPLACE ".*revision: (v[0-9]+\\.[0-9]+\\.[0-9]+).*" "\\1"
