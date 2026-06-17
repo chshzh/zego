@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/network` |
-| Version | 2026-06-16-13-02 |
+| Version | 2026-06-17-09-44 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -16,6 +16,7 @@
 
 | Version | Summary of changes |
 |---|---|
+| 2026-06-17-09-44 | Added optional mDNS / DNS-SD support: `ZEGO_NETWORK_MDNS`, `ZEGO_NETWORK_MDNS_HTTP_PORT`; new `src/mdns.c`; `Kconfig.defaults` hostname defaults; updated Memory Estimate and Test Points |
 | 2026-06-04-17-10 | Initial spec — reverse-designed from source |
 | 2026-06-05-09-31 | Added Supported Hardware section; documented nRF5340 Audio DK + nRF7002EK |
 | 2026-06-09-17-25 | P2P_CLIENT auto-connect: `wifi_run_p2p_client_mode()` starts peer discovery at boot; PBC first then PIN 12345678 fallback; 30 s retry, 5 s reconnect delay; added Kconfig, API table entry, test points |
@@ -396,13 +397,83 @@ remove-on-disconnect bookkeeping. It is shared between SoftAP and P2P_GO modes.
 
 ---
 
+
+## mDNS / DNS-SD
+
+Optional feature — enabled with `CONFIG_ZEGO_NETWORK_MDNS=y`.
+
+When enabled the device is reachable as `<hostname>.local` on any active Wi-Fi interface.
+No application code is required; all behaviour is driven by Kconfig.
+
+### Kconfig symbols
+
+| Symbol | Type | Default | Description |
+|---|---|---|---|
+| `CONFIG_ZEGO_NETWORK_MDNS` | bool | n | Enable mDNS responder + DNS-SD support |
+| `CONFIG_ZEGO_NETWORK_MDNS_HTTP_PORT` | int (0–65535) | 0 | When non-zero, registers an `_http._tcp.local` DNS-SD service record at this port. Leave at 0 if no HTTP server is present. |
+
+`CONFIG_ZEGO_NETWORK_MDNS=y` automatically selects:
+- `CONFIG_NET_HOSTNAME_ENABLE=y` — enables the hostname API; sets `CONFIG_NET_HOSTNAME` at boot
+- `CONFIG_MDNS_RESPONDER=y` — Zephyr mDNS responder joins 224.0.0.251 on every UP interface
+- `CONFIG_DNS_SD=y` — DNS Service Discovery support; `MDNS_RESPONDER_DNS_SD` defaults `y`
+
+### Hostname
+
+The hostname defaults to `"zego-device"` (→ `zego-device.local`) via `Kconfig.defaults`.
+Override in `prj.conf`:
+
+```
+CONFIG_NET_HOSTNAME="myapp"   # device becomes myapp.local
+```
+
+`CONFIG_NET_HOSTNAME_UNIQUE` defaults to `n` (stable, predictable name).
+Set to `y` in `prj.conf` if multiple devices share the same network segment.
+
+### Per-mode behaviour
+
+| Mode | mDNS reliability | Notes |
+|---|---|---|
+| SoftAP | Reliable | Multicast stays on 192.168.7.0/24; works as long as a client is connected |
+| P2P_GO | Reliable | Same as SoftAP — GO is the AP |
+| STA | Router-dependent | Most home routers pass mDNS multicast; enterprise APs sometimes block it |
+| P2P_CLIENT | Unreliable | Phone acting as GO rarely forwards mDNS multicast; direct IP is the reliable fallback |
+
+### Enabling in prj.conf
+
+Minimum (hostname resolution only):
+
+```
+CONFIG_ZEGO_NETWORK_MDNS=y
+CONFIG_NET_HOSTNAME="myapp"          # optional; default is "zego-device"
+```
+
+With HTTP service discovery:
+
+```
+CONFIG_ZEGO_NETWORK_MDNS=y
+CONFIG_NET_HOSTNAME="myapp"
+CONFIG_ZEGO_NETWORK_MDNS_HTTP_PORT=80
+```
+
+### Implementation files
+
+| File | Role |
+|---|---|
+| `Kconfig` | `ZEGO_NETWORK_MDNS`, `ZEGO_NETWORK_MDNS_HTTP_PORT` definitions |
+| `Kconfig.defaults` | `NET_HOSTNAME default "zego-device"`, `NET_HOSTNAME_UNIQUE default n` |
+| `CMakeLists.txt` | Conditional `zephyr_library_sources(src/mdns.c)` |
+| `src/mdns.c` | `DNS_SD_REGISTER_SERVICE` (when `HTTP_PORT > 0`) + `SYS_INIT` boot log |
+
+---
+
 ## Memory Estimate
 
 | Item | Flash | RAM |
 |---|---|---|
 | `net_event_mgmt.c` | ~8 KB | ~1 KB (static state, semaphores, callbacks) |
 | `wifi_utils.c` | ~4 KB | ~0.5 KB (SSID buffer, timer state) |
-| **Total** | **~12 KB** | **~1.5 KB** |
+| **Total (base)** | **~12 KB** | **~1.5 KB** |
+| `src/mdns.c` + `MDNS_RESPONDER` | +~6 KB | +~1.5 KB (socket, multicast state) — only when `ZEGO_NETWORK_MDNS=y` |
 
 ---
 
@@ -424,3 +495,5 @@ remove-on-disconnect bookkeeping. It is shared between SoftAP and P2P_GO modes.
 | P2P_CLIENT no prefix match | `[zego_wifi_utils] P2P_CLIENT: no GO with configured prefix found, retry in 90 s` |
 | P2P_CLIENT connected | `[zego_net_event_mgmt] Wi-Fi connected: mode=P2P_CLIENT ip=... ssid=DIRECT-...` |
 | P2P_CLIENT reconnect | `[zego_wifi_utils] P2P_CLIENT: disconnected, retrying in 15 s...` |
+| mDNS active (boot) | `[zego_mdns] mDNS: device reachable as <hostname>.local` |
+| mDNS HTTP DNS-SD (boot) | `[zego_mdns] mDNS: DNS-SD _http._tcp.local port=<N>` — only when `MDNS_HTTP_PORT > 0` |

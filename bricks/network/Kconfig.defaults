@@ -176,3 +176,17 @@ config NET_MGMT_EVENT_STACK_SIZE
 
 config NET_MGMT_EVENT_QUEUE_TIMEOUT
 	default 5000 if ZEGO_NETWORK
+
+# ---------------------------------------------------------------------------
+# mDNS hostname defaults
+# ---------------------------------------------------------------------------
+# Override the Zephyr default ("zephyr") with a sensible brick default when
+# mDNS is enabled.  The app can still override with CONFIG_NET_HOSTNAME="myapp"
+# in prj.conf — that explicit setting takes precedence over any default.
+config NET_HOSTNAME
+	default "zego-device" if ZEGO_NETWORK_MDNS
+
+# Disable MAC-suffix uniquification so the hostname stays predictable.
+# Flip to y in prj.conf if multiple devices share the same network.
+config NET_HOSTNAME_UNIQUE
+	default n if ZEGO_NETWORK_MDNS

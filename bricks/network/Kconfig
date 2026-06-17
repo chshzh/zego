@@ -86,6 +86,51 @@ config ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC
 endmenu # "P2P Client Configuration"
 
 # ---------------------------------------------------------------------------
+# mDNS / DNS-SD
+# ---------------------------------------------------------------------------
+
+config ZEGO_NETWORK_MDNS
+	bool "Enable mDNS hostname advertisement"
+	default n
+	select NET_HOSTNAME_ENABLE
+	select MDNS_RESPONDER
+	select DNS_SD
+	help
+	  Enables the Zephyr mDNS responder so the device is reachable as
+	  <hostname>.local on any active Wi-Fi interface (SoftAP, STA,
+	  P2P_GO, P2P_CLIENT). No application code required — enabling this
+	  option and setting CONFIG_NET_HOSTNAME in prj.conf is sufficient.
+
+	  Mode notes:
+	    SoftAP / P2P_GO  — works immediately; device IP is 192.168.7.1
+	    STA              — works after DHCP; requires router to pass mDNS
+	                       multicast (home routers usually do)
+	    P2P_CLIENT       — advertised but phone-as-GO rarely forwards mDNS
+	                       multicast; direct IP is the reliable fallback
+
+	  The hostname is taken from CONFIG_NET_HOSTNAME.  When this option is
+	  enabled the default hostname is "zego-device" (→ zego-device.local).
+	  Override in prj.conf:  CONFIG_NET_HOSTNAME="myapp"
+
+if ZEGO_NETWORK_MDNS
+
+config ZEGO_NETWORK_MDNS_HTTP_PORT
+	int "DNS-SD HTTP service port (0 = disabled)"
+	default 0
+	range 0 65535
+	help
+	  When non-zero, registers an _http._tcp.local DNS-SD service record
+	  at this port.  This allows service-discovery browsers (Bonjour,
+	  Avahi, iOS Safari, Android Chrome) to find the HTTP server without
+	  knowing the device IP address.
+
+	  Set to 80 (or CONFIG_APP_HTTP_PORT) to match the HTTP server port.
+	  Leave at 0 if the device does not run an HTTP server, or if only
+	  hostname resolution (hostname.local) is needed.
+
+endif # ZEGO_NETWORK_MDNS
+
+# ---------------------------------------------------------------------------
 # Log level (standard Zephyr template)
 # ---------------------------------------------------------------------------
 
