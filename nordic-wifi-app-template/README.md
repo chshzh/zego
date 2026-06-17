@@ -1,7 +1,5 @@
 # Nordic Wi-Fi App Template
 
-[![Validation](https://github.com/chshzh/zego/actions/workflows/validation.yml/badge.svg)](https://github.com/chshzh/zego/actions/workflows/validation.yml)
-[![Release](https://github.com/chshzh/zego/actions/workflows/release.yml/badge.svg)](https://github.com/chshzh/zego/actions/workflows/release.yml)
 [![Latest Release](https://img.shields.io/github/v/release/chshzh/zego?label=Release&color=skyblue)](https://github.com/chshzh/zego/releases/latest)
 
 ## Project Overview
