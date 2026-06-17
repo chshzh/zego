@@ -1,0 +1,207 @@
+name: Validation
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Cancel any in-progress run for the same branch/PR to avoid wasting CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  set-version:
+    runs-on: ubuntu-24.04
+    outputs:
+      NCS_VERSION: ${{ steps.extract-version.outputs.NCS_VERSION }}
+      TOOLCHAIN_VERSION: ${{ steps.extract-version.outputs.TOOLCHAIN_VERSION }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: app-workspace/zego
+
+      - name: Extract NCS version from west.yml
+        id: extract-version
+        working-directory: app-workspace/zego
+        run: |
+          NCS_VERSION=$(awk '
+            $1=="-" && $2=="name:" && $3=="sdk-nrf" { in_sdk=1; next }
+            in_sdk && $1=="revision:" { print $2; exit }
+          ' west.yml)
+          if [ -z "${NCS_VERSION}" ]; then
+            echo "Failed to extract sdk-nrf revision from west.yml" >&2
+            exit 1
+          fi
+          echo "NCS_VERSION=${NCS_VERSION}" >> $GITHUB_OUTPUT
+          # The toolchain Docker image tag matches the NCS revision exactly.
+          echo "TOOLCHAIN_VERSION=${NCS_VERSION}" >> $GITHUB_OUTPUT
+
+  build-and-test:
+    needs: set-version
+    runs-on: ubuntu-24.04
+    container: ghcr.io/nrfconnect/sdk-nrf-toolchain:${{ needs.set-version.outputs.TOOLCHAIN_VERSION }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      matrix:
+        config:
+          - name: "nRF54LM20DK + nRF7002EB2"
+            build_dir: "build_nrf54lm20dk"
+            board: "nrf54lm20dk/nrf54lm20a/cpuapp"
+            cmake_args: "-Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002eb2"
+          - name: "nRF7002DK"
+            build_dir: "build_nrf7002dk"
+            board: "nrf7002dk/nrf5340/cpuapp"
+            cmake_args: "-Dnordic-wifi-app-template_SNIPPET=wifi-p2p"
+          - name: "nRF5340 Audio DK + nRF7002EK"
+            build_dir: "build_nrf5340_audio_dk"
+            board: "nrf5340_audio_dk/nrf5340/cpuapp"
+            cmake_args: "-Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002ek"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: app-workspace/zego
+
+      - name: Cache west workspace
+        uses: actions/cache@v4
+        with:
+          path: |
+            app-workspace/.west
+            app-workspace/nrf
+            app-workspace/zephyr
+            app-workspace/modules
+            app-workspace/nrfxlib
+            app-workspace/bootloader
+          key: west-${{ needs.set-version.outputs.NCS_VERSION }}-${{ hashFiles('app-workspace/zego/west.yml') }}
+
+      - name: Prepare west workspace
+        working-directory: app-workspace
+        run: |
+          grep -q 'base = zephyr' .west/config 2>/dev/null || \
+            west init -l zego
+          west update -o=--depth=1 -n
+
+      - name: Build ${{ matrix.config.name }}
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        run: |
+          BUILD_LOG="${{ matrix.config.build_dir }}/build.log"
+          mkdir -p "${{ matrix.config.build_dir }}"
+          set -o pipefail
+          west build -p -b ${{ matrix.config.board }} -d ${{ matrix.config.build_dir }} -- \
+            ${{ matrix.config.cmake_args }} 2>&1 | tee "$BUILD_LOG"
+
+      - name: Extract memory usage for ${{ matrix.config.name }}
+        if: always()
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        run: |
+          BUILD_LOG="${{ matrix.config.build_dir }}/build.log"
+          USAGE_SUMMARY="${{ matrix.config.build_dir }}/usage-summary.txt"
+
+          if [ -f "$BUILD_LOG" ]; then
+            ROM_USAGE="$(awk '/^[[:space:]]*FLASH:/ {
+              n=$2+0; if (n>max_f) { max_f=n; line_f=$2 " " $3 " / " $4 " " $5 " (" $6 ")" }
+            } END { print line_f }' "$BUILD_LOG")"
+            RAM_USAGE="$(awk '/^[[:space:]]*RAM:/ {
+              n=$2+0; if (n>max_r) { max_r=n; line_r=$2 " " $3 " / " $4 " " $5 " (" $6 ")" }
+            } END { print line_r }' "$BUILD_LOG")"
+          else
+            ROM_USAGE="n/a"
+            RAM_USAGE="n/a"
+          fi
+
+          : "${ROM_USAGE:=n/a}"
+          : "${RAM_USAGE:=n/a}"
+
+          {
+            echo "ROM_USAGE=$ROM_USAGE"
+            echo "RAM_USAGE=$RAM_USAGE"
+          } > "$USAGE_SUMMARY"
+
+          echo "ROM usage: $ROM_USAGE"
+          echo "RAM usage: $RAM_USAGE"
+
+      - name: Capture size report for ${{ matrix.config.name }}
+        if: always()
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        run: |
+          ELF_PATH="${{ matrix.config.build_dir }}/nordic-wifi-app-template/zephyr/zephyr.elf"
+          SIZE_REPORT="${{ matrix.config.build_dir }}/size-report.txt"
+          SIZE_TOOL="$(command -v arm-zephyr-eabi-size || command -v llvm-size || command -v size)"
+
+          echo "ELF: ${ELF_PATH}" > "$SIZE_REPORT"
+          echo "Tool: ${SIZE_TOOL}" >> "$SIZE_REPORT"
+          echo >> "$SIZE_REPORT"
+
+          if [ -f "$ELF_PATH" ] && [ -n "$SIZE_TOOL" ]; then
+            "$SIZE_TOOL" "$ELF_PATH" >> "$SIZE_REPORT"
+          else
+            echo "size data unavailable" >> "$SIZE_REPORT"
+          fi
+
+          echo "Generated size report: $SIZE_REPORT"
+
+      - name: Stage artifacts for ${{ matrix.config.name }}
+        if: always()
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        run: |
+          STAGE="artifact-staging-${{ matrix.config.build_dir }}"
+          mkdir -p "$STAGE"
+          for f in build.log usage-summary.txt size-report.txt; do
+            cp "${{ matrix.config.build_dir }}/$f" "$STAGE/" 2>/dev/null || true
+          done
+          BOARD_QUAL="${{ matrix.config.board }}"
+          BOARD_QUAL="${BOARD_QUAL//\//_}"
+          APP_HEX="${{ matrix.config.build_dir }}/merged_${BOARD_QUAL}.hex"
+          NET_HEX="${{ matrix.config.build_dir }}/merged_${BOARD_QUAL/cpuapp/cpunet}.hex"
+          if [ -f "${APP_HEX}" ] && [ -f "${NET_HEX}" ]; then
+            python3 -c "import sys; from intelhex import IntelHex; a=IntelHex(); a.loadhex(sys.argv[1]); n=IntelHex(); n.loadhex(sys.argv[2]); a.merge(n,overlap='replace'); a.write_hex_file(sys.argv[3])" "${APP_HEX}" "${NET_HEX}" "$STAGE/merged.hex"
+            echo "Combined app+net → merged.hex"
+          elif [ -f "${APP_HEX}" ]; then
+            cp "${APP_HEX}" "$STAGE/merged.hex"
+            echo "Collected ${APP_HEX}"
+          else
+            echo "Warning: ${APP_HEX} not found"
+          fi
+
+      - name: Upload artifacts for ${{ matrix.config.name }}
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: warn
+          name: build-${{ matrix.config.build_dir }}
+          path: app-workspace/zego/nordic-wifi-app-template/artifact-staging-${{ matrix.config.build_dir }}/
+
+  static-analysis:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch Zephyr checkpatch
+        run: |
+          git clone --depth=1 https://github.com/zephyrproject-rtos/zephyr.git /tmp/zephyr
+          chmod +x /tmp/zephyr/scripts/checkpatch.pl
+
+      - name: Run Zephyr checkpatch
+        run: |
+          echo "Running Zephyr checkpatch on source files..."
+          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            git diff HEAD~1 | /tmp/zephyr/scripts/checkpatch.pl --no-tree -
+          else
+            echo "Single commit — checking all source files..."
+            if [ -d nordic-wifi-app-template/src/ ]; then
+              find nordic-wifi-app-template/src/ \( -name "*.c" -o -name "*.h" \) | while read -r file; do
+                echo "Checking $file..."
+                /tmp/zephyr/scripts/checkpatch.pl --no-tree --file "$file" || true
+              done
+            fi
+          fi
+          echo "Checkpatch analysis completed ✓"

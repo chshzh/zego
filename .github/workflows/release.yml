@@ -1,0 +1,354 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # e.g. v3.3.0.1, v3.3.0.2
+
+# Cancel any in-progress run for the same tag.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  set-version:
+    runs-on: ubuntu-24.04
+    outputs:
+      NCS_VERSION: ${{ steps.extract-version.outputs.NCS_VERSION }}
+      TOOLCHAIN_VERSION: ${{ steps.extract-version.outputs.TOOLCHAIN_VERSION }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: app-workspace/zego
+
+      - name: Extract NCS version from west.yml
+        id: extract-version
+        working-directory: app-workspace/zego
+        run: |
+          NCS_VERSION=$(awk '
+            $1=="-" && $2=="name:" && $3=="sdk-nrf" { in_sdk=1; next }
+            in_sdk && $1=="revision:" { print $2; exit }
+          ' west.yml)
+          if [ -z "${NCS_VERSION}" ]; then
+            echo "Failed to extract sdk-nrf revision from west.yml" >&2
+            exit 1
+          fi
+          echo "NCS_VERSION=${NCS_VERSION}" >> $GITHUB_OUTPUT
+          echo "TOOLCHAIN_VERSION=${NCS_VERSION}" >> $GITHUB_OUTPUT
+
+  build-release:
+    needs: set-version
+    runs-on: ubuntu-24.04
+    container: ghcr.io/nrfconnect/sdk-nrf-toolchain:${{ needs.set-version.outputs.TOOLCHAIN_VERSION }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: app-workspace/zego
+          fetch-depth: 0
+
+      - name: Prepare west workspace
+        working-directory: app-workspace
+        run: |
+          west init -l zego
+          west update -o=--depth=1 -n
+
+      - name: Extract version from tag
+        id: ver
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building release ${VERSION}"
+
+      # ── nRF54LM20DK + nRF7002EB2 ────────────────────────────────────────────
+      - name: Build nRF54LM20DK + nRF7002EB2
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        env:
+          VER: ${{ steps.ver.outputs.VERSION }}
+        run: |
+          mkdir -p build_nrf54lm20dk
+          set -o pipefail
+          west build -p -b nrf54lm20dk/nrf54lm20a/cpuapp -d build_nrf54lm20dk -- \
+            -Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002eb2 \
+            -DAPP_VERSION_STRING="${VER}" 2>&1 | tee build_nrf54lm20dk/build.log
+
+      - name: Resolve merged hex — nRF54LM20DK
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        run: |
+          BUILD_DIR="build_nrf54lm20dk"
+          MERGED="${BUILD_DIR}/merged.hex"
+          BOARD_QUAL="nrf54lm20dk_nrf54lm20a_cpuapp"
+          APP_HEX="${BUILD_DIR}/merged_${BOARD_QUAL}.hex"
+          if [ -f "${MERGED}" ]; then
+            echo "merged.hex already exists"
+          elif [ -f "${APP_HEX}" ]; then
+            cp "${APP_HEX}" "${MERGED}"
+            echo "Collected ${APP_HEX}"
+          else
+            echo "merged.hex not found — available hex files:"
+            find "${BUILD_DIR}" -name "*.hex" | head -20
+            ZHEX="${BUILD_DIR}/nordic-wifi-app-template/zephyr/zephyr.hex"
+            [ -f "${ZHEX}" ] && cp "${ZHEX}" "${MERGED}" && echo "Fallback: zephyr.hex" || { echo "ERROR: no hex found"; exit 1; }
+          fi
+
+      - name: Extract memory usage — nRF54LM20DK
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        run: |
+          BUILD_LOG="build_nrf54lm20dk/build.log"
+          ROM_USAGE="$(awk '/^[[:space:]]*FLASH:/ {
+            n=$2+0; if (n>max_f) { max_f=n; line_f=$2 " " $3 " / " $4 " " $5 " (" $6 ")" }
+          } END { print line_f }' "$BUILD_LOG")"
+          RAM_USAGE="$(awk '/^[[:space:]]*RAM:/ {
+            n=$2+0; if (n>max_r) { max_r=n; line_r=$2 " " $3 " / " $4 " " $5 " (" $6 ")" }
+          } END { print line_r }' "$BUILD_LOG")"
+          : "${ROM_USAGE:=n/a}"
+          : "${RAM_USAGE:=n/a}"
+          printf "ROM_USAGE=%s\nRAM_USAGE=%s\n" "$ROM_USAGE" "$RAM_USAGE" > release-usage-nrf54lm20dk.txt
+          echo "nRF54LM20DK  ROM: $ROM_USAGE | RAM: $RAM_USAGE"
+
+      # ── nRF7002DK ────────────────────────────────────────────────────────────
+      - name: Build nRF7002DK
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        env:
+          VER: ${{ steps.ver.outputs.VERSION }}
+        run: |
+          mkdir -p build_nrf7002dk
+          set -o pipefail
+          west build -p -b nrf7002dk/nrf5340/cpuapp -d build_nrf7002dk -- \
+            -Dnordic-wifi-app-template_SNIPPET=wifi-p2p \
+            -DAPP_VERSION_STRING="${VER}" 2>&1 | tee build_nrf7002dk/build.log
+
+      - name: Resolve merged hex — nRF7002DK
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        run: |
+          BUILD_DIR="build_nrf7002dk"
+          MERGED="${BUILD_DIR}/merged.hex"
+          BOARD_QUAL="nrf7002dk_nrf5340_cpuapp"
+          APP_HEX="${BUILD_DIR}/merged_${BOARD_QUAL}.hex"
+          NET_HEX="${BUILD_DIR}/merged_${BOARD_QUAL/cpuapp/cpunet}.hex"
+          if [ -f "${MERGED}" ]; then
+            echo "merged.hex already exists"
+          elif [ -f "${APP_HEX}" ] && [ -f "${NET_HEX}" ]; then
+            python3 -c "import sys; from intelhex import IntelHex; a=IntelHex(); a.loadhex(sys.argv[1]); n=IntelHex(); n.loadhex(sys.argv[2]); a.merge(n,overlap='replace'); a.write_hex_file(sys.argv[3])" "${APP_HEX}" "${NET_HEX}" "${MERGED}"
+            echo "Combined app+net → merged.hex"
+          elif [ -f "${APP_HEX}" ]; then
+            cp "${APP_HEX}" "${MERGED}"
+            echo "Collected ${APP_HEX}"
+          else
+            echo "merged.hex not found — available hex files:"
+            find "${BUILD_DIR}" -name "*.hex" | head -20
+            ZHEX="${BUILD_DIR}/nordic-wifi-app-template/zephyr/zephyr.hex"
+            [ -f "${ZHEX}" ] && cp "${ZHEX}" "${MERGED}" && echo "Fallback: zephyr.hex" || { echo "ERROR: no hex found"; exit 1; }
+          fi
+
+      - name: Extract memory usage — nRF7002DK
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        run: |
+          BUILD_LOG="build_nrf7002dk/build.log"
+          ROM_USAGE="$(awk '/^[[:space:]]*FLASH:/ {
+            n=$2+0; if (n>max_f) { max_f=n; line_f=$2 " " $3 " / " $4 " " $5 " (" $6 ")" }
+          } END { print line_f }' "$BUILD_LOG")"
+          RAM_USAGE="$(awk '/^[[:space:]]*RAM:/ {
+            n=$2+0; if (n>max_r) { max_r=n; line_r=$2 " " $3 " / " $4 " " $5 " (" $6 ")" }
+          } END { print line_r }' "$BUILD_LOG")"
+          : "${ROM_USAGE:=n/a}"
+          : "${RAM_USAGE:=n/a}"
+          printf "ROM_USAGE=%s\nRAM_USAGE=%s\n" "$ROM_USAGE" "$RAM_USAGE" > release-usage-nrf7002dk.txt
+          echo "nRF7002DK  ROM: $ROM_USAGE | RAM: $RAM_USAGE"
+
+      # ── nRF5340 Audio DK + nRF7002EK ────────────────────────────────────────
+      - name: Build nRF5340 Audio DK + nRF7002EK
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        env:
+          VER: ${{ steps.ver.outputs.VERSION }}
+        run: |
+          mkdir -p build_nrf5340_audio_dk
+          set -o pipefail
+          west build -p -b nrf5340_audio_dk/nrf5340/cpuapp -d build_nrf5340_audio_dk -- \
+            -Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002ek \
+            -DAPP_VERSION_STRING="${VER}" 2>&1 | tee build_nrf5340_audio_dk/build.log
+
+      - name: Resolve merged hex — nRF5340 Audio DK
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        run: |
+          BUILD_DIR="build_nrf5340_audio_dk"
+          MERGED="${BUILD_DIR}/merged.hex"
+          BOARD_QUAL="nrf5340_audio_dk_nrf5340_cpuapp"
+          APP_HEX="${BUILD_DIR}/merged_${BOARD_QUAL}.hex"
+          NET_HEX="${BUILD_DIR}/merged_${BOARD_QUAL/cpuapp/cpunet}.hex"
+          if [ -f "${MERGED}" ]; then
+            echo "merged.hex already exists"
+          elif [ -f "${APP_HEX}" ] && [ -f "${NET_HEX}" ]; then
+            python3 -c "import sys; from intelhex import IntelHex; a=IntelHex(); a.loadhex(sys.argv[1]); n=IntelHex(); n.loadhex(sys.argv[2]); a.merge(n,overlap='replace'); a.write_hex_file(sys.argv[3])" "${APP_HEX}" "${NET_HEX}" "${MERGED}"
+            echo "Combined app+net → merged.hex"
+          elif [ -f "${APP_HEX}" ]; then
+            cp "${APP_HEX}" "${MERGED}"
+            echo "Collected ${APP_HEX}"
+          else
+            echo "merged.hex not found — available hex files:"
+            find "${BUILD_DIR}" -name "*.hex" | head -20
+            ZHEX="${BUILD_DIR}/nordic-wifi-app-template/zephyr/zephyr.hex"
+            [ -f "${ZHEX}" ] && cp "${ZHEX}" "${MERGED}" && echo "Fallback: zephyr.hex" || { echo "ERROR: no hex found"; exit 1; }
+          fi
+
+      - name: Extract memory usage — nRF5340 Audio DK
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        run: |
+          BUILD_LOG="build_nrf5340_audio_dk/build.log"
+          ROM_USAGE="$(awk '/^[[:space:]]*FLASH:/ {
+            n=$2+0; if (n>max_f) { max_f=n; line_f=$2 " " $3 " / " $4 " " $5 " (" $6 ")" }
+          } END { print line_f }' "$BUILD_LOG")"
+          RAM_USAGE="$(awk '/^[[:space:]]*RAM:/ {
+            n=$2+0; if (n>max_r) { max_r=n; line_r=$2 " " $3 " / " $4 " " $5 " (" $6 ")" }
+          } END { print line_r }' "$BUILD_LOG")"
+          : "${ROM_USAGE:=n/a}"
+          : "${RAM_USAGE:=n/a}"
+          printf "ROM_USAGE=%s\nRAM_USAGE=%s\n" "$ROM_USAGE" "$RAM_USAGE" > release-usage-nrf5340_audio_dk.txt
+          echo "nRF5340 Audio DK  ROM: $ROM_USAGE | RAM: $RAM_USAGE"
+
+      # ── Collect and upload ───────────────────────────────────────────────────
+      - name: Stage release artifacts
+        working-directory: app-workspace/zego/nordic-wifi-app-template
+        env:
+          VER: ${{ steps.ver.outputs.VERSION }}
+        run: |
+          mkdir -p release
+          cp build_nrf54lm20dk/merged.hex \
+             release/nordic-wifi-app-template-nrf54lm20dk-nrf7002eb2-${VER}.hex
+          cp build_nrf54lm20dk/nordic-wifi-app-template/zephyr/zephyr.elf \
+             release/nordic-wifi-app-template-nrf54lm20dk-nrf7002eb2-${VER}.elf
+          cp build_nrf7002dk/merged.hex \
+             release/nordic-wifi-app-template-nrf7002dk-${VER}.hex
+          cp build_nrf7002dk/nordic-wifi-app-template/zephyr/zephyr.elf \
+             release/nordic-wifi-app-template-nrf7002dk-${VER}.elf
+          cp build_nrf5340_audio_dk/merged.hex \
+             release/nordic-wifi-app-template-nrf5340-audio-dk-nrf7002ek-${VER}.hex
+          cp build_nrf5340_audio_dk/nordic-wifi-app-template/zephyr/zephyr.elf \
+             release/nordic-wifi-app-template-nrf5340-audio-dk-nrf7002ek-${VER}.elf
+          cp release-usage-nrf54lm20dk.txt release/
+          cp release-usage-nrf7002dk.txt release/
+          cp release-usage-nrf5340_audio_dk.txt release/
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.ver.outputs.VERSION }}
+          path: app-workspace/zego/nordic-wifi-app-template/release/
+
+  static-analysis:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch Zephyr checkpatch
+        run: |
+          git clone --depth=1 https://github.com/zephyrproject-rtos/zephyr.git /tmp/zephyr
+          chmod +x /tmp/zephyr/scripts/checkpatch.pl
+
+      - name: Run Zephyr checkpatch
+        run: |
+          echo "Running Zephyr checkpatch on source files..."
+          if [ -d nordic-wifi-app-template/src/ ]; then
+            find nordic-wifi-app-template/src/ \( -name "*.c" -o -name "*.h" \) | while read -r file; do
+              echo "Checking $file..."
+              /tmp/zephyr/scripts/checkpatch.pl --no-tree --file "$file" || true
+            done
+          fi
+          echo "Checkpatch analysis completed ✓"
+
+  create-release:
+    needs: [set-version, build-release, static-analysis]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: ver
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ steps.ver.outputs.VERSION }}
+          path: release/
+
+      - name: Generate release notes
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            echo "Initial release of Nordic Wi-Fi App Template" > /tmp/changelog.txt
+          else
+            echo "Generating changelog from $PREV_TAG to ${{ steps.ver.outputs.VERSION }}"
+            git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD > /tmp/changelog.txt
+          fi
+
+      - name: Prepare release body
+        run: |
+          read_usage() {
+            local file="$1" key="$2"
+            grep "^${key}=" "$file" 2>/dev/null | cut -d= -f2-
+          }
+
+          VER="${{ steps.ver.outputs.VERSION }}"
+          REPO="${{ github.server_url }}/${{ github.repository }}"
+          DL_BASE="${REPO}/releases/download/${VER}"
+
+          NRF54LM20_ROM="$(read_usage "release/release-usage-nrf54lm20dk.txt"      ROM_USAGE)"
+          NRF54LM20_RAM="$(read_usage "release/release-usage-nrf54lm20dk.txt"      RAM_USAGE)"
+          NRF7002DK_ROM="$(read_usage "release/release-usage-nrf7002dk.txt"        ROM_USAGE)"
+          NRF7002DK_RAM="$(read_usage "release/release-usage-nrf7002dk.txt"        RAM_USAGE)"
+          NRF5340_ROM="$(read_usage  "release/release-usage-nrf5340_audio_dk.txt"  ROM_USAGE)"
+          NRF5340_RAM="$(read_usage  "release/release-usage-nrf5340_audio_dk.txt"  RAM_USAGE)"
+
+          : "${NRF54LM20_ROM:=n/a}" "${NRF54LM20_RAM:=n/a}"
+          : "${NRF7002DK_ROM:=n/a}" "${NRF7002DK_RAM:=n/a}"
+          : "${NRF5340_ROM:=n/a}"   "${NRF5340_RAM:=n/a}"
+
+          cat > /tmp/release-body.txt <<EOF
+          ## Nordic Wi-Fi App Template ${VER}
+
+          > Built with NCS ${{ needs.set-version.outputs.NCS_VERSION }}
+
+          ### 📦 Firmware Files
+
+          | Board | Flash image | Symbol file | ROM | RAM |
+          |-------|-------------|-------------|-----|-----|
+          | nRF54LM20DK + nRF7002EB2 | [nordic-wifi-app-template-nrf54lm20dk-nrf7002eb2-${VER}.hex](${DL_BASE}/nordic-wifi-app-template-nrf54lm20dk-nrf7002eb2-${VER}.hex) | [.elf](${DL_BASE}/nordic-wifi-app-template-nrf54lm20dk-nrf7002eb2-${VER}.elf) | ${NRF54LM20_ROM} | ${NRF54LM20_RAM} |
+          | nRF7002DK | [nordic-wifi-app-template-nrf7002dk-${VER}.hex](${DL_BASE}/nordic-wifi-app-template-nrf7002dk-${VER}.hex) | [.elf](${DL_BASE}/nordic-wifi-app-template-nrf7002dk-${VER}.elf) | ${NRF7002DK_ROM} | ${NRF7002DK_RAM} |
+          | nRF5340 Audio DK + nRF7002EK | [nordic-wifi-app-template-nrf5340-audio-dk-nrf7002ek-${VER}.hex](${DL_BASE}/nordic-wifi-app-template-nrf5340-audio-dk-nrf7002ek-${VER}.hex) | [.elf](${DL_BASE}/nordic-wifi-app-template-nrf5340-audio-dk-nrf7002ek-${VER}.elf) | ${NRF5340_ROM} | ${NRF5340_RAM} |
+
+          For flashing instructions see the [Build & Flash](https://github.com/chshzh/zego/blob/main/nordic-wifi-app-template/README.md#build--flash) section in the README.
+
+          ### 📝 Changes Since Last Release
+
+          EOF
+
+          cat /tmp/changelog.txt >> /tmp/release-body.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Nordic Wi-Fi App Template ${{ steps.ver.outputs.VERSION }}"
+          body_path: /tmp/release-body.txt
+          files: |
+            release/*.hex
+            release/*.elf
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
