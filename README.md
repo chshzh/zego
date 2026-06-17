@@ -54,7 +54,7 @@ See each spec for the full API, Kconfig reference, and hardware test guide.
 
 | App | Directory | Description |
 |-----|-----------|-------------|
-| nordic-wifi-app-template | `zego/nordic-wifi-app-template/` | NCS Wi-Fi app template using all five modules (STA / SoftAP / P2P + BLE provisioning) |
+| [nordic-wifi-app-template](nordic-wifi-app-template/README.md) | `zego/nordic-wifi-app-template/` | NCS Wi-Fi app template using all five modules (STA / SoftAP / P2P + BLE provisioning) |
 
 ---
 
