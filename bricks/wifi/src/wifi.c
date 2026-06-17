@@ -183,9 +183,7 @@ void zego_banner_wifi_info(void)
 		} else {
 			LOG_INF("P2P_CLIENT can connect via PBC using one of the guidance below.");
 			LOG_INF("[ DK as P2P_CLIENT ]");
-			LOG_INF("  1. P2P_CLIENT DK:  wifi p2p find       (wait ~10 s)");
-			LOG_INF("  2. P2P_CLIENT DK:  wifi p2p peer       (confirm GO appears)");
-			LOG_INF("  3. P2P_CLIENT DK:  wifi p2p connect %s pbc --join", mac_str);
+			LOG_INF("  P2P_CLIENT DK:  wifi p2p connect %s pbc --join", mac_str);
 		}
 		break;
 	}
