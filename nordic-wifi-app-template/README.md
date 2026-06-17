@@ -1,6 +1,7 @@
 # Nordic Wi-Fi App Template
 
-[![Build](https://github.com/chshzh/zego/actions/workflows/build.yml/badge.svg)](https://github.com/chshzh/zego/actions/workflows/build.yml)
+[![Validation](https://github.com/chshzh/zego/actions/workflows/validation.yml/badge.svg)](https://github.com/chshzh/zego/actions/workflows/validation.yml)
+[![Release](https://github.com/chshzh/zego/actions/workflows/release.yml/badge.svg)](https://github.com/chshzh/zego/actions/workflows/release.yml)
 [![Latest Release](https://img.shields.io/github/v/release/chshzh/zego?label=Release&color=skyblue)](https://github.com/chshzh/zego/releases/latest)
 
 ## Project Overview
@@ -146,7 +147,6 @@ nordic-wifi-app-template/
 ├── CMakeLists.txt                    ← registers zego modules; project entry point
 ├── Kconfig                           ← project Kconfig
 ├── prj.conf                          ← default Kconfig configuration (all modules enabled)
-├── west.yml                          ← NCS v3.3.0 manifest
 ├── sysbuild.conf                     ← disables Partition Manager; enables MCUboot
 ├── overlay-nrf5340-wifi-ble-prov.conf ← optional: enable BLE prov on flash-constrained boards
 ├── boards/
@@ -184,7 +184,7 @@ External zego bricks (referenced via `EXTRA_ZEPHYR_MODULES` in `CMakeLists.txt`)
 
 ### Workspace Setup
 
-West workspace is driven by [west.yml](west.yml), which pins the NCS version:
+West workspace is driven by the repo-level [west.yml](../west.yml), which pins the NCS version:
 
 ```sh
 - name: sdk-nrf
@@ -207,8 +207,8 @@ cd /opt/nordic/ncs/v3.3.0   # your existing NCS workspace root
 
 git clone https://github.com/chshzh/zego
 
-# Switch the workspace manifest to the app-template west.yml (one-time change)
-west config manifest.path zego/nordic-wifi-app-template
+# Switch the workspace manifest to the zego west.yml (one-time change)
+west config manifest.path zego
 
 # Sync — NCS repos already present, only new project repos are cloned
 west update
@@ -225,7 +225,6 @@ Follow the [custom repository guide](https://docs.nordicsemi.com/bundle/nrf-conn
 ```sh
 west init -m https://github.com/chshzh/zego --mr main <workspace-dir>
 cd <workspace-dir>
-west config manifest.path zego/nordic-wifi-app-template
 west update
 ```
 
@@ -290,6 +289,15 @@ west flash -d build_nrf54lm20dk
 west flash -d build_nrf7002dk
 west flash -d build_nrf5340_audio_dk
 ```
+
+### CI / CD
+
+| Workflow | Trigger | Jobs |
+|----------|---------|------|
+| [Validation](https://github.com/chshzh/zego/actions/workflows/validation.yml) | push / PR → `main` | `build-and-test` — 3-board parallel matrix (nRF54LM20DK, nRF7002DK, nRF5340 Audio DK) using the NCS toolchain Docker image; uploads build logs, size reports, and merged hex as artifacts. `static-analysis` — Zephyr checkpatch on changed source files. |
+| [Release](https://github.com/chshzh/zego/actions/workflows/release.yml) | push `v*` tag (e.g. `v3.3.0.1`) | `build-release` — sequential 3-board build with `APP_VERSION_STRING` set to the tag; resolves `merged.hex` per board. `create-release` — publishes a GitHub Release with one `.hex` and one `.elf` per board, a memory-usage table, and an auto-generated changelog. |
+
+The tag format is `v<ncs-version>.<build>` (e.g. `v3.3.0.1`). Major/minor/patch always match the NCS version the firmware is based on.
 
 ### Developer Notes
 

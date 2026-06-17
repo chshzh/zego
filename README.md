@@ -1,5 +1,8 @@
 # Zego — Reusable NCS/Zephyr modules
 
+[![Validation](https://github.com/chshzh/zego/actions/workflows/validation.yml/badge.svg)](https://github.com/chshzh/zego/actions/workflows/validation.yml)
+[![Release](https://github.com/chshzh/zego/actions/workflows/release.yml/badge.svg)](https://github.com/chshzh/zego/actions/workflows/release.yml)
+
 **Zego** is the *Zephyr + LEGO* concept applied to embedded firmware: build applications
 by snapping together self-contained modules the way you assemble LEGO bricks.
 Each module is an independent Zephyr module with its own Kconfig, CMake, and zbus
@@ -52,6 +55,17 @@ See each spec for the full API, Kconfig reference, and hardware test guide.
 | App | Directory | Description |
 |-----|-----------|-------------|
 | nordic-wifi-app-template | `zego/nordic-wifi-app-template/` | NCS Wi-Fi app template using all five modules (STA / SoftAP / P2P + BLE provisioning) |
+
+---
+
+## CI / CD
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| [Validation](https://github.com/chshzh/zego/actions/workflows/validation.yml) | push / PR → `main` | Builds all 3 boards in parallel; runs Zephyr checkpatch on changed source files |
+| [Release](https://github.com/chshzh/zego/actions/workflows/release.yml) | push `v*` tag | Builds all 3 boards, stamps firmware with the tag version, publishes a GitHub Release with `.hex` + `.elf` per board |
+
+See [nordic-wifi-app-template/README.md — CI / CD](nordic-wifi-app-template/README.md#ci--cd) for workflow details and artifact layout.
 
 ---
 
