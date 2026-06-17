@@ -558,17 +558,15 @@ static void l2_ap_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgm
 
 		{
 			bool is_p2p_go = (active_mode == ZEGO_WIFI_MODE_P2P_GO);
-			struct net_if *wifi_iface = net_if_get_first_wifi();
 			char dk_ip[INET_ADDRSTRLEN];
-			char dk_mac[18];
-			char ssid[WIFI_SSID_MAX_LEN + 1] = {0};
 
 			snprintf(dk_ip, sizeof(dk_ip), "%s", CONFIG_NET_CONFIG_MY_IPV4_ADDR);
-			iface_mac_to_str(wifi_iface, dk_mac);
 
 			if (is_p2p_go) {
 				wifi_p2p_go_cancel_wps_timer();
 
+				char ssid[WIFI_SSID_MAX_LEN + 1] = {0};
+				struct net_if *wifi_iface = net_if_get_first_wifi();
 				struct wifi_iface_status wstatus = {0};
 
 				if (wifi_iface &&
@@ -580,14 +578,13 @@ static void l2_ap_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgm
 				}
 
 				LOG_INF("L2-NET_EVENT_WIFI_AP_STA_CONNECTED: mac=%s mode=P2P_GO "
-					"ip=%s",
-					mac_str, dk_ip);
+					"ip=%s ssid=%s",
+					mac_str, dk_ip, ssid[0] ? ssid : "<pending>");
 			} else {
 				wifi_softap_cancel_remind_timer();
-				snprintf(ssid, sizeof(ssid), "%s", CONFIG_ZEGO_WIIF_SOFTAP_SSID);
 				LOG_INF("L2-NET_EVENT_WIFI_AP_STA_CONNECTED: mac=%s mode=SoftAP "
-					"ip=%s clients=%d",
-					mac_str, dk_ip, sta_count);
+					"ip=%s clients=%d ssid=%s",
+					mac_str, dk_ip, sta_count, CONFIG_ZEGO_WIIF_SOFTAP_SSID);
 			}
 
 			zego_on_net_event_wifi_ap_sta_connected(sta_count);

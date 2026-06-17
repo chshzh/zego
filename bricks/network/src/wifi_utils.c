@@ -239,6 +239,8 @@ static int wifi_set_softap(const char *ssid, const char *psk)
 		return ret;
 	}
 
+	LOG_INF("SoftAP AP_ENABLE request accepted (band=%d channel=%d)", params.band,
+		params.channel);
 	return 0;
 }
 
@@ -372,6 +374,17 @@ int wifi_run_softap_mode(void)
 		CONFIG_ZEGO_WIIF_SOFTAP_SSID,
 		IS_ENABLED(CONFIG_ZEGO_WIIF_SOFTAP_BAND_5_GHZ) ? "5 GHz" : "2.4 GHz",
 		CONFIG_ZEGO_WIIF_SOFTAP_CHANNEL);
+
+	/* Stop the DHCP client that net_config starts at boot.
+	 * In SoftAP mode the AP device is the DHCP server, not a client.
+	 * Without this, the client loops sending failed DISCOVERs which
+	 * exhausts TX packet buffers and causes the DHCP server to fail
+	 * to send OFFER messages with -ENOMEM. */
+	struct net_if *iface = net_if_get_first_wifi();
+
+	if (iface) {
+		net_dhcpv4_stop(iface);
+	}
 
 	ret = wifi_set_reg_domain();
 	if (ret) {
