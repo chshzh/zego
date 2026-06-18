@@ -1,0 +1,44 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+config ZEGO_MEMONITOR
+	bool "Periodic memory and thread watermark monitor"
+	depends on ZBUS
+	depends on SYS_HEAP_RUNTIME_STATS
+	depends on THREAD_STACK_INFO
+	depends on INIT_STACKS
+	default n
+	help
+	  Periodically samples all k_heap instances (via STRUCT_SECTION_FOREACH)
+	  and all Zephyr thread stack watermarks (via k_thread_foreach).  Stores
+	  the latest snapshot in a spinlock-protected static cache and publishes
+	  MEMONITOR_CHAN so subscribers know when fresh data is ready.
+
+	  Consumers call memonitor_get_heaps() or memonitor_get_threads() to
+	  obtain a thread-safe point-in-time copy — safe from any context
+	  including HTTP handlers.
+
+	  When CONFIG_MBEDTLS_ENABLE_HEAP=y the mbedTLS internal heap is
+	  automatically included in the heap snapshot as "mbedtls_heap".
+
+if ZEGO_MEMONITOR
+
+config ZEGO_MEMONITOR_INTERVAL_MS
+	int "Sampling interval in milliseconds"
+	default 2000
+	range 100 60000
+	help
+	  How often the sampler fires on the system work queue.
+	  2000 ms is a good default for dashboard display.
+	  Reduce to 500 ms during stress testing to capture short-lived peaks.
+
+config ZEGO_MEMONITOR_LOG_LEVEL
+	int "Log level for memonitor"
+	default 3
+	range 0 4
+	help
+	  0=OFF  1=ERR  2=WRN  3=INF  4=DBG
+
+endif # ZEGO_MEMONITOR

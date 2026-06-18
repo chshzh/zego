@@ -355,7 +355,18 @@ The tag format is `v<ncs-version>.<build>` (e.g. `v3.3.0.1`). Major/minor/patch 
   | `_system_heap` | SoftAP (3 clients) | ~89 KB / 110 KB |
   | `_system_heap` | STA (connected) | ~66 KB / 110 KB |
 
-  **Stack sizing rule:** `CONFIG_<THREAD>_STACK_SIZE = HWM / 0.9` (10 % headroom). Update `prj.conf` or `boards/nrf54lm20dk_nrf54lm20a_cpuapp.conf` with new measurements after each firmware change that touches network paths.
+  **Memory sizing rules** — read HWM after exercising all four Wi-Fi modes in one session (worst-case coverage):
+
+  *Thread stacks:*
+  - Resize if HWM > **80 %** of allocated stack size.
+  - For large, well-characterised stacks (> 2048 B) — `hostap_handler`, `hostap_iface_wq`, `nrf70_bh_wq` — the practical threshold is **90 %**; these sit at 85–90 % by design and are stable.
+  - Sizing formula: `CONFIG_<THREAD>_STACK_SIZE = HWM / 0.9` (≈ 10 % headroom).
+
+  *System heap:*
+  - Resize if heap HWM > **80 %** of total heap size.
+  - Sizing formula: `CONFIG_HEAP_MEM_POOL_SIZE = HWM / 0.8` (≈ 20 % headroom).
+
+  Update `prj.conf` or `boards/nrf54lm20dk_nrf54lm20a_cpuapp.conf` with new measurements after each firmware change that touches network paths.
 
 ---
 

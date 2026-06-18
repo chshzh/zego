@@ -45,6 +45,7 @@ Capabilities are composed by enabling Kconfig symbols — no code copying.
 | wifi | `zego/bricks/wifi/` | `WIFI_MODE_CHAN` (out) | [wifi-spec.md](bricks/wifi/docs/wifi-spec.md) |
 | network | `zego/bricks/network/` | — (weak-hook API) | [network-spec.md](bricks/network/docs/network-spec.md) |
 | wifi_ble_prov | `zego/bricks/wifi_ble_prov/` | — | [wifi-ble-prov-spec.md](bricks/wifi_ble_prov/docs/wifi-ble-prov-spec.md) |
+| memonitor | `zego/bricks/memonitor/` | `MEMONITOR_CHAN` (out) | [memonitor-spec.md](bricks/memonitor/docs/memonitor-spec.md) |
 
 See each spec for the full API, Kconfig reference, and hardware test guide.
 
@@ -54,7 +55,37 @@ See each spec for the full API, Kconfig reference, and hardware test guide.
 
 | App | Directory | Description |
 |-----|-----------|-------------|
-| [nordic-wifi-app-template](nordic-wifi-app-template/README.md) | `zego/nordic-wifi-app-template/` | NCS Wi-Fi app template using all five modules (STA / SoftAP / P2P + BLE provisioning) |
+| [nordic-wifi-app-template](nordic-wifi-app-template/README.md) | `zego/nordic-wifi-app-template/` | NCS Wi-Fi app template using all zego modules (STA / SoftAP / P2P + BLE provisioning) |
+
+---
+
+## Live memory monitoring — memonitor brick
+
+`memonitor` is a zego brick that periodically samples all `k_heap` instances and Zephyr thread stack watermarks. It fires every `CONFIG_ZEGO_MEMONITOR_INTERVAL_MS` on the system work queue, stores both snapshots in a spinlock-protected static cache, and publishes a small `MEMONITOR_CHAN` zbus notification so subscribers know fresh data is ready.
+
+| Kconfig symbol | Default | Purpose |
+|----------------|---------|---------|
+| `CONFIG_ZEGO_MEMONITOR` | `n` | Enable the brick |
+| `CONFIG_ZEGO_MEMONITOR_INTERVAL_MS` | `2000` | Sampling interval in ms (100–60 000) |
+| `CONFIG_ZEGO_MEMONITOR_LOG_LEVEL` | `3` (INF) | Log verbosity 0–4 |
+
+Requires: `CONFIG_ZBUS=y`, `CONFIG_SYS_HEAP_RUNTIME_STATS=y`, `CONFIG_THREAD_STACK_INFO=y`, `CONFIG_INIT_STACKS=y`, `CONFIG_STACK_SENTINEL=n`.
+
+Consumers call `memonitor_get_heaps()` and `memonitor_get_threads()` to obtain a thread-safe point-in-time copy — safe from any context including HTTP handlers. The primary validated consumer is `nordic-wifi-webdash`, which serves the snapshots as `/api/heaps` and `/api/threads` JSON endpoints.
+
+See [memonitor-spec.md](bricks/memonitor/docs/memonitor-spec.md) for the full API, Kconfig reference, and integration guide.
+
+### ZView vs memonitor
+
+| | [ZView](https://github.com/chshzh/zview) | memonitor brick |
+|---|---|---|
+| **Transport** | JLink RTT — requires a physical debug probe | None — self-contained in firmware |
+| **When it works** | Development only (probe attached) | Any time, including deployed devices |
+| **Firmware cost** | Near-zero ROM/RAM — RTT buffer only | ~4 KB static BSS; small periodic work-queue task |
+| **Data access** | Host-side tool on the developer's PC | Firmware-internal: zbus subscribers, HTTP handlers, loggers |
+| **Primary use** | Measure stack watermarks → tune `boards/<board>.conf` | Runtime heap/thread health visible to the application |
+
+Use ZView during development to size stacks correctly. Use memonitor at runtime to expose live memory health to the application (e.g. a web dashboard or Memfault metric).
 
 ---
 
@@ -169,7 +200,8 @@ zego/
 │   ├── led/           ← per-LED state machine, LED_CMD_CHAN subscriber
 │   ├── wifi/          ← Wi-Fi mode selector + NVS persistence
 │   ├── network/       ← Wi-Fi event management, DHCP, weak-hook API
-│   └── wifi_ble_prov/ ← BLE GATT provisioning service
+│   ├── wifi_ble_prov/ ← BLE GATT provisioning service
+│   └── memonitor/     ← periodic heap and thread-stack sampler; publishes MEMONITOR_CHAN
 ├── nordic-wifi-app-template/  ← example app (STA / SoftAP / P2P + BLE prov)
 └── west.yml   ← workspace manifest (contain NCS version based on)
 ```

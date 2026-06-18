@@ -1,0 +1,5 @@
+name: zego_memonitor
+
+build:
+  cmake: .
+  kconfig: Kconfig
