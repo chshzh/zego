@@ -33,6 +33,22 @@
 #include <zephyr/zbus/zbus.h>
 #if defined(CONFIG_MBEDTLS_MEMORY_DEBUG)
 #include <mbedtls/memory_buffer_alloc.h>
+
+/* Read by ZView orchestrator as a flat 3×u32: total, used (cur), max_used.
+ * Two attributes are required together:
+ *   __attribute__((used))   — tells GCC/LTO "emit this symbol even if no code
+ *                             references it"; prevents LTO tree-shaking before
+ *                             the linker stage.
+ *   __attribute__((retain)) — marks the ELF section SHF_GNU_RETAIN so the
+ *                             linker --gc-sections pass keeps it even when no
+ *                             live code reference reaches this symbol.
+ * Both are necessary: retain alone is ignored by LTO, used alone is ignored
+ * by --gc-sections. */
+struct {
+	uint32_t total_bytes;
+	uint32_t used_bytes;
+	uint32_t max_used_bytes;
+} zview_mbedtls_stats __attribute__((used, retain));
 #endif
 
 LOG_MODULE_REGISTER(memonitor, CONFIG_ZEGO_MEMONITOR_LOG_LEVEL);
@@ -41,18 +57,22 @@ LOG_MODULE_REGISTER(memonitor, CONFIG_ZEGO_MEMONITOR_LOG_LEVEL);
  * Single owner: this file.  webserver.c is a subscriber.
  * Future subscribers: log reporter, Memfault metrics uploader.
  */
-ZBUS_CHAN_DEFINE(MEMONITOR_CHAN, struct memonitor_event,
-		NULL, NULL, ZBUS_OBSERVERS_EMPTY,
-		ZBUS_MSG_INIT(.timestamp_ms = 0, .interval_ms = 0,
-			      .heap_count = 0, .thread_count = 0));
+ZBUS_CHAN_DEFINE(MEMONITOR_CHAN, struct memonitor_event, NULL, NULL, ZBUS_OBSERVERS_EMPTY,
+		 ZBUS_MSG_INIT(.timestamp_ms = 0, .interval_ms = 0, .heap_count = 0,
+			       .thread_count = 0));
 
 /* ── Static snapshot cache ──────────────────────────────────────────────────
  * Protected by a spinlock so webserver HTTP handlers can read from any thread.
+ * Arrays are only allocated when the respective sub-feature is enabled.
  */
-static struct memonitor_heap_entry   heap_cache[MEMONITOR_MAX_HEAPS];
-static struct memonitor_thread_entry thread_cache[MEMONITOR_MAX_THREADS];
+#if defined(CONFIG_ZEGO_MEMONITOR_HEAP_MONITOR)
+static struct memonitor_heap_entry heap_cache[MEMONITOR_MAX_HEAPS];
 static uint8_t heap_count_cached;
+#endif
+#if defined(CONFIG_ZEGO_MEMONITOR_THREAD_MONITOR)
+static struct memonitor_thread_entry thread_cache[MEMONITOR_MAX_THREADS];
 static uint8_t thread_count_cached;
+#endif
 static struct k_spinlock cache_lock;
 
 /* ── Known k_heap symbol declarations ──────────────────────────────────────
@@ -69,12 +89,24 @@ extern __weak struct k_heap wifi_drv_data_mem_pool;
 
 static const char *k_heap_name_lookup(const struct k_heap *heap)
 {
-	if (heap == &_system_heap)                                          return "_system_heap";
-	if (&net_buf_mem_pool_rx_bufs && heap == &net_buf_mem_pool_rx_bufs) return "net_buf_mem_pool_rx_bufs";
-	if (&net_buf_mem_pool_tx_bufs && heap == &net_buf_mem_pool_tx_bufs) return "net_buf_mem_pool_tx_bufs";
-	if (&shell_uart_history_heap  && heap == &shell_uart_history_heap)  return "shell_uart_history_heap";
-	if (&wifi_drv_ctrl_mem_pool   && heap == &wifi_drv_ctrl_mem_pool)   return "wifi_drv_ctrl_mem_pool";
-	if (&wifi_drv_data_mem_pool   && heap == &wifi_drv_data_mem_pool)   return "wifi_drv_data_mem_pool";
+	if (heap == &_system_heap) {
+		return "_system_heap";
+	}
+	if (&net_buf_mem_pool_rx_bufs && heap == &net_buf_mem_pool_rx_bufs) {
+		return "net_buf_mem_pool_rx_bufs";
+	}
+	if (&net_buf_mem_pool_tx_bufs && heap == &net_buf_mem_pool_tx_bufs) {
+		return "net_buf_mem_pool_tx_bufs";
+	}
+	if (&shell_uart_history_heap && heap == &shell_uart_history_heap) {
+		return "shell_uart_history_heap";
+	}
+	if (&wifi_drv_ctrl_mem_pool && heap == &wifi_drv_ctrl_mem_pool) {
+		return "wifi_drv_ctrl_mem_pool";
+	}
+	if (&wifi_drv_data_mem_pool && heap == &wifi_drv_data_mem_pool) {
+		return "wifi_drv_data_mem_pool";
+	}
 	return "k_heap";
 }
 
@@ -98,10 +130,10 @@ static void sample_heaps(void)
 		}
 		strncpy(tmp[cnt].name, k_heap_name_lookup(heap), sizeof(tmp[cnt].name) - 1);
 		tmp[cnt].name[sizeof(tmp[cnt].name) - 1] = '\0';
-		tmp[cnt].free      = st.free_bytes;
-		tmp[cnt].used      = st.allocated_bytes;
+		tmp[cnt].free = st.free_bytes;
+		tmp[cnt].used = st.allocated_bytes;
 		tmp[cnt].watermark = st.max_allocated_bytes;
-		tmp[cnt].total     = st.free_bytes + st.allocated_bytes;
+		tmp[cnt].total = st.free_bytes + st.allocated_bytes;
 		cnt++;
 	}
 
@@ -119,12 +151,18 @@ static void sample_heaps(void)
 
 		strncpy(tmp[cnt].name, "mbedtls_heap", sizeof(tmp[cnt].name) - 1);
 		tmp[cnt].name[sizeof(tmp[cnt].name) - 1] = '\0';
-		tmp[cnt].used      = cur_used;
+		tmp[cnt].used = cur_used;
 		tmp[cnt].watermark = max_used;
-		tmp[cnt].total     = CONFIG_MBEDTLS_HEAP_SIZE;
-		tmp[cnt].free      = CONFIG_MBEDTLS_HEAP_SIZE > cur_used
-				   ? CONFIG_MBEDTLS_HEAP_SIZE - cur_used : 0;
+		tmp[cnt].total = CONFIG_MBEDTLS_HEAP_SIZE;
+		tmp[cnt].free = CONFIG_MBEDTLS_HEAP_SIZE > cur_used
+					? CONFIG_MBEDTLS_HEAP_SIZE - cur_used
+					: 0;
 		cnt++;
+
+		/* Keep ZView-visible struct in sync */
+		zview_mbedtls_stats.total_bytes = CONFIG_MBEDTLS_HEAP_SIZE;
+		zview_mbedtls_stats.used_bytes = (uint32_t)cur_used;
+		zview_mbedtls_stats.max_used_bytes = (uint32_t)max_used;
 	}
 #endif /* CONFIG_MBEDTLS_ENABLE_HEAP */
 
@@ -175,7 +213,7 @@ static void thread_sample_cb(const struct k_thread *thread, void *user_data)
 	e->state[sizeof(e->state) - 1] = '\0';
 
 	/* Stack high-water mark */
-	e->stack_hwm  = 0;
+	e->stack_hwm = 0;
 	e->stack_size = 0;
 
 #if defined(CONFIG_THREAD_STACK_INFO)
@@ -219,14 +257,26 @@ static void memonitor_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
 
+#if defined(CONFIG_ZEGO_MEMONITOR_HEAP_MONITOR)
 	sample_heaps();
+#endif
+#if defined(CONFIG_ZEGO_MEMONITOR_THREAD_MONITOR)
 	sample_threads();
+#endif
 
 	struct memonitor_event ev = {
 		.timestamp_ms = k_uptime_get_32(),
-		.interval_ms  = CONFIG_ZEGO_MEMONITOR_INTERVAL_MS,
-		.heap_count   = heap_count_cached,
+		.interval_ms = CONFIG_ZEGO_MEMONITOR_INTERVAL_MS,
+#if defined(CONFIG_ZEGO_MEMONITOR_HEAP_MONITOR)
+		.heap_count = heap_count_cached,
+#else
+		.heap_count = 0,
+#endif
+#if defined(CONFIG_ZEGO_MEMONITOR_THREAD_MONITOR)
 		.thread_count = thread_count_cached,
+#else
+		.thread_count = 0,
+#endif
 	};
 
 	int ret = zbus_chan_pub(&MEMONITOR_CHAN, &ev, K_NO_WAIT);
@@ -234,6 +284,32 @@ static void memonitor_work_fn(struct k_work *work)
 	if (ret < 0) {
 		LOG_WRN("MEMONITOR_CHAN publish failed: %d", ret);
 	}
+
+#if defined(CONFIG_ZEGO_MEMONITOR_LOG_PERIODIC)
+	/* Read directly from static caches — safe here: caches were just written,
+	 * next write is after k_work_reschedule below, concurrent access is read-only. */
+#if defined(CONFIG_ZEGO_MEMONITOR_HEAP_MONITOR)
+	for (uint8_t i = 0; i < heap_count_cached; i++) {
+		uint32_t pct =
+			heap_cache[i].total
+				? (uint32_t)(heap_cache[i].watermark * 100u / heap_cache[i].total)
+				: 0u;
+		LOG_INF("heap %-24s hwm=%5zu/%5zu (%u%%)", heap_cache[i].name,
+			heap_cache[i].watermark, heap_cache[i].total, pct);
+	}
+#endif /* ZEGO_MEMONITOR_HEAP_MONITOR */
+#if defined(CONFIG_ZEGO_MEMONITOR_THREAD_MONITOR)
+	for (uint8_t i = 0; i < thread_count_cached; i++) {
+		if (thread_cache[i].stack_size == 0) {
+			continue;
+		}
+		uint32_t pct =
+			(uint32_t)(thread_cache[i].stack_hwm * 100u / thread_cache[i].stack_size);
+		LOG_INF("thrd %-24s hwm=%5zu/%5zu (%u%%)", thread_cache[i].name,
+			thread_cache[i].stack_hwm, thread_cache[i].stack_size, pct);
+	}
+#endif /* ZEGO_MEMONITOR_THREAD_MONITOR */
+#endif /* ZEGO_MEMONITOR_LOG_PERIODIC */
 
 	k_work_reschedule(&memonitor_work, K_MSEC(CONFIG_ZEGO_MEMONITOR_INTERVAL_MS));
 }
@@ -250,6 +326,7 @@ SYS_INIT(memonitor_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
 
 /* ── Public accessor API ────────────────────────────────────────────────────*/
 
+#if defined(CONFIG_ZEGO_MEMONITOR_HEAP_MONITOR)
 int memonitor_get_heaps(struct memonitor_heap_entry *out, uint8_t max, uint8_t *count)
 {
 	if (!out || !count || max == 0) {
@@ -265,7 +342,9 @@ int memonitor_get_heaps(struct memonitor_heap_entry *out, uint8_t max, uint8_t *
 
 	return 0;
 }
+#endif /* CONFIG_ZEGO_MEMONITOR_HEAP_MONITOR */
 
+#if defined(CONFIG_ZEGO_MEMONITOR_THREAD_MONITOR)
 int memonitor_get_threads(struct memonitor_thread_entry *out, uint8_t max, uint8_t *count)
 {
 	if (!out || !count || max == 0) {
@@ -281,3 +360,4 @@ int memonitor_get_threads(struct memonitor_thread_entry *out, uint8_t max, uint8
 
 	return 0;
 }
+#endif /* CONFIG_ZEGO_MEMONITOR_THREAD_MONITOR */

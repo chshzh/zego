@@ -6,33 +6,104 @@
 config ZEGO_MEMONITOR
 	bool "Periodic memory and thread watermark monitor"
 	depends on ZBUS
-	depends on SYS_HEAP_RUNTIME_STATS
-	depends on THREAD_STACK_INFO
-	depends on INIT_STACKS
 	default n
 	help
-	  Periodically samples all k_heap instances (via STRUCT_SECTION_FOREACH)
-	  and all Zephyr thread stack watermarks (via k_thread_foreach).  Stores
-	  the latest snapshot in a spinlock-protected static cache and publishes
-	  MEMONITOR_CHAN so subscribers know when fresh data is ready.
+	  Firmware-side periodic sampler. Fires every ZEGO_MEMONITOR_INTERVAL_MS
+	  on the system work queue, captures heap and thread snapshots, and
+	  publishes MEMONITOR_CHAN so consumers (e.g. web dashboard) can read
+	  the data via memonitor_get_heaps() / memonitor_get_threads().
 
-	  Consumers call memonitor_get_heaps() or memonitor_get_threads() to
-	  obtain a thread-safe point-in-time copy — safe from any context
-	  including HTTP handlers.
-
-	  When CONFIG_MBEDTLS_ENABLE_HEAP=y the mbedTLS internal heap is
-	  automatically included in the heap snapshot as "mbedtls_heap".
+	  This is independent of ZView. ZView reads memory directly over SWD/JTAG
+	  at its own rate and does not require this brick to be enabled.
+	  Enable ZEGO_MEMONITOR_ZVIEW to auto-select the Kconfig symbols that
+	  ZView needs (INIT_STACKS, THREAD_MONITOR, etc.).
 
 if ZEGO_MEMONITOR
 
+config ZEGO_MEMONITOR_ZVIEW
+	bool "ZView Kconfig dependencies (SWD/JTAG live monitor)"
+	depends on !STACK_SENTINEL
+	select INIT_STACKS
+	select THREAD_MONITOR
+	select THREAD_STACK_INFO
+	select THREAD_NAME
+	select THREAD_RUNTIME_STATS
+	select THREAD_RUNTIME_STATS_USE_TIMING_FUNCTIONS
+	select SYS_HEAP_RUNTIME_STATS
+	select NET_BUF_POOL_USAGE if NETWORKING
+	default n
+	help
+	  ZView is a host-side tool that reads heap and thread data directly
+	  over SWD/JTAG. It does not go through the firmware sampler and is not
+	  affected by ZEGO_MEMONITOR_INTERVAL_MS.
+
+	  This option auto-selects the Kconfig symbols ZView requires to read
+	  thread stack watermarks and heap peak usage from the target ELF:
+	    CONFIG_INIT_STACKS         — fills stacks with 0xaa (watermark base)
+	    CONFIG_THREAD_MONITOR      — thread list accessible via kernel API
+	    CONFIG_THREAD_STACK_INFO   — stack address/size metadata in k_thread
+	    CONFIG_THREAD_NAME         — thread name strings in ELF
+	    CONFIG_THREAD_RUNTIME_STATS    — CPU usage counters
+	    CONFIG_THREAD_RUNTIME_STATS_USE_TIMING_FUNCTIONS — accurate CPU%
+	                                     via hardware timer
+	    CONFIG_SYS_HEAP_RUNTIME_STATS  — heap peak/allocated fields
+	    CONFIG_NET_BUF_POOL_USAGE      — net_buf pool stats visible as heaps
+	                                     (only when NETWORKING=y)
+
+	  CONFIG_STACK_SENTINEL must remain n (enforced by "depends on
+	  !STACK_SENTINEL"): sentinel overwrites the 0xaa fill with 0xf0f0f0f0,
+	  causing ZView to report 100% stack usage on every thread.
+
+config ZEGO_MEMONITOR_HEAP_MONITOR
+	bool "Heap watermark sampling (firmware-side)"
+	depends on SYS_HEAP_RUNTIME_STATS
+	default y
+	help
+	  Firmware-side heap sampler. Captures all k_heap instances via
+	  STRUCT_SECTION_FOREACH every ZEGO_MEMONITOR_INTERVAL_MS and caches
+	  the result for consumers (e.g. web dashboard /api/heaps endpoint).
+	  When CONFIG_MBEDTLS_ENABLE_HEAP=y the mbedTLS heap is appended as
+	  "mbedtls_heap".
+	  Requires CONFIG_SYS_HEAP_RUNTIME_STATS=y.
+
+	  ZView reads heap data directly over SWD/JTAG independent of this
+	  setting; ZEGO_MEMONITOR_ZVIEW controls the Kconfig ZView needs.
+
+config ZEGO_MEMONITOR_THREAD_MONITOR
+	bool "Thread stack watermark sampling (firmware-side)"
+	depends on THREAD_STACK_INFO
+	depends on INIT_STACKS
+	default y
+	help
+	  Firmware-side thread sampler. Captures stack HWM, state, and name for
+	  all Zephyr threads every ZEGO_MEMONITOR_INTERVAL_MS and caches the
+	  result for consumers (e.g. web dashboard /api/threads endpoint).
+	  Requires CONFIG_THREAD_STACK_INFO=y and CONFIG_INIT_STACKS=y.
+	  CONFIG_STACK_SENTINEL must be n — enabling it overwrites the 0xaa
+	  stack-init fill with 0xf0f0f0f0, causing 100% watermarks on all threads.
+
+	  ZView reads thread stack data directly over SWD/JTAG independent of
+	  this setting; ZEGO_MEMONITOR_ZVIEW controls the Kconfig ZView needs.
+
 config ZEGO_MEMONITOR_INTERVAL_MS
-	int "Sampling interval in milliseconds"
+	int "Firmware sampler interval (milliseconds)"
 	default 2000
 	range 100 60000
 	help
-	  How often the sampler fires on the system work queue.
-	  2000 ms is a good default for dashboard display.
-	  Reduce to 500 ms during stress testing to capture short-lived peaks.
+	  Controls how often the firmware-side sampler (HEAP_MONITOR +
+	  THREAD_MONITOR) fires on the system work queue.
+	  This setting has no effect on ZView, which reads heap and stack data
+	  directly over SWD/JTAG at its own host-controlled rate.
+
+config ZEGO_MEMONITOR_LOG_PERIODIC
+	bool "Log heap and thread watermarks to UART on each sample"
+	default n
+	help
+	  On every sample interval emit a compact INF log line per tracked heap
+	  (name, HWM, total, %) and per tracked thread (name, HWM, stack size, %).
+	  Useful for field monitoring without ZView attached.
+	  Default n — log format strings consume flash. Enable selectively on boards
+	  with sufficient flash headroom (e.g. nRF54LM20DK). Leave n on nRF7002DK.
 
 config ZEGO_MEMONITOR_LOG_LEVEL
 	int "Log level for memonitor"
@@ -40,5 +111,13 @@ config ZEGO_MEMONITOR_LOG_LEVEL
 	range 0 4
 	help
 	  0=OFF  1=ERR  2=WRN  3=INF  4=DBG
+
+# When MBEDTLS_ENABLE_HEAP is active the memonitor samples the mbedTLS heap
+# and exposes zview_mbedtls_stats for ZView.  MBEDTLS_MEMORY_DEBUG is required
+# to read cur/peak usage via mbedtls_memory_buffer_alloc_cur_get() /
+# _max_get().  Select it automatically so no board conf entry is needed.
+config MBEDTLS_MEMORY_DEBUG
+	bool
+	default y if MBEDTLS_ENABLE_HEAP
 
 endif # ZEGO_MEMONITOR

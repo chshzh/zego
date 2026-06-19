@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/bricks/memonitor` |
-| Version | 2026-06-18-00-00 |
+| Version | 2026-06-19-11-24 |
 | PRD Version | N/A (standalone library brick) |
 | NCS Version | v3.3.0 |
 | Status | Validated (migrated from nordic-wifi-webdash) |
@@ -17,6 +17,8 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-18-00-00 | Initial spec — migrated from `nordic-wifi-webdash/src/modules/memonitor` after in-app validation. Renamed Kconfig prefix `APP_MEMONITOR_*` → `ZEGO_MEMONITOR_*`. |
+| 2026-06-19-09-04 | Added separate sub-configs: `ZEGO_MEMONITOR_HEAP_MONITOR`, `ZEGO_MEMONITOR_THREAD_MONITOR`, `ZEGO_MEMONITOR_ZVIEW`. Heap/thread sampling and ZView dependencies are now independently controllable. Public API stubs added for disabled sub-features. |
+|| 2026-06-19-11-24 | Added `ZEGO_MEMONITOR_LOG_PERIODIC` — optional UART log of all heap HWMs and thread stack watermarks on each sample interval. Default `n` (log format strings consume flash). Enable on flash-rich boards (nRF54LM20DK); leave `n` on nRF7002DK. |
 
 ---
 
@@ -65,12 +67,13 @@ Tested on:
 
 | Dependency | Kconfig | Notes |
 |-----------|---------|-------|
-| Zbus | `CONFIG_ZBUS` | Required for `MEMONITOR_CHAN` |
-| Heap runtime stats | `CONFIG_SYS_HEAP_RUNTIME_STATS` | Enables `sys_heap_runtime_stats_get()` |
-| Thread stack info | `CONFIG_THREAD_STACK_INFO` | Required for `thread->stack_info.size` |
-| Stack init fill | `CONFIG_INIT_STACKS` | Fills stacks with `0xaa`; required for `k_thread_stack_space_get()` |
+| Zbus | `CONFIG_ZBUS` | Required for `MEMONITOR_CHAN` (top-level) |
+| Heap runtime stats | `CONFIG_SYS_HEAP_RUNTIME_STATS` | Required by `ZEGO_MEMONITOR_HEAP_MONITOR` |
+| Thread stack info | `CONFIG_THREAD_STACK_INFO` | Required by `ZEGO_MEMONITOR_THREAD_MONITOR` |
+| Stack init fill | `CONFIG_INIT_STACKS` | Required by `ZEGO_MEMONITOR_THREAD_MONITOR` |
 | Stack sentinel OFF | `CONFIG_STACK_SENTINEL=n` | Must be `n`; `=y` overwrites `0xaa` fill with `0xf0f0f0f0`, causing all watermarks to report 100% |
-| mbedTLS heap (optional) | `CONFIG_MBEDTLS_ENABLE_HEAP` | When `=y`, mbedTLS internal heap is auto-included in snapshot as `"mbedtls_heap"` |
+| mbedTLS heap (optional) | `CONFIG_MBEDTLS_ENABLE_HEAP` | When `=y`, mbedTLS internal heap is auto-included in heap snapshot as `"mbedtls_heap"` |
+| ZView (optional) | `CONFIG_ZEGO_MEMONITOR_ZVIEW` | Selects all ZView-required Kconfig symbols automatically |
 
 ---
 
@@ -216,11 +219,39 @@ static allocation is safe and avoids overflowing the work queue stack.
 
 ## Kconfig Reference
 
+### Core
+
 | Symbol | Default | Description |
 |--------|---------|-------------|
-| `CONFIG_ZEGO_MEMONITOR` | `n` | Enable the brick |
+| `CONFIG_ZEGO_MEMONITOR` | `n` | Enable the brick. Only requires `ZBUS`. |
 | `CONFIG_ZEGO_MEMONITOR_INTERVAL_MS` | `2000` | Sampling period (ms) |
 | `CONFIG_ZEGO_MEMONITOR_LOG_LEVEL` | `3` (INF) | Log verbosity 0–4 |
+
+### Sub-features
+
+| Symbol | Default | Description |
+|--------|---------|-------------|
+| `CONFIG_ZEGO_MEMONITOR_HEAP_MONITOR` | `y` | Sample all `k_heap` instances + optional mbedTLS heap. Requires `SYS_HEAP_RUNTIME_STATS`. |
+| `CONFIG_ZEGO_MEMONITOR_THREAD_MONITOR` | `y` | Sample all Zephyr thread stack watermarks. Requires `THREAD_STACK_INFO` + `INIT_STACKS`. |
+| `CONFIG_ZEGO_MEMONITOR_ZVIEW` | `n` | Auto-`select` all ZView-required Kconfig symbols (see below). Requires `!STACK_SENTINEL`. |
+| `CONFIG_ZEGO_MEMONITOR_LOG_PERIODIC` | `n` | Log all heap HWMs and thread stack watermarks to UART on each sample. Default `n` — log strings consume flash. Enable on flash-rich boards only (e.g. nRF54LM20DK). |
+
+### `ZEGO_MEMONITOR_ZVIEW` — auto-selected symbols
+
+When `CONFIG_ZEGO_MEMONITOR_ZVIEW=y`, the brick selects:
+
+| Symbol | Purpose |
+|--------|---------|
+| `CONFIG_INIT_STACKS` | Fills stacks with `0xaa`; required for watermark computation |
+| `CONFIG_THREAD_MONITOR` | ZView thread discovery |
+| `CONFIG_THREAD_STACK_INFO` | Thread stack metadata |
+| `CONFIG_THREAD_NAME` | Thread name display in ZView |
+| `CONFIG_THREAD_RUNTIME_STATS` | CPU usage tracking in ZView |
+| `CONFIG_SYS_HEAP_RUNTIME_STATS` | Heap peak / fragmentation map in ZView |
+
+> **Note:** `CONFIG_STACK_SENTINEL=n` cannot be auto-selected (Kconfig `select` can only
+> enable booleans, not force them off). It must remain `n` in the project conf explicitly.
+> `ZEGO_MEMONITOR_ZVIEW` enforces this with `depends on !STACK_SENTINEL`.
 
 ---
 
@@ -242,6 +273,8 @@ rsource "path/to/zego/bricks/memonitor/Kconfig"  # or via module system
 # prj.conf
 CONFIG_ZEGO_MEMONITOR=y
 CONFIG_ZEGO_MEMONITOR_INTERVAL_MS=2000
+CONFIG_ZEGO_MEMONITOR_ZVIEW=y   # auto-selects all ZView Kconfig dependencies
+CONFIG_STACK_SENTINEL=n          # must be explicit: ZVIEW cannot select =n
 ```
 
 ```c
@@ -265,3 +298,6 @@ memonitor_get_heaps(heaps, ARRAY_SIZE(heaps), &count);
 | TP-4 | `CONFIG_ZEGO_MEMONITOR=n` | `/api/heaps` and `/api/threads` return 404; sections hidden |
 | TP-5 | `CONFIG_MBEDTLS_ENABLE_HEAP=y` | `mbedtls_heap` row appears in `/api/heaps` |
 | TP-6 | ZView heap view | Matches `/api/heaps` values within one sample interval |
+| TP-7 | `CONFIG_ZEGO_MEMONITOR_HEAP_MONITOR=n` | Heap section hidden; `/api/heaps` returns empty; thread section unaffected |
+| TP-8 | `CONFIG_ZEGO_MEMONITOR_THREAD_MONITOR=n` | Thread section hidden; `/api/threads` returns empty; heap section unaffected |
+| TP-9 | `CONFIG_ZEGO_MEMONITOR_ZVIEW=y` | All ZView symbols selected; `STACK_SENTINEL=n` enforced via `depends on !STACK_SENTINEL` |
