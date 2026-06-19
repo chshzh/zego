@@ -16,7 +16,7 @@
 
 | Version | Summary of changes |
 |---|---|
-| 2026-06-04-17-10 | Initial spec — reverse-designed from source |
+| 2026-06-04-17-10 | Initial spec - reverse-designed from source |
 | 2026-06-05-09-31 | Added Supported Hardware section; documented nRF5340 Audio DK + nRF7002EK + BLE network-core constraint |
 | 2026-06-11-13-52 | Updated hook name references: `zego_network_on_wifi_connected`→`zego_on_net_event_dhcp_bound`, `zego_network_on_wifi_disconnected`→`zego_on_net_event_wifi_disconnect` |
 | 2026-06-14-00-21 | `wifi_ble_prov_init()` now checks `zego_wifi_get_mode()` at SYS_INIT and skips the entire BLE provisioning stack when not in STA mode; prevents BLE GATT notification spam in P2P / SoftAP modes |
@@ -48,20 +48,20 @@ messages to `WIFI_CHAN` to keep the BLE advertisement status flags up to date.
 ## Supported Hardware
 
 BLE provisioning requires the BT host stack. On dual-core boards (nRF7002DK, nRF5340 Audio DK),
-BLE runs on the network core via `hci_ipc` — set `SB_CONFIG_NETCORE_HCI_IPC=y` in
+BLE runs on the network core via `hci_ipc` - set `SB_CONFIG_NETCORE_HCI_IPC=y` in
 `sysbuild.conf`. On single-core nRF54LM20DK, the BT stack runs on the same core as the app.
 
 | Board | Build target | BLE core | Notes |
 |-------|-------------|----------|-------|
-| nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-DSHIELD=nrf7002eb2` | Same app core | Single-core; ~2× flash/RAM — comfortable margin |
-| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | Network core (`hci_ipc`) | `SB_CONFIG_NETCORE_HCI_IPC=y` in `sysbuild.conf`; ~1 MB app flash — BT stack (~150 KB) fits but leaves little headroom alongside a heavy app |
+| nRF54LM20DK + nRF7002EB2 | `nrf54lm20dk/nrf54lm20a/cpuapp` + `-DSHIELD=nrf7002eb2` | Same app core | Single-core; ~2× flash/RAM - comfortable margin |
+| nRF7002DK | `nrf7002dk/nrf5340/cpuapp` | Network core (`hci_ipc`) | `SB_CONFIG_NETCORE_HCI_IPC=y` in `sysbuild.conf`; ~1 MB app flash - BT stack (~150 KB) fits but leaves little headroom alongside a heavy app |
 | nRF5340 Audio DK + nRF7002EK | `nrf5340_audio_dk/nrf5340/cpuapp` + `-DSHIELD=nrf7002ek` | Network core (`hci_ipc`) | `SB_CONFIG_NETCORE_HCI_IPC=y` in `sysbuild.conf`; same ~1 MB app-core flash budget as nRF7002DK |
 
 ---
 
 ## Module Type
 
-- [x] **Library wrapper module** — wraps `BT_WIFI_PROV` (NCS `bluetooth/services/wifi_provisioning`)
+- [x] **Library wrapper module** - wraps `BT_WIFI_PROV` (NCS `bluetooth/services/wifi_provisioning`)
   and `WIFI_PROV_CORE`. Runs an ADV daemon work queue thread (4096 B stack, priority 5).
   Does **not** use the SMF pattern; driven by net_mgmt callbacks and a zbus listener.
 
@@ -104,7 +104,7 @@ BLE runs on the network core via `hci_ipc` — set `SB_CONFIG_NETCORE_HCI_IPC=y`
 
 ## Zbus Integration
 
-**Owns (defines)**: `WIFI_CHAN` — defined in `wifi_ble_prov.c`.
+**Owns (defines)**: `WIFI_CHAN` - defined in `wifi_ble_prov.c`.
 
 ```c
 /* wifi_ble_prov.h */
@@ -126,7 +126,7 @@ ZBUS_CHAN_DECLARE(WIFI_CHAN);   /* use in app files that publish or subscribe */
 
 **Subscribes to**: `WIFI_CHAN` via `ZBUS_LISTENER_DEFINE(wifi_ble_prov_listener, ...)`.
 
-**Listener is a `ZBUS_LISTENER`** (synchronous, runs in publisher's context — must be fast):
+**Listener is a `ZBUS_LISTENER`** (synchronous, runs in publisher's context - must be fast):
 - `WIFI_STA_CONNECTED` → schedules `update_adv_data_work` (K_NO_WAIT)
 - `WIFI_STA_DISCONNECTED` → schedules `update_adv_data_work` (K_NO_WAIT)
 
@@ -143,8 +143,8 @@ flags will not update.
 |---|---|
 | Device name format | `PVxxxxxx` (P, V + upper-case hex of MAC bytes 3–5) |
 | UUID advertised | `BT_UUID_PROV_VAL` (128-bit, from `wifi_provisioning.h`) |
-| Fast advertising | `BT_GAP_ADV_FAST_INT_MIN_2` / `MAX_2` — used when device is not yet provisioned |
-| Slow advertising | `BT_GAP_ADV_SLOW_INT_MIN` / `MAX` — used after provisioning |
+| Fast advertising | `BT_GAP_ADV_FAST_INT_MIN_2` / `MAX_2` - used when device is not yet provisioned |
+| Slow advertising | `BT_GAP_ADV_SLOW_INT_MIN` / `MAX` - used after provisioning |
 | Service data flags | Bit 0: provisioning active; Bit 1: Wi-Fi connected; Byte 3: RSSI |
 
 Advertisement data is refreshed on the `adv_daemon_work_q` via `update_adv_data_work`
@@ -157,7 +157,7 @@ Advertisement data is refreshed on the `adv_daemon_work_q` via `update_adv_data_
 On `WIFI_DISCONNECT_RESULT` (when provisioner is not the intentional cause):
 
 1. Schedule `wifi_connect_work` after `WIFI_RECONNECT_DELAY_SEC` (5 s).
-2. On work handler: attempt `connect_stored_rotating()` — cycles through all stored SSIDs
+2. On work handler: attempt `connect_stored_rotating()` - cycles through all stored SSIDs
    in round-robin order using `wifi_credentials_for_each_ssid()`.
 3. If still disconnected: reschedule after `WIFI_RECONNECT_RETRY_SEC` (180 s).
 4. Log the full retry schedule at reconnect start (shows T+Ns for each SSID in rotation order).
@@ -195,7 +195,7 @@ Dependencies: `ZEGO_NETWORK && ZBUS && WIFI_CREDENTIALS`
 
 ## SYS_INIT
 
-`SYS_INIT(wifi_ble_prov_init, APPLICATION, 95)` — runs after `zego/network` (priority 5) and after
+`SYS_INIT(wifi_ble_prov_init, APPLICATION, 95)` - runs after `zego/network` (priority 5) and after
 the Wi-Fi stack is operational.
 
 `wifi_ble_prov_init()` sequence:
@@ -203,14 +203,14 @@ the Wi-Fi stack is operational.
    `"Skipping BLE provisioner init (mode=X, STA only)"` and return 0 immediately.
    This prevents BLE GATT notification spam (`"BT not connected. Ignore notification request."`)
    in P2P and SoftAP modes where no BLE central is expected.
-2. Check `wifi_credentials_is_empty()` — set boot flag to skip duplicate auto-connect.
+2. Check `wifi_credentials_is_empty()` - set boot flag to skip duplicate auto-connect.
 3. Start ADV daemon work queue.
 4. Init `k_work_delayable` items: `wifi_connect_work`, `update_adv_param_work`, `update_adv_data_work`.
 5. Register BT auth callbacks.
-6. `bt_enable(NULL)` — blocks until BT stack ready.
-7. `wifi_prov_init()` — start GATT provisioning service.
+6. `bt_enable(NULL)` - blocks until BT stack ready.
+7. `wifi_prov_init()` - start GATT provisioning service.
 8. Derive device name from MAC and call `bt_set_name()`.
-9. `bt_le_adv_start()` — begin advertising.
+9. `bt_le_adv_start()` - begin advertising.
 10. Register `wifi_mgmt_cb` for connect/disconnect events.
 
 ---
@@ -251,6 +251,6 @@ the Wi-Fi stack is operational.
 | Provisioning service started | `[zego_wifi_ble_prov] Wi-Fi provisioning service started` |
 | Advertising started | `[zego_wifi_ble_prov] BT Advertising started (device name: PVxxxxxx)` |
 | BT client connected | `[zego_wifi_ble_prov] BT Connected` |
-| Wi-Fi connected (from listener) | `[zego_wifi_ble_prov] WiFi connected — BLE advertisement updated` |
+| Wi-Fi connected (from listener) | `[zego_wifi_ble_prov] WiFi connected - BLE advertisement updated` |
 | Disconnect + reconnect | `[zego_wifi_ble_prov] WiFi disconnected, scheduling reconnect in 5 s` |
 | Retry schedule logged | `[zego_wifi_ble_prov] --- Retry schedule (N stored network(s)) ---` |

@@ -31,6 +31,6 @@ config BT_BUF_ACL_TX_SIZE
 config BT_RX_STACK_SIZE
 	default 22000 if ZEGO_WIFI_BLE_PROV
 
-# 75 units (750 ms) — avoids supervision timeout during WiFi scan delays.
+# 75 units (750 ms) - avoids supervision timeout during WiFi scan delays.
 config BT_PERIPHERAL_PREF_TIMEOUT
 	default 75 if ZEGO_WIFI_BLE_PROV

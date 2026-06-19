@@ -55,7 +55,7 @@ ZBUS_CHAN_DECLARE(WIFI_CHAN);
  *
  * Allows the application to enable or disable the BLE provisioning
  * advertisement.  Uses the same advertising parameters as the initial
- * start in wifi_ble_prov_init() — FAST if unprovisioned, SLOW if already
+ * start in wifi_ble_prov_init() - FAST if unprovisioned, SLOW if already
  * provisioned.
  *
  * @param enable  true to start advertising, false to stop.

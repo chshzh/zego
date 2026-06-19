@@ -30,7 +30,7 @@
 
 LOG_MODULE_REGISTER(zego_wifi_ble_prov, CONFIG_ZEGO_WIFI_BLE_PROV_LOG_LEVEL);
 
-/* WIFI_CHAN is owned by this module — all other users declare it via the header. */
+/* WIFI_CHAN is owned by this module - all other users declare it via the header. */
 ZBUS_CHAN_DEFINE(WIFI_CHAN, struct wifi_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY, ZBUS_MSG_INIT(0));
 
 #define WIFI_RECONNECT_DELAY_SEC 5
@@ -106,7 +106,7 @@ static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 		 *
 		 * status==0 with provisioner NOT active means WPA supplicant
 		 * self-disconnected after beacon loss (AP went away).  Schedule
-		 * reconnect in that case — the same as for non-zero status.
+		 * reconnect in that case - the same as for non-zero status.
 		 */
 		if (status && status->status == 0 && wifi_prov_state_get()) {
 			LOG_INF("WiFi disconnected (intentional), deferring reconnect to "
@@ -125,7 +125,7 @@ static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 	case NET_EVENT_WIFI_CONNECT_RESULT: {
 		const struct wifi_status *status = (const struct wifi_status *)cb->info;
 		if (status && status->status == 0) {
-			/* Success — clear reconnect state */
+			/* Success - clear reconnect state */
 			wifi_reconnect_pending = false;
 			k_work_cancel_delayable(&wifi_connect_work);
 		} else {
@@ -498,7 +498,7 @@ static int wifi_ble_prov_init(void)
 	/* BLE provisioning is only meaningful in STA mode.
 	 * In P2P / SoftAP modes the provisioner's Wi-Fi event listener would
 	 * spam "BT not connected. Ignore notification request." on every
-	 * connect/disconnect — skip the entire init to keep the log clean. */
+	 * connect/disconnect - skip the entire init to keep the log clean. */
 	if (zego_wifi_get_mode() != ZEGO_WIFI_MODE_STA) {
 		LOG_DBG("Skipping BLE provisioner init (mode=%d, STA only)", zego_wifi_get_mode());
 		return 0;
@@ -587,10 +587,10 @@ static void wifi_ble_prov_listener_cb(const struct zbus_channel *chan)
 	const struct wifi_msg *msg = zbus_chan_const_msg(chan);
 
 	if (msg->type == WIFI_STA_CONNECTED) {
-		LOG_INF("WiFi connected — BLE advertisement updated");
+		LOG_INF("WiFi connected - BLE advertisement updated");
 		wifi_ble_prov_update_status(true);
 	} else if (msg->type == WIFI_STA_DISCONNECTED) {
-		LOG_INF("WiFi disconnected — BLE advertisement updated");
+		LOG_INF("WiFi disconnected - BLE advertisement updated");
 		wifi_ble_prov_update_status(false);
 	}
 }
