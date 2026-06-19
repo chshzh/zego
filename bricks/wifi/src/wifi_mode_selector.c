@@ -195,11 +195,11 @@ static int mode_selector_init(void)
 	int ret;
 
 	/* Compile-time default if NVS has no stored value (e.g. fresh --erase flash) */
-#if CONFIG_ZEGO_WIFI_DEFAULT_WIFI_MODE_SOFTAP
+#if CONFIG_ZEGO_WIFI_DEFAULT_MODE_SOFTAP
 	s_mode = ZEGO_WIFI_MODE_SOFTAP;
-#elif CONFIG_ZEGO_WIFI_DEFAULT_WIFI_MODE_P2P_GO
+#elif CONFIG_ZEGO_WIFI_DEFAULT_MODE_P2P_GO
 	s_mode = ZEGO_WIFI_MODE_P2P_GO;
-#elif CONFIG_ZEGO_WIFI_DEFAULT_WIFI_MODE_P2P_CLIENT
+#elif CONFIG_ZEGO_WIFI_DEFAULT_MODE_P2P_CLIENT
 	s_mode = ZEGO_WIFI_MODE_P2P_CLIENT;
 #else
 	s_mode = ZEGO_WIFI_MODE_STA;

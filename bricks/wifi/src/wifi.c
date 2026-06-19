@@ -176,34 +176,39 @@ void zego_banner_wifi_info(void)
 				 _mac->addr[0], _mac->addr[1], _mac->addr[2], _mac->addr[3],
 				 _mac->addr[4], _mac->addr[5]);
 		}
-		LOG_INF("P2P_GO mode: group up, PBC armed - this DK's MAC: %s", mac_str);
-		LOG_INF("NOTE: Phone as P2P client is NOT supported - DK clients only.");
+		LOG_INF("P2P_GO mode: group up, WPS PIN active - this DK's MAC: %s", mac_str);
 		if (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC[0] != '\0') {
 			LOG_INF("P2P_CLIENT DK is configured to auto-connect to this GO.");
 		} else {
-			LOG_INF("P2P_CLIENT can connect via PBC using one of the guidance below.");
+			LOG_INF("P2P_CLIENT can connect via WPS PIN using one of the options "
+				"below.");
 			LOG_INF("[ DK as P2P_CLIENT ]");
-			LOG_INF("  P2P_CLIENT DK:  wifi p2p connect %s pbc --join", mac_str);
+			LOG_INF("  P2P_CLIENT DK:  wifi p2p connect %s pin 12345678 --join",
+				mac_str);
+			LOG_INF("[ Phone as P2P_CLIENT ]");
+			LOG_INF("  1. Phone: Turn on Wi-Fi, disconnect from other APs");
+			LOG_INF("  2. Phone: Wi-Fi Direct -> wait for DK, select it, enter PIN "
+				"12345678");
 		}
 		break;
 	}
 
 	case ZEGO_WIFI_MODE_P2P_CLIENT:
 		if (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC[0] != '\0') {
-			LOG_INF("P2P_CLIENT mode: auto-connecting to GO %s (pbc --join, retry "
-				"every 90 s)",
+			LOG_INF("P2P_CLIENT mode: auto-connecting to GO %s (pin 12345678 --join, "
+				"retry every 90 s)",
 				CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC);
 		} else {
-			LOG_INF("P2P_CLIENT mode: connect to a P2P_GO DK or phone via PBC:");
+			LOG_INF("P2P_CLIENT mode: connect to a P2P_GO DK via WPS PIN:");
 			LOG_INF("[ DK GO ]");
 			LOG_INF("  If you have the GO's MAC(see GO logs), run directly:");
-			LOG_INF("    wifi p2p connect <GO MAC> pbc --join");
+			LOG_INF("    wifi p2p connect <GO MAC> pin 12345678 --join");
 			LOG_INF("  Otherwise, discover first:");
 			LOG_INF("  1. wifi p2p find");
 			LOG_INF("  2. wifi p2p peer       (note GO MAC)");
-			LOG_INF("  3. wifi p2p connect <GO MAC> pbc --join");
-			LOG_INF("[ Phone GO ]");
-			LOG_INF("  1. Phone: enable Wi-Fi Direct");
+			LOG_INF("  3. wifi p2p connect <GO MAC> pin 12345678 --join");
+			LOG_INF("[ Phone GO ] (NOT recommended -- Android routing + mDNS blocked)");
+			LOG_INF("  1. Phone: Turn on Wi-Fi, disconnect from other APs");
 			LOG_INF("  2. wifi p2p find");
 			LOG_INF("  3. wifi p2p peer       (find phone MAC)");
 			LOG_INF("  4. wifi p2p connect <phone MAC> pbc -g 0");
