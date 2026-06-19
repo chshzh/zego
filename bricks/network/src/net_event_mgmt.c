@@ -130,11 +130,10 @@ static K_SEM_DEFINE(station_connected_sem, 0, 1); /* SoftAP: first STA joined  *
 /* ============================================================================
  * DEFERRED DHCP STOP (P2P_CLIENT)
  * ============================================================================
- * driver_zephyr.c calls net_dhcpv4_restart() from the hostap_handler thread
- * a few ms AFTER the CONNECT_RESULT callback fires.  Stopping DHCP directly
- * in the callback is therefore undone almost immediately.  This work item is
- * scheduled 100 ms after the static IP is assigned, ensuring it fires AFTER
- * the supplicant's restart and keeps DHCP permanently stopped for P2P_CLIENT.
+ * net_dhcpv4_stop() must NOT be called from inside the NET_EVENT_IPV4_DHCP_BOUND
+ * callback — doing so re-enters the DHCP state machine while it is still
+ * processing the bound event and causes an MPU fault.  This work item defers
+ * the stop to the system workqueue, which runs after the callback returns.
  */
 static struct k_work_delayable dhcp_diag_work;
 
@@ -147,7 +146,7 @@ static void dhcp_diag_handler(struct k_work *work)
 	}
 
 	net_dhcpv4_stop(iface);
-	LOG_DBG("P2P_CLIENT: deferred DHCP stop done (state=%d)", (int)iface->config.dhcpv4.state);
+	LOG_DBG("P2P_CLIENT: deferred DHCP stop done");
 }
 
 /* ============================================================================
@@ -352,31 +351,14 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 				}
 			} else if (active_mode == ZEGO_WIFI_MODE_P2P_CLIENT) {
 				wifi_p2p_client_on_connect_result(true);
-				/* Assign a static IP instead of relying on DHCPv4.
-				 * DHCPv4 packet creation fails on this platform in P2P mode
-				 * (net_ipv4_create returns -ENOBUFS).  The P2P_GO runs a
-				 * DHCP server on 192.168.7.1/24 with pool start at .2, so
-				 * using a fixed 192.168.7.2/24 address is safe and reliable. */
-				if (wifi_p2p_client_setup_static_ip(iface) == 0) {
-					char mac[18];
-
-					iface_mac_to_str(iface, mac);
-					network_connected = true;
-					// wifi_print_status();
-					/* Skip NET_REQUEST_WIFI_IFACE_STATUS here: it triggers
-					 * SIGNAL_POLL internally which times out (~15 s) on the
-					 * first P2P connection while wpa_supplicant is still
-					 * initialising.  The SSID is always "DIRECT-xx" in P2P
-					 * mode; notify immediately with the known static IP. */
-					zego_on_net_event_dhcp_bound(ZEGO_WIFI_MODE_P2P_CLIENT,
-								     "192.168.7.2", mac, "P2P");
-					/* Schedule a deferred DHCP stop to counteract the
-					 * net_dhcpv4_restart() that driver_zephyr.c fires
-					 * a few ms later from the hostap_handler thread. */
-					k_work_reschedule(&dhcp_diag_work, K_MSEC(100));
-				}
+				/* Restart DHCP like STA mode — wait for DHCP_BOUND to get
+				 * the GO-assigned IP (phone: e.g. 192.168.49.x; DK GO:
+				 * 192.168.7.x). */
+				LOG_INF("P2P_CLIENT: restarting DHCP on %s",
+					net_if_get_device(iface) ? net_if_get_device(iface)->name
+								 : "?");
+				net_dhcpv4_restart(iface);
 			} else if (active_mode == ZEGO_WIFI_MODE_STA) {
-				/* Same immediate restart pattern for STA. */
 				LOG_INF("STA: restarting DHCP on %s",
 					net_if_get_device(iface) ? net_if_get_device(iface)->name
 								 : "?");
@@ -580,6 +562,13 @@ static void l2_ap_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgm
 				LOG_INF("L2-NET_EVENT_WIFI_AP_STA_CONNECTED: mac=%s mode=P2P_GO "
 					"ip=%s ssid=%s",
 					mac_str, dk_ip, ssid[0] ? ssid : "<pending>");
+
+				/* AP_ENABLE_RESULT never fires for P2P_GO (only CONNECT_RESULT
+				 * does), so the cached mode/ip/ssid used by
+				 * zego_on_net_event_wifi_ap_sta_connected() are still zero.
+				 * Update them now with the real values before the callback. */
+				zego_on_net_event_wifi_ap_enabled(ZEGO_WIFI_MODE_P2P_GO, dk_ip,
+								  ssid);
 			} else {
 				wifi_softap_cancel_remind_timer();
 				LOG_INF("L2-NET_EVENT_WIFI_AP_STA_CONNECTED: mac=%s mode=SoftAP "
@@ -614,7 +603,7 @@ static void l2_ap_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgm
 		LOG_INF("L2-NET_EVENT_WIFI_AP_STA_DISCONNECTED: mac=%s clients=%d", mac_str,
 			rem_count);
 		if (active_mode == ZEGO_WIFI_MODE_P2P_GO) {
-			wifi_p2p_go_rearm_pbc();
+			wifi_p2p_go_rearm_wps_pin();
 		}
 		zego_on_net_event_wifi_ap_sta_disconnected(rem_count);
 		break;
@@ -697,6 +686,14 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 	}
 
 	network_connected = true;
+	if (active_mode == ZEGO_WIFI_MODE_P2P_CLIENT) {
+		/* Cancel any pending fallback and schedule a deferred DHCP stop.
+		 * Cannot call net_dhcpv4_stop() directly here — we are inside the
+		 * DHCP_BOUND callback and re-entering the DHCP state machine causes
+		 * an MPU fault.  The 100 ms delay ensures the callback returns first. */
+		k_work_cancel_delayable(&dhcp_diag_work);
+		k_work_reschedule(&dhcp_diag_work, K_MSEC(100));
+	}
 	wifi_print_status();
 
 	bool is_p2p_client = (active_mode == ZEGO_WIFI_MODE_P2P_CLIENT) ||

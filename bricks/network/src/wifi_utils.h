@@ -94,7 +94,7 @@ int wifi_set_mode(int mode);
 int wifi_set_tx_injection_mode(void);
 
 /**
- * @brief Start P2P_GO mode: create autonomous group, arm WPS PBC, start discovery.
+ * @brief Start P2P_GO mode: create autonomous group, set WPS PIN (12345678).
  *
  * @return 0 on success, negative error code on failure.
  */
@@ -111,13 +111,14 @@ void wifi_softap_cancel_remind_timer(void);
 void wifi_p2p_go_cancel_wps_timer(void);
 
 /**
- * @brief Re-arm WPS PBC on the GO so a rebooted client can reconnect.
+ * @brief Re-arm WPS PIN on the GO so a disconnected client can reconnect.
  *
- * Call this when a P2P_GO station disconnects.  PBC has a 120 s window; once
- * it expires the client cannot use `pbc --join` to rejoin.  This function
- * re-arms PBC and restarts P2P device discovery so the client can reconnect.
+ * Call this when a P2P_GO station disconnects.  This function re-sets the
+ * WPS PIN so the client can reconnect using:
+ *   DK:    wifi p2p connect <MAC> pin 12345678 --join
+ *   Phone: Wi-Fi Direct -> select DK -> enter PIN 12345678
  */
-void wifi_p2p_go_rearm_pbc(void);
+void wifi_p2p_go_rearm_wps_pin(void);
 
 /**
  * @brief Start P2P_CLIENT mode.

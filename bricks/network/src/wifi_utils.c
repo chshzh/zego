@@ -482,8 +482,9 @@ int wifi_print_status(void)
  *   1. group_add   - create an autonomous (non-persistent) P2P group.
  *                    CONNECT_RESULT fires once the group is up; net_event_mgmt.c
  *                    starts the DHCP server there.
- *   2. wps_pbc     - arm WPS Push-Button mode (120 s window).  Clients join with:
- *                      wifi p2p connect <THIS_MAC> pbc --join
+ *   2. wps_pin     - set WPS PIN (12345678).  Clients join with:
+ *                      DK:    wifi p2p connect <THIS_MAC> pin 12345678 --join
+ *                      Phone: Wi-Fi Direct -> select DK -> enter PIN 12345678
  *
  * NOTE: P2P_FIND (discovery scan) must NOT be called on a running GO.
  * A GO is already beaconing on its operating channel; clients find it by
@@ -491,7 +492,7 @@ int wifi_print_status(void)
  * Response.  Calling P2P_FIND while a GO is active always fails with
  * "Failed to start p2p_scan" because the radio is anchored to the GO channel.
  *
- * wps_pbc calls deep into wpa_supplicant and overflows the 2 KB sysworkq
+ * wps_pin calls deep into wpa_supplicant and overflows the 2 KB sysworkq
  * stack.  A dedicated 4 KB work queue is used for that call.
  */
 
@@ -501,13 +502,13 @@ int wifi_print_status(void)
 K_THREAD_STACK_DEFINE(p2p_wps_workq_stack, P2P_WPS_WORKQ_STACK_SIZE);
 static struct k_work_q p2p_wps_workq;
 static bool p2p_wps_workq_started;
-/* Delayable so it can be rescheduled periodically to keep the PBC window open. */
-static struct k_work_delayable p2p_go_arm_work;
+static struct k_work_delayable p2p_go_wps_retry_work;
 
-/* PBC window is 120 s; re-arm 10 s before expiry to keep it continuously open. */
-#define P2P_GO_PBC_REARM_INTERVAL_S 110
+#define P2P_GO_WPS_PIN              "12345678"
+/* Re-arm WPS PIN after this many seconds if no client has connected. */
+#define P2P_GO_WPS_REARM_INTERVAL_S 300
 
-static void p2p_go_arm_pbc_and_find(struct k_work *work)
+static void p2p_go_set_wps_pin_handler(struct k_work *work)
 {
 	struct net_if *iface = net_if_get_first_wifi();
 
@@ -516,39 +517,41 @@ static void p2p_go_arm_pbc_and_find(struct k_work *work)
 		return;
 	}
 
-	struct wifi_wps_config_params wps = {.oper = WIFI_WPS_PBC};
+	struct wifi_wps_config_params wps = {.oper = WIFI_WPS_PIN_SET};
+
+	snprintf(wps.pin, sizeof(wps.pin), "%s", P2P_GO_WPS_PIN);
+
 	int ret = net_mgmt(NET_REQUEST_WIFI_WPS_CONFIG, iface, &wps, sizeof(wps));
 
 	if (ret) {
-		LOG_ERR("P2P_GO: WPS PBC arm failed (%d)", ret);
+		LOG_ERR("P2P_GO: WPS PIN set failed (%d)", ret);
 	} else {
-		LOG_INF("P2P_GO: WPS PBC armed (120 s window, re-arms every %d s)",
-			P2P_GO_PBC_REARM_INTERVAL_S);
+		LOG_INF("P2P_GO: WPS PIN active: %s", P2P_GO_WPS_PIN);
 		LOG_INF("P2P_GO: GO is beaconing - clients discover via Wi-Fi Direct scan");
 	}
 
-	/* Re-arm PBC before the window expires so the GO is always connectable.
+	/* Re-arm periodically so the GO remains connectable after the PIN window expires.
 	 * DO NOT call P2P_FIND here - it always fails on a running GO because the
 	 * radio is anchored to the group channel and cannot scan social channels.
 	 * Clients find this GO by scanning ch1/6/11 and reading the Probe Response. */
 	k_work_reschedule_for_queue(&p2p_wps_workq, k_work_delayable_from_work(work),
-				    K_SECONDS(P2P_GO_PBC_REARM_INTERVAL_S));
+				    K_SECONDS(P2P_GO_WPS_REARM_INTERVAL_S));
 }
 
 void wifi_p2p_go_cancel_wps_timer(void)
 {
 	if (p2p_wps_workq_started) {
-		k_work_cancel_delayable(&p2p_go_arm_work);
+		k_work_cancel_delayable(&p2p_go_wps_retry_work);
 	}
 }
 
-void wifi_p2p_go_rearm_pbc(void)
+void wifi_p2p_go_rearm_wps_pin(void)
 {
 	if (!p2p_wps_workq_started) {
 		return;
 	}
-	LOG_INF("P2P_GO: re-arming PBC for client reconnect");
-	k_work_reschedule_for_queue(&p2p_wps_workq, &p2p_go_arm_work, K_NO_WAIT);
+	LOG_INF("P2P_GO: re-arming WPS PIN for client reconnect");
+	k_work_reschedule_for_queue(&p2p_wps_workq, &p2p_go_wps_retry_work, K_NO_WAIT);
 }
 
 int wifi_run_p2p_go_mode(void)
@@ -574,7 +577,7 @@ int wifi_run_p2p_go_mode(void)
 		return ret;
 	}
 
-	LOG_INF("P2P_GO: group created - arming PBC and starting discovery");
+	LOG_INF("P2P_GO: group created - setting WPS PIN and starting discovery");
 
 	if (!p2p_wps_workq_started) {
 		k_work_queue_init(&p2p_wps_workq);
@@ -583,8 +586,8 @@ int wifi_run_p2p_go_mode(void)
 				   NULL);
 		p2p_wps_workq_started = true;
 	}
-	k_work_init_delayable(&p2p_go_arm_work, p2p_go_arm_pbc_and_find);
-	k_work_schedule_for_queue(&p2p_wps_workq, &p2p_go_arm_work, K_NO_WAIT);
+	k_work_init_delayable(&p2p_go_wps_retry_work, p2p_go_set_wps_pin_handler);
+	k_work_schedule_for_queue(&p2p_wps_workq, &p2p_go_wps_retry_work, K_NO_WAIT);
 
 	return 0;
 }
@@ -602,7 +605,7 @@ void wifi_p2p_go_cancel_wps_timer(void)
 {
 }
 
-void wifi_p2p_go_rearm_pbc(void)
+void wifi_p2p_go_rearm_wps_pin(void)
 {
 }
 
@@ -613,7 +616,7 @@ void wifi_p2p_go_rearm_pbc(void)
  * ============================================================================
  *
  * When CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC is a non-empty string, P2P_CLIENT
- * automatically runs 'wifi p2p connect <MAC> pbc --join' at boot and reconnects
+ * automatically runs 'wifi p2p connect <MAC> pin 12345678 --join' at boot and reconnects
  * automatically whenever the P2P group is lost.
  *
  * Connect / retry flow:
@@ -810,7 +813,8 @@ static void p2p_client_do_connect(struct k_work *work)
 
 		memcpy(params.peer_addr, peer_buf[best].mac, 6);
 		params.oper = WIFI_P2P_CONNECT;
-		params.connect.method = WIFI_P2P_METHOD_PBC;
+		params.connect.method = WIFI_P2P_METHOD_KEYPAD;
+		snprintf(params.connect.pin, sizeof(params.connect.pin), "12345678");
 		params.connect.join = true;
 
 		int ret = net_mgmt(NET_REQUEST_WIFI_P2P_OPER, iface, &params, sizeof(params));
@@ -820,7 +824,7 @@ static void p2p_client_do_connect(struct k_work *work)
 			k_work_reschedule_for_queue(
 				&p2p_cli_workq, k_work_delayable_from_work(work), K_SECONDS(10));
 		} else {
-			LOG_INF("P2P_CLIENT: connect initiated -> pbc --join");
+			LOG_INF("P2P_CLIENT: connect initiated -> pin 12345678 --join");
 			p2p_client_pending = true;
 			k_work_reschedule_for_queue(&p2p_cli_workq,
 						    k_work_delayable_from_work(work),
@@ -841,7 +845,8 @@ static void p2p_client_do_connect(struct k_work *work)
 	}
 
 	params.oper = WIFI_P2P_CONNECT;
-	params.connect.method = WIFI_P2P_METHOD_PBC;
+	params.connect.method = WIFI_P2P_METHOD_KEYPAD;
+	snprintf(params.connect.pin, sizeof(params.connect.pin), "12345678");
 	params.connect.join = true;
 
 	int ret = net_mgmt(NET_REQUEST_WIFI_P2P_OPER, iface, &params, sizeof(params));
@@ -852,7 +857,8 @@ static void p2p_client_do_connect(struct k_work *work)
 		k_work_reschedule_for_queue(&p2p_cli_workq, k_work_delayable_from_work(work),
 					    K_SECONDS(10));
 	} else {
-		LOG_INF("P2P_CLIENT: connect initiated -> wifi p2p connect %s pbc --join", mac_str);
+		LOG_INF("P2P_CLIENT: connect initiated -> wifi p2p connect %s pin 12345678 --join",
+			mac_str);
 		/* Command accepted.  Block further retries until CONNECT_RESULT
 		 * arrives or P2P_CLIENT_CONNECT_TIMEOUT_S passes. */
 		p2p_client_pending = true;
