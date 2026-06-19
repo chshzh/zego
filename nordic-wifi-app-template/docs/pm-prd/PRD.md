@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Product Name | Nordic Wi-Fi App Template |
-| Version | 2026-06-16-13-30 |
+| Version | 2026-06-19-12-44 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Draft |
@@ -27,6 +27,7 @@
 | 2026-06-14-00-21 | P2P_CLIENT: revised auto-connect using target GO MAC (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC Kconfig); direct --join connect skips discovery; static IP 192.168.7.2/24 assigned immediately; 90 s retry timeout; 15 s reconnect delay after disconnect. P2P_GO: PBC auto re-armed on client disconnect and every 110 s. BLE provisioner: init skipped in non-STA modes. Updated FR-107 |
 | 2026-06-16-13-30 | SoftAP: max 3 simultaneous clients (FR-005 updated); net_event_app TODO log messages must clearly show clients now connected and remaining count for both connect and disconnect events |
 | 2026-06-16-11-26 | P2P_CLIENT: added FR-108 MAC-prefix auto-select mode — when CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC ends in :00:00:00, device scans for all P2P GOs matching the 3-byte OUI prefix and connects to the one with the highest RSSI; exact-MAC mode unchanged |
+| 2026-06-19-12-44 | FR-103 updated: heap-only logging replaced by zego/memonitor brick — periodic heap + thread stack watermark sampling via MEMONITOR_CHAN; ZView live monitoring support added. |
 
 ---
 
@@ -146,7 +147,7 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 |---|---|---|---|---|
 | FR-101 | developer | read button events via `BUTTON_CHAN` | I can add button-driven application logic immediately | Button press publishes correct `button_msg` on `BUTTON_CHAN` |
 | FR-102 | developer | control LEDs via `LED_CMD_CHAN` | I can add LED feedback immediately | `LED_CMD_CHAN` message changes LED state |
-| FR-103 | developer | see heap usage logged periodically | I detect memory leaks early | Heap high-water mark logged every N minutes |
+| FR-103 | developer | monitor heap and thread stack watermarks periodically | I detect memory leaks and stack overflows early | `zego/memonitor` brick samples all `k_heap` instances and thread stack HWMs every `CONFIG_ZEGO_MEMONITOR_INTERVAL_MS` (default 5 s) and publishes a `MEMONITOR_CHAN` zbus event; ZView live monitoring enabled when `CONFIG_ZEGO_MEMONITOR_ZVIEW=y` |
 | FR-104 | evaluator | cycle Wi-Fi mode with a long button press | I can switch modes without a UART shell | Button 0 held ≥ 3 s → next mode saved to NVS → device reboots into new mode |
 | FR-105 | evaluator | see Wi-Fi connection state on LED 0 | I can tell at a glance whether the device is connected | ROTATE while connecting → solid ON when connected (STA/P2P) / ROTATE when SoftAP up with no clients / solid ON when SoftAP client connected / breathe in BLE prov / fast blink on error; on nRF5340 Audio DK ROTATE uses RGB2 only ([3,4,5]) and connected state shows solid green on RGB2 (index 4) |
 | FR-106 | evaluator | toggle BLE provisioning with a double-click (nRF54LM20DK) | I can enter/exit provisioning mode without the shell | Double-click on Button 0 toggles BLE provisioning advertising |

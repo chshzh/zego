@@ -26,6 +26,7 @@
 - **Button 0 gesture UX** — single-click prints Wi-Fi status to UART; long press (≥ 3 s) cycles modes; double-click toggles BLE provisioning advertising (nRF54LM20DK only).
 - **Startup banner** — prints firmware version, board, MAC address, active mode, and per-mode connection instructions at every boot.
 - **Single customisation point** — `src/modules/network/net_event_app.c` with inline guide and TODO-annotated patterns for publishing your own Zbus channel on connect/disconnect.
+- **Live memory monitoring via [zego/memonitor](../bricks/memonitor)** — samples all `k_heap` instances and thread stack HWMs every 5 s; publishes `MEMONITOR_CHAN` zbus event on each sample; ZView live view available over JLink when `ZEGO_MEMONITOR_ZVIEW=y`.
 
 ### Target Users
 
@@ -306,6 +307,9 @@ The tag format is `v<ncs-version>.<build>` (e.g. `v3.3.0.1`). Major/minor/patch 
 - **nRF5340 Audio DK DTS overlay** (`boards/nrf5340_audio_dk_nrf5340_cpuapp.overlay`) maps the nRF7002EK SPI bus to the Audio DK's Arduino header — this is required; the nRF54LM20DK shield handles its own pinout without an overlay.
 - **Customisation entry point** is `src/modules/network/net_event_app.c`. Override `zego_on_net_event_dhcp_bound()` and `zego_on_net_event_wifi_disconnect()` — the file contains inline TODO comments and a 4-step example for publishing a Zbus channel.
 - **Heap monitor** logs the high-water mark periodically (interval configurable via `CONFIG_APP_HEAP_MONITOR_INTERVAL_S`). Watch for steady growth as an early sign of leaks.
+- **P2P connection method differences:**
+  - **PBC (Push Button Config):** the GO must press/accept the WPS button to admit the client. On DK-as-GO this happens automatically; on phone-as-GO, accept the incoming connection request on the phone.
+  - **PIN:** the P2P_CLIENT side must enter the PIN code displayed on (or configured in) the GO. On DK-as-GO the PIN is `12345678`; enter it on the phone's Wi-Fi Direct screen when prompted. On DK-as-P2P_CLIENT pass it with `wifi p2p connect <MAC> pin 12345678 --join`.
 - **Live memory and thread watermark monitoring with ZView:**
   Run ZView from the project root while the board is live. Replace the `-s` serial with your board's J-Link serial number (`nrfjprog --ids`).
 

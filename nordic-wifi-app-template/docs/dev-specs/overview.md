@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-16-13-30 |
-| PRD Version | 2026-06-16-13-30 |
+| Version | 2026-06-19-12-44 |
+| PRD Version | 2026-06-19-12-44 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -17,6 +17,7 @@
 
 | Version | Summary of changes |
 |---|---|
+| 2026-06-19-12-44 | Updated to PRD v2026-06-19-12-44: FR-103 updated to zego/memonitor brick — spec reference changed from architecture.md to memonitor-spec.md; description updated to heap + thread watermarks. |
 | 2026-06-04-18-00 | Added UX module spec (ux.md); updated spec index and PRD mapping for FR-104/105/106; noted APP_WIFI_STATE_CHAN in architecture summary |
 | 2026-06-04-22-00 | Updated ux.md and PRD for revised SoftAP LED behavior (ROTATE/solid ON) |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK target; updated Target Board(s), architecture.md, and ux.md; added board conf + DTS overlay + hci_ipc netcore conf |
@@ -87,7 +88,7 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | FR-008 Net event hook | [architecture.md](architecture.md) | Specified |
 | FR-101 Button events | [button-spec.md](../../button/docs/button-spec.md) | Specified |
 | FR-102 LED control | [led-spec.md](../../led/docs/led-spec.md) | Specified |
-| FR-103 Heap monitor | [architecture.md](architecture.md) | Specified |
+| FR-103 Heap + thread watermarks | [zego/memonitor — memonitor-spec.md](https://github.com/chshzh/zego/blob/main/bricks/memonitor/docs/memonitor-spec.md) | Specified |
 | FR-104 Button 0 mode cycle | [ux.md](ux.md) | Specified |
 | FR-105 LED Wi-Fi state feedback | [ux.md](ux.md) | Specified |
 | FR-106 BLE prov double-click | [ux.md](ux.md) | Specified |
