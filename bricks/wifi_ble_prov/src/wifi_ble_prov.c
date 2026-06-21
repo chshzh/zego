@@ -53,7 +53,7 @@ ZBUS_CHAN_DEFINE(WIFI_CHAN, struct wifi_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY, Z
 #define PROV_BT_LE_ADV_PARAM_SLOW                                                                  \
 	BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN, BT_GAP_ADV_SLOW_INT_MIN, BT_GAP_ADV_SLOW_INT_MAX, NULL)
 
-#define ADV_DAEMON_STACK_SIZE 4096
+#define ADV_DAEMON_STACK_SIZE CONFIG_ZEGO_WIFI_BLE_PROV_ADV_DAEMON_STACK_SIZE
 #define ADV_DAEMON_PRIORITY   5
 
 static struct k_work_delayable wifi_connect_work;

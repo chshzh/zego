@@ -27,6 +27,13 @@ config ZEGO_WIFI_BLE_PROV
 
 if ZEGO_WIFI_BLE_PROV
 
+config ZEGO_WIFI_BLE_PROV_ADV_DAEMON_STACK_SIZE
+	int "BLE advertising daemon work queue stack size (bytes)"
+	default 4096
+	help
+	  Stack size for the ble_adv_daemon_wq work queue thread that drives
+	  BLE advertising parameter and data updates during Wi-Fi provisioning.
+
 module = ZEGO_WIFI_BLE_PROV
 module-str = zego_wifi_ble_prov
 source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
