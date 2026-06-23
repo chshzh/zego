@@ -1,7 +1,7 @@
 # Zego — Reusable NCS/Zephyr modules
 
 [![Validation](https://github.com/chshzh/zego/actions/workflows/validation.yml/badge.svg)](https://github.com/chshzh/zego/actions/workflows/validation.yml)
-[![Release](https://github.com/chshzh/zego/actions/workflows/release.yml/badge.svg)](https://github.com/chshzh/zego/actions/workflows/release.yml)
+[![Latest Release](https://img.shields.io/github/v/release/chshzh/zego?label=Latest%20Release&color=skyblue)](https://github.com/chshzh/zego/releases/latest)
 
 **Zego** is the *Zephyr + LEGO* concept applied to embedded firmware: build applications
 by snapping together self-contained modules the way you assemble LEGO bricks.
