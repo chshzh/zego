@@ -25,14 +25,14 @@
 /**
  * @brief Wi-Fi operating mode.
  *
- * Stored as uint8_t in NVS under settings key "app/app_wifi_mode".
+ * Stored as uint8_t in NVS under settings key "app/zego_wifi_mode".
  * Values are intentionally fixed — changing them breaks NVS compat.
  */
 enum zego_wifi_mode {
 	ZEGO_WIFI_MODE_STA        = 0, /**< Station: join an existing network */
 	ZEGO_WIFI_MODE_SOFTAP     = 1, /**< SoftAP:  create an access point   */
 	ZEGO_WIFI_MODE_P2P_GO     = 2, /**< P2P Group Owner (Wi-Fi Direct)    */
-	ZEGO_WIFI_MODE_P2P_CLIENT = 3, /**< P2P Client: join peer's group     */
+	ZEGO_WIFI_MODE_P2P_GC     = 3, /**< P2P GC (Group Client): join peer's group */
 };
 
 /**

@@ -11,7 +11,7 @@
  *
  * Feature gates:
  *   NRF70_AP_MODE          - SoftAP mode available
- *   NRF70_P2P_MODE         - P2P_GO / P2P_CLIENT modes available
+ *   NRF70_P2P_MODE         - P2P_GO / P2P_GC modes available
  *   NET_L2_WIFI_SHELL      - 'wifi connect' shell command available
  *   WIFI_CREDENTIALS       - 'wifi cred' persistent credentials available
  *   ZEGO_WIFI_BLE_PROV - BLE provisioning available
@@ -90,8 +90,8 @@ void zego_banner_wifi_info(void)
 	case ZEGO_WIFI_MODE_P2P_GO:
 		mode_str = "P2P_GO";
 		break;
-	case ZEGO_WIFI_MODE_P2P_CLIENT:
-		mode_str = "P2P_CLIENT";
+	case ZEGO_WIFI_MODE_P2P_GC:
+		mode_str = "P2P_GC";
 		break;
 	default:
 		mode_str = "Unknown";
@@ -100,31 +100,44 @@ void zego_banner_wifi_info(void)
 
 	LOG_INF("Current Wi-Fi Mode:  " CLR_CYNB "%s" CLR_RST, mode_str);
 
-#if CONFIG_NRF70_AP_MODE || CONFIG_NRF70_P2P_MODE
-	LOG_INF("Type 'app_wifi_mode ["
-#if CONFIG_NRF70_AP_MODE
-		"softap|"
+	/* Only advertise the mode-switch command when more than one mode is
+	 * compiled in — a single-mode build has nothing to switch to. */
+#define _ZEGO_WIFI_MODE_COUNT                                                                      \
+	(IS_ENABLED(CONFIG_ZEGO_WIFI_MODE_STA_ENABLED) +                                           \
+	 IS_ENABLED(CONFIG_ZEGO_WIFI_MODE_SOFTAP_ENABLED) +                                        \
+	 IS_ENABLED(CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED) +                                        \
+	 IS_ENABLED(CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED))
+
+#if _ZEGO_WIFI_MODE_COUNT > 1
+	LOG_INF(CLR_PRP "Type 'zego_wifi_mode ["
+#if CONFIG_ZEGO_WIFI_MODE_STA_ENABLED
+			"sta"
 #endif
-		"sta"
-#if CONFIG_NRF70_P2P_MODE
-		"|p2p_go|p2p_client"
+#if CONFIG_ZEGO_WIFI_MODE_SOFTAP_ENABLED
+			"|softap"
 #endif
-		"]' to change mode.");
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED
+			"|p2p_go"
+#endif
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
+			"|p2p_gc"
+#endif
+			"]' to change mode." CLR_RST);
 #endif
 
-	LOG_INF("----------------------------------------------" CLR_BLU);
+	LOG_INF("----------------------------------------------");
 
 	switch (mode) {
 	case ZEGO_WIFI_MODE_STA:
 		LOG_INF("Connect using any available option for the current Wi-Fi Mode:");
 
 #if CONFIG_NET_L2_WIFI_SHELL
-		LOG_INF(CLR_PRP "----------------------------------------------" CLR_RST);
+		LOG_INF("----------------------------------------------");
 		LOG_INF(CLR_PRP "[ Shell: one-time connect ]" CLR_RST);
 		LOG_INF(CLR_PRP "  wifi connect -s <SSID> -p <pass> -k 1" CLR_RST);
 		LOG_INF(CLR_PRP "  wifi connect --help     (more options)" CLR_RST);
 #if CONFIG_WIFI_CREDENTIALS
-		LOG_INF(CLR_PRP "----------------------------------------------" CLR_RST);
+		LOG_INF("----------------------------------------------");
 		LOG_INF(CLR_PRP "[ Shell: saved credentials (auto-connect on reboot) ]" CLR_RST);
 		LOG_INF(CLR_PRP "  wifi cred add <SSID> WPA2-PSK <pass> -k 1" CLR_RST);
 		LOG_INF(CLR_PRP "  wifi cred auto_connect (trigger auto-connect attempt without "
@@ -146,7 +159,7 @@ void zego_banner_wifi_info(void)
 			} else {
 				snprintf(ble_name, sizeof(ble_name), "PVxxxxxx");
 			}
-			LOG_INF(CLR_PRP "----------------------------------------------" CLR_RST);
+			LOG_INF("----------------------------------------------");
 			LOG_INF(CLR_PRP "[ BLE provisioning (saves credentials) ]" CLR_RST);
 			LOG_INF(CLR_PRP "  Device name : %s" CLR_RST, ble_name);
 			LOG_INF(CLR_PRP
@@ -162,15 +175,15 @@ void zego_banner_wifi_info(void)
 #if CONFIG_NRF70_AP_MODE
 	case ZEGO_WIFI_MODE_SOFTAP:
 #if defined(CONFIG_APP_WIFI_SSID)
-		LOG_INF("Connect to AP SSID='%s' Password='%s'", CONFIG_APP_WIFI_SSID,
-			CONFIG_APP_WIFI_PASSWORD);
+		LOG_INF(CLR_PRP "Connect to AP SSID='%s' Password='%s'" CLR_RST,
+			CONFIG_APP_WIFI_SSID, CONFIG_APP_WIFI_PASSWORD);
 #else
 		LOG_INF("SoftAP: connect to the configured SSID.");
 #endif
 		break;
 #endif /* CONFIG_NRF70_AP_MODE */
 
-#if CONFIG_NRF70_P2P_MODE
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED
 	case ZEGO_WIFI_MODE_P2P_GO: {
 		struct net_if *_iface = net_if_get_first_wifi();
 		struct net_linkaddr *_mac = _iface ? net_if_get_link_addr(_iface) : NULL;
@@ -181,52 +194,63 @@ void zego_banner_wifi_info(void)
 				 _mac->addr[0], _mac->addr[1], _mac->addr[2], _mac->addr[3],
 				 _mac->addr[4], _mac->addr[5]);
 		}
-		LOG_INF("P2P_GO mode: group up, WPS PIN active - this DK's MAC: %s", mac_str);
-		if (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC[0] != '\0') {
-			LOG_INF("P2P_CLIENT DK is configured to auto-connect to this GO.");
+		if (CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC[0] != '\0') {
+			LOG_INF(CLR_PRP
+				"P2P_GC DK is configured to auto-connect to this GO." CLR_RST);
 		} else {
-			LOG_INF("P2P_CLIENT can connect via WPS PIN using one of the options "
-				"below.");
-			LOG_INF("[ DK as P2P_CLIENT ]");
-			LOG_INF("  P2P_CLIENT DK:  wifi p2p connect %s pin 12345678 --join",
+			LOG_INF(CLR_PRP "P2P_GC can connect via WPS PIN using one of the options "
+					"below:" CLR_RST);
+			LOG_INF(CLR_PRP "[ DK as P2P_GC ]" CLR_RST);
+			LOG_INF(CLR_PRP
+				"  P2P_GC DK:  wifi p2p connect %s pin 12345678 --join" CLR_RST,
 				mac_str);
-			LOG_INF("[ Phone as P2P_CLIENT ]");
-			LOG_INF("  1. Phone: Turn on Wi-Fi, disconnect from other APs");
-			LOG_INF("  2. Phone: Wi-Fi Direct -> wait for DK, select it, enter PIN "
-				"12345678");
+			LOG_INF(CLR_PRP "[ Phone as P2P_GC ]" CLR_RST);
+			LOG_INF(CLR_PRP
+				"  1. Phone: Turn on Wi-Fi, disconnect from other APs" CLR_RST);
+			LOG_INF(CLR_PRP
+				"  2. Phone: Wi-Fi Direct -> wait for DK, select it, enter PIN "
+				"12345678" CLR_RST);
 		}
 		break;
 	}
+#endif /* CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED */
 
-	case ZEGO_WIFI_MODE_P2P_CLIENT:
-		if (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC[0] != '\0') {
-			LOG_INF("P2P_CLIENT mode: auto-connecting to GO %s (pin 12345678 --join, "
-				"retry every 90 s)",
-				CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC);
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
+	case ZEGO_WIFI_MODE_P2P_GC:
+		if (CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC[0] != '\0') {
+			LOG_INF(CLR_PRP
+				"P2P_GC mode: auto-connecting to GO %s (pin 12345678 --join, "
+				"retry every 90 s)" CLR_RST,
+				CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC);
 		} else {
-			LOG_INF("P2P_CLIENT mode: connect to a P2P_GO DK via WPS PIN:");
-			LOG_INF("[ DK GO ]");
-			LOG_INF("  If you have the GO's MAC(see GO logs), run directly:");
-			LOG_INF("    wifi p2p connect <GO MAC> pin 12345678 --join");
-			LOG_INF("  Otherwise, discover first:");
-			LOG_INF("  1. wifi p2p find");
-			LOG_INF("  2. wifi p2p peer       (note GO MAC)");
-			LOG_INF("  3. wifi p2p connect <GO MAC> pin 12345678 --join");
-			LOG_INF("[ Phone GO ] (NOT recommended -- Android routing + mDNS blocked)");
-			LOG_INF("  1. Phone: Turn on Wi-Fi, disconnect from other APs");
-			LOG_INF("  2. wifi p2p find");
-			LOG_INF("  3. wifi p2p peer       (find phone MAC)");
-			LOG_INF("  4. wifi p2p connect <phone MAC> pbc -g 0");
-			LOG_INF("  5. Phone: accept the invitation");
+			LOG_INF(CLR_PRP "P2P_GC mode: connect to a P2P_GO DK via WPS PIN:" CLR_RST);
+			LOG_INF(CLR_PRP "[ DK GO ]" CLR_RST);
+			LOG_INF(CLR_PRP
+				"  If you have the GO's MAC(see GO logs), run directly:" CLR_RST);
+			LOG_INF(CLR_PRP
+				"    wifi p2p connect <GO MAC> pin 12345678 --join" CLR_RST);
+			LOG_INF(CLR_PRP "  Otherwise, discover first:" CLR_RST);
+			LOG_INF(CLR_PRP "  1. wifi p2p find" CLR_RST);
+			LOG_INF(CLR_PRP "  2. wifi p2p peer       (note GO MAC)" CLR_RST);
+			LOG_INF(CLR_PRP
+				"  3. wifi p2p connect <GO MAC> pin 12345678 --join" CLR_RST);
+			LOG_INF(CLR_PRP "[ Phone GO ] (NOT recommended -- Android routing + mDNS "
+					"blocked)" CLR_RST);
+			LOG_INF(CLR_PRP
+				"  1. Phone: Turn on Wi-Fi, disconnect from other APs" CLR_RST);
+			LOG_INF(CLR_PRP "  2. wifi p2p find" CLR_RST);
+			LOG_INF(CLR_PRP "  3. wifi p2p peer       (find phone MAC)" CLR_RST);
+			LOG_INF(CLR_PRP "  4. wifi p2p connect <phone MAC> pbc -g 0" CLR_RST);
+			LOG_INF(CLR_PRP "  5. Phone: accept the invitation" CLR_RST);
 		}
 		break;
-#endif /* CONFIG_NRF70_P2P_MODE */
+#endif /* CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED */
 
 	default:
 		break;
 	}
 
-	LOG_INF(CLR_RST "==============================================");
+	LOG_INF("==============================================");
 }
 
 void zego_banner_app_extra(void)

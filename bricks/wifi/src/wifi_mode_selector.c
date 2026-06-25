@@ -10,7 +10,7 @@
  * and publishes it on WIFI_MODE_CHAN so the network module can start in the
  * correct mode.
  *
- * The 'app_wifi_mode [softap|sta|p2p_go|p2p_client]' shell command saves the
+ * The 'zego_wifi_mode [softap|sta|p2p_go|p2p_gc]' shell command saves the
  * new mode to NVS and performs a cold reboot to apply it.
  *
  * NVS note: mode values are stored as uint8_t.  The enum order in wifi.h
@@ -45,7 +45,7 @@ static enum zego_wifi_mode s_mode;
 
 static int settings_set_cb(const char *key, size_t len, settings_read_cb read_cb, void *cb_arg)
 {
-	if (strcmp(key, "app_wifi_mode") == 0 && len == sizeof(uint8_t)) {
+	if (strcmp(key, "zego_wifi_mode") == 0 && len == sizeof(uint8_t)) {
 		uint8_t val;
 		ssize_t rc = read_cb(cb_arg, &val, sizeof(val));
 
@@ -62,7 +62,7 @@ SETTINGS_STATIC_HANDLER_DEFINE(wifi_mode_selector_settings, "app", NULL, setting
 static int nvs_save_mode(enum zego_wifi_mode mode)
 {
 	uint8_t val = (uint8_t)mode;
-	int ret = settings_save_one("app/app_wifi_mode", &val, sizeof(val));
+	int ret = settings_save_one("app/zego_wifi_mode", &val, sizeof(val));
 
 	if (ret) {
 		LOG_ERR("Failed to save mode to NVS: %d", ret);
@@ -84,8 +84,8 @@ static const char *mode_to_str(enum zego_wifi_mode mode)
 		return "SoftAP";
 	case ZEGO_WIFI_MODE_P2P_GO:
 		return "P2P_GO";
-	case ZEGO_WIFI_MODE_P2P_CLIENT:
-		return "P2P_CLIENT";
+	case ZEGO_WIFI_MODE_P2P_GC:
+		return "P2P_GC";
 	default:
 		return "Unknown";
 	}
@@ -102,7 +102,7 @@ static void publish_mode(enum zego_wifi_mode mode)
 }
 
 /* ============================================================================
- * SHELL COMMAND: app_wifi_mode [softap|sta|p2p_go|p2p_client]
+ * SHELL COMMAND: zego_wifi_mode [softap|sta|p2p_go|p2p_client]
  *
  * Can be run at any time. Saves the new mode to NVS and performs a cold
  * reboot so the system starts cleanly in that mode.
@@ -115,14 +115,27 @@ static int cmd_wifi_mode(const struct shell *sh, size_t argc, char **argv)
 	if (argc < 2) {
 		shell_print(sh,
 			    "Current mode: %s\r\n"
-			    "Usage: app_wifi_mode [softap|sta|p2p_go|p2p_client]\r\n"
+			    "Usage: zego_wifi_mode ["
+#if CONFIG_ZEGO_WIFI_MODE_SOFTAP_ENABLED
+			    "softap|"
+#endif
+			    "sta"
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED
+			    "|p2p_go"
+#endif
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
+			    "|p2p_gc"
+#endif
+			    "]\r\n"
 			    "  sta        (join existing Wi-Fi)\r\n"
-#if CONFIG_NRF70_AP_MODE
+#if CONFIG_ZEGO_WIFI_MODE_SOFTAP_ENABLED
 			    "  softap     (create own SoftAP, IP 192.168.7.1)\r\n"
 #endif
-#if CONFIG_NRF70_P2P_MODE
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED
 			    "  p2p_go     (Wi-Fi Direct, device is Group Owner)\r\n"
-			    "  p2p_client (Wi-Fi Direct, device joins phone group)\r\n"
+#endif
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
+			    "  p2p_gc     (Wi-Fi Direct, device joins peer's group)\r\n"
 #endif
 			    "Board reboots automatically after mode change.",
 			    mode_to_str(s_mode));
@@ -142,21 +155,34 @@ static int cmd_wifi_mode(const struct shell *sh, size_t argc, char **argv)
 		return -EINVAL;
 #endif
 	} else if (strcasecmp(arg, "P2P_GO") == 0) {
-#if CONFIG_NRF70_P2P_MODE
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED
 		new_mode = ZEGO_WIFI_MODE_P2P_GO;
 #else
-		shell_error(sh, "P2P_GO not available — build with -DSNIPPET=wifi-p2p");
+		shell_error(sh, "P2P_GO not available in this build");
 		return -EINVAL;
 #endif
-	} else if (strcasecmp(arg, "P2P_CLIENT") == 0) {
-#if CONFIG_NRF70_P2P_MODE
-		new_mode = ZEGO_WIFI_MODE_P2P_CLIENT;
+	} else if (strcasecmp(arg, "P2P_GC") == 0) {
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
+		new_mode = ZEGO_WIFI_MODE_P2P_GC;
 #else
-		shell_error(sh, "P2P_CLIENT not available — build with -DSNIPPET=wifi-p2p");
+		shell_error(sh, "P2P_GC not available in this build");
 		return -EINVAL;
 #endif
 	} else {
-		shell_error(sh, "Invalid mode '%s'. Use softap, sta, p2p_go, or p2p_client.", arg);
+		shell_error(sh,
+			    "Invalid mode '%s'. Use "
+#if CONFIG_ZEGO_WIFI_MODE_SOFTAP_ENABLED
+			    "softap, "
+#endif
+			    "sta"
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED
+			    ", p2p_go"
+#endif
+#if CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
+			    ", p2p_gc"
+#endif
+			    ".",
+			    arg);
 		return -EINVAL;
 	}
 
@@ -180,9 +206,25 @@ static int cmd_wifi_mode(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
-SHELL_CMD_ARG_REGISTER(app_wifi_mode, NULL,
-		       "Set Wi-Fi mode and reboot: app_wifi_mode [softap|sta|p2p_go|p2p_client]",
-		       cmd_wifi_mode, 1, 1);
+#if CONFIG_ZEGO_WIFI_MODE_SOFTAP_ENABLED && CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED && CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
+#define _WIFI_MODE_HELP "Set Wi-Fi mode and reboot: app_wifi_mode [softap|sta|p2p_go|p2p_gc]"
+#elif CONFIG_ZEGO_WIFI_MODE_SOFTAP_ENABLED && CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED
+#define _WIFI_MODE_HELP "Set Wi-Fi mode and reboot: app_wifi_mode [softap|sta|p2p_go]"
+#elif CONFIG_ZEGO_WIFI_MODE_SOFTAP_ENABLED && CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
+#define _WIFI_MODE_HELP "Set Wi-Fi mode and reboot: app_wifi_mode [softap|sta|p2p_gc]"
+#elif CONFIG_ZEGO_WIFI_MODE_SOFTAP_ENABLED
+#define _WIFI_MODE_HELP "Set Wi-Fi mode and reboot: app_wifi_mode [softap|sta]"
+#elif CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED && CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
+#define _WIFI_MODE_HELP "Set Wi-Fi mode and reboot: app_wifi_mode [sta|p2p_go|p2p_gc]"
+#elif CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED
+#define _WIFI_MODE_HELP "Set Wi-Fi mode and reboot: app_wifi_mode [sta|p2p_go]"
+#elif CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
+#define _WIFI_MODE_HELP "Set Wi-Fi mode and reboot: app_wifi_mode [sta|p2p_gc]"
+#else
+#define _WIFI_MODE_HELP "Set Wi-Fi mode and reboot: app_wifi_mode [sta]"
+#endif
+
+SHELL_CMD_ARG_REGISTER(zego_wifi_mode, NULL, _WIFI_MODE_HELP, cmd_wifi_mode, 1, 1);
 #endif /* CONFIG_SHELL */
 
 /* ============================================================================
@@ -199,8 +241,8 @@ static int mode_selector_init(void)
 	s_mode = ZEGO_WIFI_MODE_SOFTAP;
 #elif CONFIG_ZEGO_WIFI_DEFAULT_MODE_P2P_GO
 	s_mode = ZEGO_WIFI_MODE_P2P_GO;
-#elif CONFIG_ZEGO_WIFI_DEFAULT_MODE_P2P_CLIENT
-	s_mode = ZEGO_WIFI_MODE_P2P_CLIENT;
+#elif CONFIG_ZEGO_WIFI_DEFAULT_MODE_P2P_GC
+	s_mode = ZEGO_WIFI_MODE_P2P_GC;
 #else
 	s_mode = ZEGO_WIFI_MODE_STA;
 #endif
@@ -223,8 +265,13 @@ static int mode_selector_init(void)
 			valid = false;
 		}
 #endif
-#if !CONFIG_NRF70_P2P_MODE
-		if (s_mode == ZEGO_WIFI_MODE_P2P_GO || s_mode == ZEGO_WIFI_MODE_P2P_CLIENT) {
+#if !CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED
+		if (s_mode == ZEGO_WIFI_MODE_P2P_GO) {
+			valid = false;
+		}
+#endif
+#if !CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
+		if (s_mode == ZEGO_WIFI_MODE_P2P_GC) {
 			valid = false;
 		}
 #endif

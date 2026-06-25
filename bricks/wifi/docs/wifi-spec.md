@@ -34,7 +34,7 @@ projects.  It provides three interlocking responsibilities in a single module:
    on `WIFI_MODE_CHAN` at `SYS_INIT APPLICATION` priority 0 so every network module
    starts in the correct mode.
 
-3. **`app_wifi_mode` shell command** — allows runtime mode switching.  Saves the new
+3. **`zego_wifi_mode` shell command** — allows runtime mode switching.  Saves the new
    mode to NVS, then reboots.  Guarded by `#if CONFIG_SHELL` so it compiles out when
    the shell is disabled.
 
@@ -113,13 +113,13 @@ relevant `CONFIG_*` symbols — SoftAP, P2P, BLE prov, Wi-Fi shell, etc.
 
 ## NVS Persistence
 
-Settings key: `"app/app_wifi_mode"` (uint8_t).
+Settings key: `"app/zego_wifi_mode"` (uint8_t).
 
 | Event | Behaviour |
 |-------|-----------|
 | Key absent (fresh flash) | Default from `ZEGO_APP_MAIN_DEFAULT_WIFI_MODE_*` Kconfig choice |
 | Key present | Loaded in `settings_set_cb`; stored in `static enum zego_wifi_mode s_mode` |
-| Mode changed via shell | `settings_save_one("app/app_wifi_mode", ...)` then `sys_reboot(SYS_REBOOT_COLD)` |
+| Mode changed via shell | `settings_save_one("app/zego_wifi_mode", ...)` then `sys_reboot(SYS_REBOOT_COLD)` |
 
 The storage partition must be large enough for the settings subsystem.  For
 nRF7002DK with Memfault the `storage_partition` is 8 KB — sufficient for this
@@ -132,7 +132,7 @@ single key plus Wi-Fi credentials.
 Available when `CONFIG_SHELL=y`.
 
 ```
-app_wifi_mode [softap|sta|p2p_go|p2p_client]
+zego_wifi_mode [softap|sta|p2p_go|p2p_client]
 ```
 
 - With no argument: prints current mode and usage hint.
@@ -245,7 +245,7 @@ Expected UART output on a clean boot with default STA mode:
 
 Shell command test:
 ```
-uart:~$ app_wifi_mode softap
+uart:~$ zego_wifi_mode softap
 Switching to SoftAP mode -- rebooting...
 ```
 After reboot, `Mode: SoftAP` should appear in the banner.

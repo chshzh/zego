@@ -30,8 +30,8 @@ config ZEGO_WIFI_MODE_SELECTOR
 	help
 	  Automatically enabled when more than one Wi-Fi mode is available
 	  (NRF70_AP_MODE or NRF70_P2P_MODE).  Stores the active mode as a
-	  uint8_t in NVS under "app/app_wifi_mode" and registers the
-	  'app_wifi_mode' shell command.  Changing the enum order in wifi.h
+	  uint8_t in NVS under "app/zego_wifi_mode" and registers the
+	  'zego_wifi_mode' shell command.  Changing the enum order in wifi.h
 	  without erasing NVS will corrupt the stored value.
 	  When disabled (STA-only builds) no NVS or settings access occurs.
 
@@ -41,10 +41,17 @@ if ZEGO_WIFI_MODE_SELECTOR
 
 choice ZEGO_WIFI_DEFAULT_MODE
 	prompt "Default Wi-Fi mode on fresh flash (no NVS key present)"
+	# Pick the fresh-flash default from the modes this build actually exposes,
+	# so a role overlay only needs to set ZEGO_WIFI_MODE_*_ENABLED (not the
+	# default too).  STA is the final fallback (always enabled). Ordering: a
+	# build with exactly one P2P role enabled defaults to it; a build with both
+	# (or neither) falls through to STA.
+	default ZEGO_WIFI_DEFAULT_MODE_P2P_GO if ZEGO_WIFI_MODE_P2P_GO_ENABLED && !ZEGO_WIFI_MODE_P2P_GC_ENABLED
+	default ZEGO_WIFI_DEFAULT_MODE_P2P_GC if ZEGO_WIFI_MODE_P2P_GC_ENABLED && !ZEGO_WIFI_MODE_P2P_GO_ENABLED
 	default ZEGO_WIFI_DEFAULT_MODE_STA
 	help
 	  Selects the mode used when NVS has no stored value (e.g. first boot
-	  after --erase).  The 'app_wifi_mode' shell command can change it at
+	  after --erase).  The 'zego_wifi_mode' shell command can change it at
 	  any time; the board reboots to apply the change.
 
 config ZEGO_WIFI_DEFAULT_MODE_STA
@@ -52,19 +59,57 @@ config ZEGO_WIFI_DEFAULT_MODE_STA
 
 config ZEGO_WIFI_DEFAULT_MODE_SOFTAP
 	bool "SoftAP — create an access point"
-	depends on NRF70_AP_MODE
+	depends on ZEGO_WIFI_MODE_SOFTAP_ENABLED
 
 config ZEGO_WIFI_DEFAULT_MODE_P2P_GO
 	bool "P2P Group Owner (Wi-Fi Direct)"
-	depends on NRF70_P2P_MODE
+	depends on ZEGO_WIFI_MODE_P2P_GO_ENABLED
 
-config ZEGO_WIFI_DEFAULT_MODE_P2P_CLIENT
-	bool "P2P Client — join a peer's P2P group"
-	depends on NRF70_P2P_MODE
+config ZEGO_WIFI_DEFAULT_MODE_P2P_GC
+	bool "P2P GC — join a peer's P2P group as Group Client"
+	depends on ZEGO_WIFI_MODE_P2P_GC_ENABLED
 
 endchoice
 
 endif # ZEGO_WIFI_MODE_SELECTOR
+
+config ZEGO_WIFI_MODE_STA_ENABLED
+	bool "Expose STA as a user-selectable Wi-Fi mode"
+	default y
+	help
+	  When y, STA mode is compiled in and listed in the boot banner and
+	  zego_wifi_mode shell command. Disable only for builds that must not
+	  expose STA to the user (e.g. kiosk P2P-only builds).
+
+config ZEGO_WIFI_MODE_P2P_GO_ENABLED
+	bool "Expose P2P_GO as a user-selectable Wi-Fi mode"
+	depends on NRF70_P2P_MODE
+	default y if NRF70_P2P_MODE
+	help
+	  When y, the P2P_GO mode is compiled in and listed in the boot banner
+	  and zego_wifi_mode shell command. Defaults y when NRF70_P2P_MODE is set.
+
+config ZEGO_WIFI_MODE_P2P_GC_ENABLED
+	bool "Expose P2P_GC (Group Client) as a user-selectable Wi-Fi mode"
+	depends on NRF70_P2P_MODE
+	default y if NRF70_P2P_MODE
+	help
+	  When y, the P2P_GC (Group Client) mode is compiled in and listed in
+	  the boot banner and zego_wifi_mode shell command. Defaults y when
+	  NRF70_P2P_MODE is set.
+
+config ZEGO_WIFI_MODE_SOFTAP_ENABLED
+	bool "Expose SoftAP as a user-selectable Wi-Fi mode"
+	depends on NRF70_AP_MODE
+	default y if NRF70_AP_MODE && !NRF70_P2P_MODE
+	help
+	  When y, the 'zego_wifi_mode softap' shell command and its help text are
+	  compiled in, and the boot banner lists softap as a switchable mode.
+
+	  Defaults to y only when NRF70_AP_MODE is set without NRF70_P2P_MODE,
+	  because P2P mode internally requires NRF70_AP_MODE for its GO path but
+	  does not expose standalone SoftAP to the user.  Enable explicitly in an
+	  overlay when you want both P2P and SoftAP available simultaneously.
 
 config ZEGO_APP_PRD_VERSION
 	string "PRD version this firmware was implemented against"
