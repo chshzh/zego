@@ -289,7 +289,11 @@ void zego_banner_app_extra(void)
 #endif
 
 #if CONFIG_WEBSERVER_MODULE
+#if defined(CONFIG_WEBSERVER_PORT)
 	LOG_INF("  " CLR_BLU "webserver" CLR_RST "         (port: %d)", CONFIG_WEBSERVER_PORT);
+#else
+	LOG_INF("  " CLR_BLU "webserver" CLR_RST);
+#endif
 #endif
 
 	LOG_INF("==============================================");

@@ -363,7 +363,13 @@ static void softap_remind_handler(struct k_work *work)
 	ARG_UNUSED(work);
 	LOG_WRN("SoftAP: no client in %d s  SSID='%s'  Password='%s'  IP=%s",
 		SOFTAP_REMIND_TIMEOUT_S, CONFIG_ZEGO_WIIF_SOFTAP_SSID,
-		CONFIG_ZEGO_WIIF_SOFTAP_PASSWORD, CONFIG_NET_CONFIG_MY_IPV4_ADDR);
+		CONFIG_ZEGO_WIIF_SOFTAP_PASSWORD,
+#if defined(CONFIG_NET_CONFIG_MY_IPV4_ADDR)
+		CONFIG_NET_CONFIG_MY_IPV4_ADDR
+#else
+		"(unconfigured)"
+#endif
+		);
 	k_work_schedule(&softap_remind_work, K_SECONDS(SOFTAP_REMIND_TIMEOUT_S));
 }
 
