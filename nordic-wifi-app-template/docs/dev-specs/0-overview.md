@@ -18,7 +18,7 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-19-12-44 | Updated to PRD v2026-06-19-12-44: FR-103 updated to zego/memonitor brick — spec reference changed from architecture.md to memonitor-spec.md; description updated to heap + thread watermarks. |
-| 2026-06-04-18-00 | Added UX module spec (ux.md); updated spec index and PRD mapping for FR-104/105/106; noted APP_WIFI_STATE_CHAN in architecture summary |
+| 2026-06-04-18-00 | Added UX module spec (ux-module.md); updated spec index and PRD mapping for FR-104/105/106; noted APP_WIFI_STATE_CHAN in architecture summary |
 | 2026-06-04-22-00 | Updated ux.md and PRD for revised SoftAP LED behavior (ROTATE/solid ON) |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK target; updated Target Board(s), architecture.md, and ux.md; added board conf + DTS overlay + hci_ipc netcore conf |
 | 2026-06-09-17-25 | Updated to PRD v2026-06-09-17-25: added FR-107 P2P_CLIENT auto-connect to PRD mapping; network-spec.md updated with auto-connect sequence, new API, Kconfig, test points |
@@ -43,13 +43,13 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 
 | Spec | Covers | PRD sections |
 |---|---|---|
-| [architecture.md](architecture.md) | System overview, module map, Zbus channels, SYS_INIT boot sequence, memory budget | All |
+| [1-architecture.md](1-architecture.md) | System overview, module map, Zbus channels, SYS_INIT boot sequence, memory budget | All |
 | [zego/wifi — wifi-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi/docs/wifi-spec.md) | Startup banner, Wi-Fi mode selector, `zego_wifi_mode` shell command, NVS persistence, weak override hooks | FR-001, FR-006, FR-007 |
 | [zego/network — network-spec.md](https://github.com/chshzh/zego/blob/main/modules/network/docs/network-spec.md) | Wi-Fi event handling, STA/SoftAP/P2P_GO/P2P_CLIENT paths, net event mgmt, `zego_on_net_event_dhcp_bound` weak hook | FR-002–FR-008 |
 | [zego/wifi_ble_prov — wifi-ble-prov-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi_ble_prov/docs/wifi-ble-prov-spec.md) | BLE provisioning (nRF Wi-Fi Provisioner), `WIFI_CHAN` owner, rotating credential reconnect | FR-004 |
 | [zego/button — button-spec.md](https://github.com/chshzh/zego/blob/main/modules/button/docs/button-spec.md) | Gesture detection (click, double-click, long press), `BUTTON_CHAN` | FR-101 |
 | [zego/led — led-spec.md](https://github.com/chshzh/zego/blob/main/modules/led/docs/led-spec.md) | Per-LED state machine (static, blink, breathe, rotate), `LED_CMD_CHAN` | FR-102 |
-| [ux.md](ux.md) | Button 0 gesture map, LED 0 Wi-Fi state machine, `APP_WIFI_STATE_CHAN` definition, BLE prov toggle | FR-104, FR-105, FR-106 |
+| [ux-module.md](ux-module.md) | Button 0 gesture map, LED 0 Wi-Fi state machine, `APP_WIFI_STATE_CHAN` definition, BLE prov toggle | FR-104, FR-105, FR-106 |
 
 ---
 
@@ -78,20 +78,20 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 
 | PRD requirement | Spec file | Status |
 |---|---|---|
-| FR-001 Build | [architecture.md](architecture.md) | Specified |
+| FR-001 Build | [1-architecture.md](1-architecture.md) | Specified |
 | FR-002 STA shell connect | [network-spec.md](../../network/docs/network-spec.md) | Specified |
 | FR-003 STA saved credentials | [network-spec.md](../../network/docs/network-spec.md) | Specified |
 | FR-004 STA BLE provisioning | [wifi-ble-prov-spec.md](../../wifi_ble_prov/docs/wifi-ble-prov-spec.md) | Specified |
 | FR-005 SoftAP mode | [network-spec.md](../../network/docs/network-spec.md) | Specified |
 | FR-006 P2P_GO mode | [network-spec.md](../../network/docs/network-spec.md) | Specified |
 | FR-007 Mode persistence | [wifi-spec.md](../../wifi/docs/wifi-spec.md) | Specified |
-| FR-008 Net event hook | [architecture.md](architecture.md) | Specified |
+| FR-008 Net event hook | [1-architecture.md](1-architecture.md) | Specified |
 | FR-101 Button events | [button-spec.md](../../button/docs/button-spec.md) | Specified |
 | FR-102 LED control | [led-spec.md](../../led/docs/led-spec.md) | Specified |
 | FR-103 Heap + thread watermarks | [zego/memonitor — memonitor-spec.md](https://github.com/chshzh/zego/blob/main/bricks/memonitor/docs/memonitor-spec.md) | Specified |
-| FR-104 Button 0 mode cycle | [ux.md](ux.md) | Specified |
-| FR-105 LED Wi-Fi state feedback | [ux.md](ux.md) | Specified |
-| FR-106 BLE prov double-click | [ux.md](ux.md) | Specified |
+| FR-104 Button 0 mode cycle | [ux-module.md](ux-module.md) | Specified |
+| FR-105 LED Wi-Fi state feedback | [ux-module.md](ux-module.md) | Specified |
+| FR-106 BLE prov double-click | [ux-module.md](ux-module.md) | Specified |
 | FR-107 P2P_CLIENT auto-connect | [network-spec.md](../../network/docs/network-spec.md) | Specified |
 | FR-108 P2P_CLIENT MAC-prefix auto-select | [network-spec.md](../../network/docs/network-spec.md) | Specified |
 
