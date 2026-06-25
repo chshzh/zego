@@ -4,6 +4,13 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
+/* CONFIG_NET_CONFIG_MY_IPV4_ADDR depends on CONFIG_NET_CONFIG_SETTINGS.
+ * Provide a fallback so the P2P_GO / SoftAP code paths compile on apps
+ * that do not enable net_config_init (e.g. memfault project). */
+#ifndef CONFIG_NET_CONFIG_MY_IPV4_ADDR
+#define CONFIG_NET_CONFIG_MY_IPV4_ADDR "192.168.7.1"
+#endif
+
 /*
  * net_event_mgmt.c — unified Wi-Fi / network event management (zego/network)
  *
