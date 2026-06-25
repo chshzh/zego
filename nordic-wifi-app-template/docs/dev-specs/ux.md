@@ -53,7 +53,7 @@ Enable with `CONFIG_APP_UX_MODULE=y`.
 |---------|-----------|--------|-------------|
 | Single click | — | Print current Wi-Fi mode to UART log | Yes |
 | Double-click | `ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS` | Toggle BLE provisioning LED (BREATHE ↔ last Wi-Fi state LED) | nRF54LM20DK only (`CONFIG_ZEGO_WIFI_BLE_PROV=y`) |
-| Long press | `ZEGO_BUTTON_LONG_PRESS_MS` (default 3000 ms) | Cycle mode STA → SoftAP → P2P_GO → STA; save via `settings_save_one("app/app_wifi_mode")`; `sys_reboot(SYS_REBOOT_COLD)` | Yes |
+| Long press | `ZEGO_BUTTON_LONG_PRESS_MS` (default 3000 ms) | Cycle mode STA → SoftAP → P2P_GO → STA; save via `settings_save_one("app/zego_wifi_mode")`; `sys_reboot(SYS_REBOOT_COLD)` | Yes |
 
 > **Long-press acknowledgement**: LED 0 is turned OFF for 300 ms before reboot so the user gets visual confirmation the gesture was registered.
 

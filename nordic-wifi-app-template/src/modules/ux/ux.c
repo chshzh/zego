@@ -92,7 +92,7 @@ static void do_mode_cycle(void)
 	k_sleep(K_MSEC(300));
 
 	uint8_t val = (uint8_t)next;
-	int ret = settings_save_one("app/app_wifi_mode", &val, sizeof(val));
+	int ret = settings_save_one("app/zego_wifi_mode", &val, sizeof(val));
 
 	if (ret) {
 		LOG_ERR("settings_save_one failed (%d) — mode not saved", ret);

@@ -60,7 +60,7 @@ Starting a new nRF7x Wi-Fi project from a blank Zephyr sample requires setting u
 | Startup banner printed | All four modes display correct connection instructions at boot |
 | STA via shell | `wifi connect -s <SSID> -p <pass> -k 1` connects the device |
 | STA via BLE prov (nRF54LM20DK) | nRF Wi-Fi Provisioner app successfully provisions credentials |
-| Mode persists | `app_wifi_mode softap` + reboot brings up SoftAP; mode survives power cycle |
+| Mode persists | `zego_wifi_mode softap` + reboot brings up SoftAP; mode survives power cycle |
 | Net event hook fires | `Wi-Fi connected: mode=... ip=...` logged in UART after connection |
 
 ---
@@ -78,7 +78,7 @@ Starting a new nRF7x Wi-Fi project from a blank Zephyr sample requires setting u
 - [x] **P2P_CLIENT mode** — device auto-connects to a P2P_GO at boot using `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC`:
   - **Exact MAC** (e.g. `F4:CE:36:00:AE:EC`): connects directly to that specific GO; no discovery scan; retries every 90 s; reconnects after 15 s on disconnect; static IP 192.168.7.2/24
   - **MAC prefix** (last 3 bytes = `00:00:00`, e.g. `F4:CE:36:00:00:00`): scans for all P2P GOs whose MAC starts with that 3-byte prefix, then connects to the one with the strongest RSSI; same retry/reconnect logic as exact-MAC mode
-- [x] **Runtime mode switching** — `app_wifi_mode [sta|softap|p2p_go|p2p_client]` saves to NVS and reboots
+- [x] **Runtime mode switching** — `zego_wifi_mode [sta|softap|p2p_go|p2p_client]` saves to NVS and reboots
 - [x] **Default mode on fresh flash**: P2P_GO
 
 ### 2.2 Buttons & LEDs
@@ -121,7 +121,7 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 ### 2.4 Developer Features
 
 - [x] **Startup banner** — app name, version, PRD version, specs version, build date, board, MAC, active mode, connection instructions, compiled module list
-- [x] **Shell commands** — `app_wifi_mode`, `wifi connect`, `wifi cred`, `wifi scan`, `wifi status`, `wifi p2p find/peer/connect`
+- [x] **Shell commands** — `zego_wifi_mode`, `wifi connect`, `wifi cred`, `wifi scan`, `wifi status`, `wifi p2p find/peer/connect`
 - [x] **Heap monitor** — periodic heap high-water mark logging (configurable interval)
 
 ---
@@ -136,9 +136,9 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 | FR-002 | developer | connect in STA mode via the shell | I can verify basic Wi-Fi connectivity | `wifi connect -s <SSID> -p <pass> -k 1` → DHCP IP logged |
 | FR-003 | developer | connect in STA mode with saved credentials | Credentials survive reboot | `wifi cred add` → power cycle → auto-reconnect |
 | FR-004 | developer | connect in STA mode via BLE provisioning (nRF54LM20DK) | No serial shell needed for provisioning | nRF Wi-Fi Provisioner app pushes credentials → device connects |
-| FR-005 | developer | switch to SoftAP mode and have up to 3 clients connect | I can test AP mode with multiple devices | (1) `app_wifi_mode softap` + reboot → up to 3 clients can join `192.168.7.1` simultaneously; (2) a 4th client is rejected by the AP; (3) on every client connect event the TODO log line clearly states the current count, e.g. `AP client connected: now 2/3 devices connected`; (4) on every client disconnect event the TODO log line clearly states remaining count, e.g. `AP client disconnected: now 1/3 devices connected` |
+| FR-005 | developer | switch to SoftAP mode and have up to 3 clients connect | I can test AP mode with multiple devices | (1) `zego_wifi_mode softap` + reboot → up to 3 clients can join `192.168.7.1` simultaneously; (2) a 4th client is rejected by the AP; (3) on every client connect event the TODO log line clearly states the current count, e.g. `AP client connected: now 2/3 devices connected`; (4) on every client disconnect event the TODO log line clearly states remaining count, e.g. `AP client disconnected: now 1/3 devices connected` |
 | FR-006 | developer | switch to P2P_GO mode | Device auto-starts P2P group at boot | P2P group created at boot; WPS PBC armed; another DK running P2P_CLIENT mode connects within ~30 s; phone-as-P2P-client is not supported |
-| FR-007 | developer | have mode persist across power cycles | I don't re-enter mode on every boot | `app_wifi_mode X` + power cycle → mode X at next boot |
+| FR-007 | developer | have mode persist across power cycles | I don't re-enter mode on every boot | `zego_wifi_mode X` + power cycle → mode X at next boot |
 | FR-008 | developer | see connection events in `net_event_app.c` | I have a clear hook to start my application logic | `zego_on_net_event_dhcp_bound()` called with correct `mode`, `ip_addr`, `mac_addr`, `ssid` |
 
 ### P1 — Should Have
@@ -151,7 +151,7 @@ All buttons publish `BUTTON_CHAN` events. All LEDs accept `LED_CMD_CHAN` command
 | FR-104 | evaluator | cycle Wi-Fi mode with a long button press | I can switch modes without a UART shell | Button 0 held ≥ 3 s → next mode saved to NVS → device reboots into new mode |
 | FR-105 | evaluator | see Wi-Fi connection state on LED 0 | I can tell at a glance whether the device is connected | ROTATE while connecting → solid ON when connected (STA/P2P) / ROTATE when SoftAP up with no clients / solid ON when SoftAP client connected / breathe in BLE prov / fast blink on error; on nRF5340 Audio DK ROTATE uses RGB2 only ([3,4,5]) and connected state shows solid green on RGB2 (index 4) |
 | FR-106 | evaluator | toggle BLE provisioning with a double-click (nRF54LM20DK) | I can enter/exit provisioning mode without the shell | Double-click on Button 0 toggles BLE provisioning advertising |
-| FR-107 | developer | switch to P2P_CLIENT mode and have the device auto-connect to a known P2P_GO | I can test P2P client mode without manual shell commands | (1) `app_wifi_mode p2p_client` + reboot → device logs "auto-connecting to GO <MAC>"; (2) WPS PBC `--join` attempted directly (no discovery scan) → if GO is reachable, static IP 192.168.7.2/24 is assigned and `zego_on_net_event_dhcp_bound()` is called within ~30 s; (3) if GO not reachable, retry every 90 s automatically; (4) on disconnect, device waits 15 s then reconnects |
+| FR-107 | developer | switch to P2P_CLIENT mode and have the device auto-connect to a known P2P_GO | I can test P2P client mode without manual shell commands | (1) `zego_wifi_mode p2p_client` + reboot → device logs "auto-connecting to GO <MAC>"; (2) WPS PBC `--join` attempted directly (no discovery scan) → if GO is reachable, static IP 192.168.7.2/24 is assigned and `zego_on_net_event_dhcp_bound()` is called within ~30 s; (3) if GO not reachable, retry every 90 s automatically; (4) on disconnect, device waits 15 s then reconnects |
 | FR-108 | developer | configure P2P_CLIENT with a MAC prefix (last 3 bytes = 00:00:00) to auto-select the strongest nearby P2P_GO | I can deploy multiple interchangeable GO DKs without recompiling for each MAC | (1) `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC="F4:CE:36:00:00:00"` → device detects prefix mode at boot; (2) P2P peer discovery runs and collects all GOs whose MAC starts with `F4:CE:36`; (3) device connects to the GO with the highest RSSI using WPS PBC `--join`; (4) on failure or disconnect, re-scans and picks the best RSSI again; (5) exact-MAC mode (`F4:CE:36:00:AE:EC`) is unaffected |
 
 ---

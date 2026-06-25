@@ -21,7 +21,7 @@
 
 - **Four Wi-Fi modes (STA, SoftAP, P2P_GO, P2P_CLIENT)** — covers every nRF7x connectivity scenario; mode is selected at runtime, not at build time.
 - **Three STA provisioning methods** — shell `wifi connect` for one-off testing, `wifi cred add` for saved auto-connect credentials, and BLE provisioning via the *nRF Wi-Fi Provisioner* phone app (no USB cable required).
-- **Runtime mode switching with `app_wifi_mode`** — persisted in NVS flash; survives power cycles so the device reconnects in the same mode after reboot.
+- **Runtime mode switching with `zego_wifi_mode`** — persisted in NVS flash; survives power cycles so the device reconnects in the same mode after reboot.
 - **Button and LED channels (`BUTTON_CHAN`, `LED_CMD_CHAN`)** — Zbus channels wired up and ready for application logic immediately.
 - **LED 0 Wi-Fi state feedback** — ROTATE while connecting, solid ON when connected, BREATHE during BLE provisioning, fast blink on error; works the same across all three boards.
 - **Button 0 gesture UX** — single-click prints Wi-Fi status to UART; long press (≥ 3 s) cycles modes; double-click toggles BLE provisioning advertising (nRF54LM20DK only).
@@ -86,7 +86,7 @@ The firmware then starts the Wi-Fi subsystem and LED 0 begins ROTATING. Connecti
     - **MAC-prefix** (`F4:CE:36:00:00:00` — last 3 bytes = `00:00:00`): runs a 10 s social-channel scan, then queries the wpa_supplicant peer table; connects to the GO with the strongest RSSI that matches the 3-byte OUI prefix; useful for multi-GO deployments where all GOs share the same manufacturer OUI.
   - **Manual**: run `wifi p2p find`, then `wifi p2p peer` to list discovered peers, then `wifi p2p connect <GO-MAC> pbc --join`.
 
-Switch mode with `app_wifi_mode [sta|softap|p2p_go|p2p_client]` — the device reboots into the new mode and persists the setting.
+Switch mode with `zego_wifi_mode [sta|softap|p2p_go|p2p_client]` — the device reboots into the new mode and persists the setting.
 
 **2. Buttons & LEDs**
 
@@ -175,7 +175,7 @@ nordic-wifi-app-template/
 External zego bricks (referenced via `EXTRA_ZEPHYR_MODULES` in `CMakeLists.txt`):
 
 ```text
-../bricks/wifi/          ← Wi-Fi mode selector, NVS persistence, `app_wifi_mode` shell command
+../bricks/wifi/          ← Wi-Fi mode selector, NVS persistence, `zego_wifi_mode` shell command
 ../bricks/network/       ← Wi-Fi event dispatcher, DHCP handling, `zego_on_net_event_wifi_*` callbacks
 ../bricks/button/        ← GPIO debounce, BUTTON_CHAN publish
 ../bricks/led/           ← LED_CMD_CHAN subscriber, ROTATE/BLINK/BREATHE effects
@@ -301,7 +301,7 @@ The tag format is `v<ncs-version>.<build>` (e.g. `v3.3.0.1`). Major/minor/patch 
 
 ### Developer Notes
 
-- **Default mode on fresh flash is P2P_GO.** Switch to STA with `app_wifi_mode sta` before running `wifi connect`. The current mode is always printed in the startup banner.
+- **Default mode on fresh flash is P2P_GO.** Switch to STA with `zego_wifi_mode sta` before running `wifi connect`. The current mode is always printed in the startup banner.
 - **BLE provisioning is disabled by default on nRF7002DK and nRF5340 Audio DK** due to 1 MB flash constraints. Use the `overlay-nrf5340-wifi-ble-prov.conf` overlay to enable it; this disables P2P to recover flash headroom. On nRF54LM20DK (2 MB), BLE provisioning is on by default.
 - **NVS erase resets everything.** `--erase` (nRF7002DK / nRF5340 Audio DK) and `--recover` (nRF54LM20DK) wipe NVS — the device wakes in P2P_GO mode and Wi-Fi credentials must be re-entered.
 - **nRF5340 Audio DK LED ROTATE** uses only RGB1 (channels idx 0–2) so RGB2 and the mono LEDs stay available for application use.
@@ -335,9 +335,9 @@ The tag format is `v<ncs-version>.<build>` (e.g. `v3.3.0.1`). Major/minor/patch 
 
   **How to get representative watermarks:** Exercise all modes in one session before reading peak values. A typical sequence:
   1. Boot in SoftAP → connect 3 clients → disconnect one by one
-  2. Switch to STA (`app_wifi_mode sta`) → `wifi connect` → `wifi disconnect`
-  3. Switch to P2P_GO (`app_wifi_mode p2p_go`) → connect DK client
-  4. Switch to P2P_CLIENT (`app_wifi_mode p2p_client`) → `wifi p2p connect <GO MAC> pbc --join`
+  2. Switch to STA (`zego_wifi_mode sta`) → `wifi connect` → `wifi disconnect`
+  3. Switch to P2P_GO (`zego_wifi_mode p2p_go`) → connect DK client
+  4. Switch to P2P_CLIENT (`zego_wifi_mode p2p_client`) → `wifi p2p connect <GO MAC> pbc --join`
 
   ZView accumulates **high-water marks** (HWM) across the session — the peaks shown after this full cycle represent worst-case usage across all modes.
 
@@ -385,7 +385,7 @@ The full design documentation lives under `docs/`. Start with [docs/dev-specs/ov
 | [docs/dev-specs/overview.md](docs/dev-specs/overview.md) | **Start here** — technical spec index, PRD-to-spec mapping, architecture summary, design decisions |
 | [docs/dev-specs/architecture.md](docs/dev-specs/architecture.md) | System architecture — module map, Zbus channels, SYS_INIT boot sequence, memory budget |
 | [docs/dev-specs/ux.md](docs/dev-specs/ux.md) | UX spec — button gesture state machine, LED effect definitions per Wi-Fi state |
-| [zego/wifi ↗](https://github.com/chshzh/zego/blob/main/bricks/wifi/docs/wifi-spec.md) | Wi-Fi mode selector — NVS persistence, `app_wifi_mode` command, mode lifecycle |
+| [zego/wifi ↗](https://github.com/chshzh/zego/blob/main/bricks/wifi/docs/wifi-spec.md) | Wi-Fi mode selector — NVS persistence, `zego_wifi_mode` command, mode lifecycle |
 | [zego/network ↗](https://github.com/chshzh/zego/blob/main/bricks/network/docs/network-spec.md) | Network module — Wi-Fi event dispatch, DHCP handling, callback contract |
 | [zego/wifi_ble_prov ↗](https://github.com/chshzh/zego/blob/main/bricks/wifi_ble_prov/docs/wifi-ble-prov-spec.md) | BLE provisioning — GATT service, credential storage, nRF Wi-Fi Provisioner integration |
 | [zego/button ↗](https://github.com/chshzh/zego/blob/main/bricks/button/docs/button-spec.md) | Button module — GPIO debounce, BUTTON_CHAN publish, gesture detection |

@@ -50,7 +50,7 @@ All feature modules are provided by the `zego/` shared library. The template reg
 
 | Module dir | Kconfig symbol | Provides |
 |---|---|---|
-| `zego/wifi` | `CONFIG_ZEGO_WIFI` | Startup banner, Wi-Fi mode selector, `app_wifi_mode` shell command, NVS persistence |
+| `zego/wifi` | `CONFIG_ZEGO_WIFI` | Startup banner, Wi-Fi mode selector, `zego_wifi_mode` shell command, NVS persistence |
 | `zego/network` | `CONFIG_ZEGO_NETWORK` | Wi-Fi event management (STA / SoftAP / P2P_GO / P2P_CLIENT), DHCP, net mgmt callbacks, weak-hook API |
 | `zego/button` | `CONFIG_ZEGO_BUTTON` | GPIO button driver, gesture detection, `BUTTON_CHAN` publisher |
 | `zego/led` | `CONFIG_ZEGO_LED` | Per-LED state machine, `LED_CMD_CHAN` subscriber |
@@ -142,9 +142,9 @@ Modules initialise in priority order. Lower numbers run first.
 Implemented entirely in `zego/wifi`. See [zego/wifi — wifi-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi/docs/wifi-spec.md) for full details.
 
 **Summary:**
-- NVS settings key: `"app/app_wifi_mode"` (uint8_t)
+- NVS settings key: `"app/zego_wifi_mode"` (uint8_t)
 - Default on fresh flash: `ZEGO_WIFI_MODE_P2P_GO` (2)
-- Shell command: `uart:~$ app_wifi_mode [sta|softap|p2p_go|p2p_client]`
+- Shell command: `uart:~$ zego_wifi_mode [sta|softap|p2p_go|p2p_client]`
 - Mode is written to NVS immediately; takes effect on next reboot
 
 ---
@@ -225,7 +225,7 @@ actual zego directory (e.g. `../../zego/modules/button`).
           └──────────┬──────────────┘
                      │ read/write
           ┌──────────▼──────────────┐
-          │       zego/wifi         │◄── uart: app_wifi_mode command
+          │       zego/wifi         │◄── uart: zego_wifi_mode command
           │  (mode selector +       │
           │   startup banner)       │
           └──────────┬──────────────┘

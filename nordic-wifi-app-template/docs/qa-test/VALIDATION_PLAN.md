@@ -75,7 +75,7 @@ button log, heap log.
 1. Open UART on board. Capture boot log. Verify banner `Nordic Wi-Fi App Template` printed.
 2. Switch to STA mode and reboot:
    ```
-   app_wifi_mode sta
+   zego_wifi_mode sta
    ```
 3. After reboot, connect to AP:
    ```
@@ -114,7 +114,7 @@ mode persists across reboot. Long-press mode cycle.
 
 1. Switch to SoftAP mode:
    ```
-   app_wifi_mode softap
+   zego_wifi_mode softap
    ```
    Board reboots. Verify log: `SoftAP: connect to ...` banner.
 2. **[HUMAN]** Observe LED 0: should ROTATE (AP up, no clients) ← TC-012
@@ -161,7 +161,7 @@ mode persists across reboot. Long-press mode cycle.
 
 1. On nRF7002DK: switch to P2P_GO mode:
    ```
-   app_wifi_mode p2p_go
+   zego_wifi_mode p2p_go
    ```
    After reboot, capture boot log. Note the MAC address printed in banner:
    `P2P_GO mode: group up, PBC armed - this DK's MAC: XX:XX:XX:XX:XX:XX`
@@ -169,7 +169,7 @@ mode persists across reboot. Long-press mode cycle.
 2. Verify nRF7002DK log: P2P group created at boot; WPS PBC armed ← TC-006 (partial)
 3. On nRF54LM20DK: set `TARGET_GO_MAC` to `<GO_MAC>` and switch to P2P_CLIENT:
    ```
-   app_wifi_mode p2p_client
+   zego_wifi_mode p2p_client
    ```
    > **Note**: `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` is a build-time Kconfig. If the
    > current build has a different MAC configured, use the shell `wifi p2p connect <GO_MAC> pbc --join`
