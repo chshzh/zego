@@ -12,7 +12,7 @@
  *   DOUBLE_CLICK  Toggle BLE provisioning LED (BREATHE ↔ last Wi-Fi state).
  *                 (Full BLE adv toggle requires CONFIG_ZEGO_WIFI_BLE_PROV=y
  *                  and a future zego_wifi_ble_prov_advertise() API.)
- *   LONG_PRESS    Cycle Wi-Fi mode STA → SoftAP → P2P_GO → P2P_CLIENT → STA,
+ *   LONG_PRESS    Cycle Wi-Fi mode STA → SoftAP → P2P_GO → P2P_GC → STA,
  *                 save to NVS via settings, reboot.
  *
  * LED 0 state machine driven by APP_WIFI_STATE_CHAN:
@@ -49,7 +49,7 @@ static const enum zego_wifi_mode mode_cycle[] = {
 	ZEGO_WIFI_MODE_STA,
 	ZEGO_WIFI_MODE_SOFTAP,
 	ZEGO_WIFI_MODE_P2P_GO,
-	ZEGO_WIFI_MODE_P2P_CLIENT,
+	ZEGO_WIFI_MODE_P2P_GC,
 };
 
 static const char *mode_name(enum zego_wifi_mode m)
@@ -61,7 +61,7 @@ static const char *mode_name(enum zego_wifi_mode m)
 		return "softap";
 	case ZEGO_WIFI_MODE_P2P_GO:
 		return "p2p_go";
-	case ZEGO_WIFI_MODE_P2P_CLIENT:
+	case ZEGO_WIFI_MODE_P2P_GC:
 		return "p2p_client";
 	default:
 		return "unknown";
