@@ -121,46 +121,46 @@ void wifi_p2p_go_cancel_wps_timer(void);
 void wifi_p2p_go_rearm_wps_pin(void);
 
 /**
- * @brief Start P2P_CLIENT mode.
+ * @brief Start P2P_GC mode.
  *
- * If CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC is set, automatically initiates
+ * If CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC is set, automatically initiates
  * 'wifi p2p connect <MAC> pbc --join', retrying every 10 s until success.
  * Otherwise prints manual-connect instructions and returns.
  *
  * @return 0 on success, negative error code on failure.
  */
-int wifi_run_p2p_client_mode(void);
+int wifi_run_p2p_gc_mode(void);
 
 /**
- * @brief Notify P2P_CLIENT auto-connect of a CONNECT_RESULT event.
+ * @brief Notify P2P_GC auto-connect of a CONNECT_RESULT event.
  *
- * Call from the CONNECT_RESULT handler for P2P_CLIENT mode:
+ * Call from the CONNECT_RESULT handler for P2P_GC mode:
  *   - success=true  → cancel retry work
  *   - success=false → schedule next attempt in 10 s
  *
- * No-op if CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC is empty (manual mode).
+ * No-op if CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC is empty (manual mode).
  *
  * @param success true if CONNECT_RESULT status == 0, false otherwise.
  */
-void wifi_p2p_client_on_connect_result(bool success);
+void wifi_p2p_gc_on_connect_result(bool success);
 
 /**
- * @brief Notify P2P_CLIENT auto-connect of a DISCONNECT_RESULT event.
+ * @brief Notify P2P_GC auto-connect of a DISCONNECT_RESULT event.
  *
  * Resets the connected + pending flags and schedules a reconnect attempt
- * in 5 s so the CLIENT re-joins the GO automatically after link loss.
+ * in 5 s so the GC re-joins the GO automatically after link loss.
  *
- * No-op if CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC is empty or if the
- * CLIENT was not connected.
+ * No-op if CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC is empty or if the
+ * GC was not connected.
  */
-void wifi_p2p_client_on_disconnect(void);
+void wifi_p2p_gc_on_disconnect(void);
 
 /**
- * @brief Notify P2P_CLIENT that a P2P peer was found during the pre-discovery scan.
+ * @brief Notify P2P_GC that a P2P peer was found during the pre-discovery scan.
  *
  * Called from the NET_EVENT_WIFI_P2P_DEVICE_FOUND handler.
  *
- * In **exact-MAC mode**: if @p mac matches CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC,
+ * In **exact-MAC mode**: if @p mac matches CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC,
  * immediately cancels the find phase and schedules WIFI_P2P_CONNECT.
  *
  * In **prefix mode** (last 3 bytes of target MAC are 00:00:00): accumulates all
@@ -170,10 +170,10 @@ void wifi_p2p_client_on_disconnect(void);
  * @param mac  6-byte P2P device address from the discovery event.
  * @param rssi Signal strength reported in the discovery event (dBm).
  */
-void wifi_p2p_client_on_peer_found(const uint8_t *mac, int8_t rssi);
+void wifi_p2p_gc_on_peer_found(const uint8_t *mac, int8_t rssi);
 
 /**
- * @brief Assign a static IP (192.168.7.2/24) to the P2P_CLIENT Wi-Fi interface.
+ * @brief Assign a static IP (192.168.7.2/24) to the P2P_GC Wi-Fi interface.
  *
  * Assigns the fixed client address for the P2P group (192.168.7.0/24) hosted
  * by the P2P_GO (192.168.7.1).  Removes any pre-existing address at that
@@ -182,6 +182,6 @@ void wifi_p2p_client_on_peer_found(const uint8_t *mac, int8_t rssi);
  * @param iface The Wi-Fi interface pointer from the CONNECT_RESULT callback.
  * @return 0 on success, negative errno on failure.
  */
-int wifi_p2p_client_setup_static_ip(struct net_if *iface);
+int wifi_p2p_gc_setup_static_ip(struct net_if *iface);
 
 #endif /* WIFI_UTILS_H */

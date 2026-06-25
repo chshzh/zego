@@ -71,19 +71,19 @@ endmenu # "SoftAP Configuration"
 # P2P Client Configuration
 # ---------------------------------------------------------------------------
 
-menu "P2P Client Configuration"
+menu "P2P GC Configuration"
 depends on WIFI_NM_WPA_SUPPLICANT_P2P
 
-config ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC
-	string "P2P_CLIENT: target GO MAC for auto-connect"
+config ZEGO_WIFI_P2P_GC_TARGET_GO_MAC
+	string "P2P_GC: target GO MAC for auto-connect"
 	default ""
 	help
-	  When non-empty (e.g. "F4:CE:36:00:6E:B1"), P2P_CLIENT mode
+	  When non-empty (e.g. "F4:CE:36:00:6E:B1"), P2P_GC mode
 	  automatically runs 'wifi p2p connect <MAC> pbc --join' at boot,
 	  retrying every 10 s until CONNECT_RESULT: success.
 	  Leave empty to connect manually via the shell.
 
-endmenu # "P2P Client Configuration"
+endmenu # "P2P GC Configuration"
 
 # ---------------------------------------------------------------------------
 # mDNS / DNS-SD
@@ -98,14 +98,14 @@ config ZEGO_NETWORK_MDNS
 	help
 	  Enables the Zephyr mDNS responder so the device is reachable as
 	  <hostname>.local on any active Wi-Fi interface (SoftAP, STA,
-	  P2P_GO, P2P_CLIENT). No application code required — enabling this
+	  P2P_GO, P2P_GC). No application code required — enabling this
 	  option and setting CONFIG_NET_HOSTNAME in prj.conf is sufficient.
 
 	  Mode notes:
 	    SoftAP / P2P_GO  — works immediately; device IP is 192.168.7.1
 	    STA              — works after DHCP; requires router to pass mDNS
 	                       multicast (home routers usually do)
-	    P2P_CLIENT       — advertised but phone-as-GO rarely forwards mDNS
+	    P2P_GC           — advertised but phone-as-GO rarely forwards mDNS
 	                       multicast; direct IP is the reliable fallback
 
 	  The hostname is taken from CONFIG_NET_HOSTNAME.  When this option is

@@ -41,7 +41,7 @@
  *                       reliable as long as a client is connected.
  *   STA              — depends on the router forwarding mDNS multicast;
  *                       home routers usually do, enterprise APs sometimes block it.
- *   P2P_CLIENT       — advertised, but the phone acting as GO rarely forwards
+ *   P2P_GC           — advertised, but the phone acting as GO rarely forwards
  *                       mDNS multicast; direct IP access is the reliable fallback.
  */
 

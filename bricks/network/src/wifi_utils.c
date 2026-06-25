@@ -249,9 +249,11 @@ static bool dhcp_server_started;
 int wifi_setup_dhcp_server(void)
 {
 	struct net_if *iface;
-	struct in_addr pool_start;
 	struct in_addr gw_addr, netmask;
+#if IS_ENABLED(CONFIG_NET_DHCPV4_SERVER)
+	struct in_addr pool_start;
 	int ret;
+#endif
 
 	LOG_INF("DHCP server setup starting...");
 
@@ -282,6 +284,7 @@ int wifi_setup_dhcp_server(void)
 	net_if_ipv4_set_netmask_by_addr(iface, &gw_addr, &netmask);
 	LOG_INF("Static IP %s/24 assigned to Wi-Fi interface", CONFIG_NET_CONFIG_MY_IPV4_ADDR);
 
+#if IS_ENABLED(CONFIG_NET_DHCPV4_SERVER)
 	ret = zsock_inet_pton(AF_INET, "192.168.7.2", &pool_start);
 	if (ret != 1) {
 		LOG_ERR("Invalid DHCP pool start address");
@@ -300,15 +303,18 @@ int wifi_setup_dhcp_server(void)
 
 	dhcp_server_started = true;
 	LOG_INF("DHCP server started with pool starting at 192.168.7.2");
+#else
+	LOG_WRN("DHCP server not compiled in — skipping server start");
+#endif
 	return 0;
 }
 
 /* ============================================================================
- * P2P_CLIENT STATIC IP
+ * P2P_GC STATIC IP
  * ============================================================================
  */
 
-int wifi_p2p_client_setup_static_ip(struct net_if *iface)
+int wifi_p2p_gc_setup_static_ip(struct net_if *iface)
 {
 	struct in_addr client_ip, netmask, cfg_ip;
 
@@ -332,13 +338,13 @@ int wifi_p2p_client_setup_static_ip(struct net_if *iface)
 	struct net_if_addr *ifaddr = net_if_ipv4_addr_add(iface, &client_ip, NET_ADDR_MANUAL, 0);
 
 	if (!ifaddr) {
-		LOG_ERR("P2P_CLIENT: failed to assign 192.168.7.2/24 to %s",
+		LOG_ERR("P2P_GC: failed to assign 192.168.7.2/24 to %s",
 			net_if_get_device(iface) ? net_if_get_device(iface)->name : "?");
 		return -EINVAL;
 	}
 
 	net_if_ipv4_set_netmask_by_addr(iface, &client_ip, &netmask);
-	LOG_INF("P2P_CLIENT: static IP 192.168.7.2/24 assigned to %s",
+	LOG_INF("P2P_GC: static IP 192.168.7.2/24 assigned to %s",
 		net_if_get_device(iface) ? net_if_get_device(iface)->name : "?");
 	return 0;
 }
@@ -612,26 +618,26 @@ void wifi_p2p_go_rearm_wps_pin(void)
 #endif /* CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P && CONFIG_WIFI_NM_WPA_SUPPLICANT_WPS */
 
 /* ============================================================================
- * P2P_CLIENT AUTO-CONNECT
+ * P2P_GC AUTO-CONNECT
  * ============================================================================
  *
- * When CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC is a non-empty string, P2P_CLIENT
+ * When CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC is a non-empty string, P2P_GC
  * automatically runs 'wifi p2p connect <MAC> pin 12345678 --join' at boot and reconnects
  * automatically whenever the P2P group is lost.
  *
  * Connect / retry flow:
- *   - p2p_client_do_connect() fires when the retry timer expires.
- *   - A "pending connect" flag (p2p_client_pending) prevents sending a new connect
+ *   - p2p_gc_do_connect() fires when the retry timer expires.
+ *   - A "pending connect" flag (p2p_gc_pending) prevents sending a new connect
  *     command while one is already in-flight, avoiding "scan already in progress"
  *     errors from wpa_supplicant.
  *   - If net_mgmt returns 0 (command accepted): set pending, wait for CONNECT_RESULT.
- *       success  → wifi_p2p_client_on_connect_result(true)  → cancel retries
+ *       success  → wifi_p2p_gc_on_connect_result(true)  → cancel retries
  *       No success after 30 s → retry timer fires, clears pending, tries again.
  *   - If net_mgmt returns error (rejected): reschedule immediately.
  *
  * Disconnect / reconnect flow:
- *   - wifi_p2p_client_on_disconnect() is called from the DISCONNECT_RESULT handler.
- *   - Resets p2p_client_connected + p2p_client_pending.
+ *   - wifi_p2p_gc_on_disconnect() is called from the DISCONNECT_RESULT handler.
+ *   - Resets p2p_gc_connected + p2p_gc_pending.
  *   - Schedules a reconnect attempt in 5 s.
  *
  * The connect runs on a dedicated 4 KB work queue (net_mgmt P2P connect can
@@ -644,11 +650,11 @@ void wifi_p2p_go_rearm_wps_pin(void)
 K_THREAD_STACK_DEFINE(p2p_cli_workq_stack, P2P_CLI_WORKQ_STACK_SIZE);
 static struct k_work_q p2p_cli_workq;
 static bool p2p_cli_workq_started;
-static struct k_work_delayable p2p_client_retry_work;
-static bool p2p_client_connected;
-static bool p2p_client_pending; /* connect cmd accepted, waiting for result */
-static bool p2p_find_running;   /* WIFI_P2P_FIND is currently active */
-static bool p2p_go_found;       /* target GO was found during pre-discovery */
+static struct k_work_delayable p2p_gc_retry_work;
+static bool p2p_gc_connected;
+static bool p2p_gc_pending;   /* connect cmd accepted, waiting for result */
+static bool p2p_find_running; /* WIFI_P2P_FIND is currently active */
+static bool p2p_go_found;     /* target GO was found during pre-discovery */
 
 /* wpa_supplicant --join makes exactly P2P_MAX_JOIN_SCAN_ATTEMPTS (10) scan
  * attempts, each ~4.6 s + 1 s retry gap, then emits GROUP_FORMATION_FAILURE
@@ -657,7 +663,7 @@ static bool p2p_go_found;       /* target GO was found during pre-discovery */
  * T≈63 s → GROUP_FORMATION_FAILURE at T≈64 s.
  * 90 s > 64 s, so wpa_supplicant has been idle ≥ 26 s before we restart,
  * guaranteeing no "scan already in progress" on the fresh P2P_CONNECT. */
-#define P2P_CLIENT_CONNECT_TIMEOUT_S 90
+#define P2P_GC_CONNECT_TIMEOUT_S 90
 
 /* Prefix-mode find window: social-channel scan duration.  After this elapses
  * we stop the find and query the wpa_supplicant peer table directly.
@@ -670,36 +676,52 @@ static bool p2p_go_found;       /* target GO was found during pre-discovery */
 /* Size of the local peer-query buffer used after P2P_FIND completes. */
 #define P2P_PREFIX_MAX_CANDIDATES 5
 
+/* Parse "AA:BB:CC:DD:EE:FF" into 6 bytes. Returns true on success.
+ * Note: newlib-nano's sscanf does not implement the "hh" length modifier,
+ * so "%hhx" silently fails to convert. Parse into unsigned int with "%x"
+ * (supported) and narrow to uint8_t. */
+static bool parse_mac6(const char *s, uint8_t out[6])
+{
+	unsigned int v[6];
+
+	if (sscanf(s, "%x:%x:%x:%x:%x:%x", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) != 6) {
+		return false;
+	}
+	for (int i = 0; i < 6; i++) {
+		out[i] = (uint8_t)v[i];
+	}
+	return true;
+}
+
 /* Return true if the target GO MAC ends in :00:00:00 (prefix mode). */
 static bool p2p_is_prefix_mode(void)
 {
-	const char *s = CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC;
+	const char *s = CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC;
 	uint8_t b[6];
 
-	if (sscanf(s, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) !=
-	    6) {
+	if (!parse_mac6(s, b)) {
 		return false;
 	}
 	return (b[3] == 0 && b[4] == 0 && b[5] == 0);
 }
 
-static void p2p_client_do_connect(struct k_work *work)
+static void p2p_gc_do_connect(struct k_work *work)
 {
-	if (p2p_client_connected) {
+	if (p2p_gc_connected) {
 		return;
 	}
 
-	if (p2p_client_pending) {
+	if (p2p_gc_pending) {
 		/* 90 s with no CONNECT_RESULT: wpa_supplicant exhausted its 10
 		 * join-scan attempts and is now idle.  Reset all state and retry. */
-		LOG_INF("P2P_CLIENT: %ds Timeout, and GO not found - restarting P2P connect",
-			P2P_CLIENT_CONNECT_TIMEOUT_S);
-		p2p_client_pending = false;
+		LOG_INF("P2P_GC: %ds Timeout, and GO not found - restarting P2P connect",
+			P2P_GC_CONNECT_TIMEOUT_S);
+		p2p_gc_pending = false;
 		p2p_go_found = false;
 		p2p_find_running = false;
 	}
 
-	const char *mac_str = CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC;
+	const char *mac_str = CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC;
 
 	if (mac_str[0] == '\0') {
 		return;
@@ -708,7 +730,7 @@ static void p2p_client_do_connect(struct k_work *work)
 	struct net_if *iface = net_if_get_first_wifi();
 
 	if (!iface) {
-		LOG_ERR("P2P_CLIENT: no Wi-Fi iface, retry in 10 s");
+		LOG_ERR("P2P_GC: no Wi-Fi iface, retry in 10 s");
 		k_work_reschedule_for_queue(&p2p_cli_workq, k_work_delayable_from_work(work),
 					    K_SECONDS(10));
 		return;
@@ -730,14 +752,14 @@ static void p2p_client_do_connect(struct k_work *work)
 					   sizeof(find_params));
 
 			if (ret) {
-				LOG_WRN("P2P_CLIENT: prefix find failed (%d), retry in 10 s", ret);
+				LOG_WRN("P2P_GC: prefix find failed (%d), retry in 10 s", ret);
 				k_work_reschedule_for_queue(&p2p_cli_workq,
 							    k_work_delayable_from_work(work),
 							    K_SECONDS(10));
 				return;
 			}
 			p2p_find_running = true;
-			LOG_INF("P2P_CLIENT: prefix mode %c%c:%c%c:%c%c:* - peer discovery (%d s)",
+			LOG_INF("P2P_GC: prefix mode %c%c:%c%c:%c%c:* - peer discovery (%d s)",
 				mac_str[0], mac_str[1], mac_str[3], mac_str[4], mac_str[6],
 				mac_str[7], P2P_PREFIX_FIND_TIMEOUT_S);
 			/* Re-schedule to fire when the find window expires. */
@@ -765,18 +787,19 @@ static void p2p_client_do_connect(struct k_work *work)
 		int qret = net_mgmt(NET_REQUEST_WIFI_P2P_OPER, iface, &qparams, sizeof(qparams));
 
 		if (qret) {
-			LOG_WRN("P2P_CLIENT: peer table query failed (%d), retry in 10 s", qret);
+			LOG_WRN("P2P_GC: peer table query failed (%d), retry in 10 s", qret);
 			k_work_reschedule_for_queue(
 				&p2p_cli_workq, k_work_delayable_from_work(work), K_SECONDS(10));
 			return;
 		}
 
 		/* Filter by OUI prefix and pick best RSSI. */
-		uint8_t prefix[3];
+		uint8_t mac6[6];
+		uint8_t *prefix = mac6;
 
-		sscanf(mac_str, "%hhx:%hhx:%hhx", &prefix[0], &prefix[1], &prefix[2]);
+		(void)parse_mac6(mac_str, mac6);
 
-		LOG_INF("P2P_CLIENT: peer table has %d entries, filtering for prefix "
+		LOG_INF("P2P_GC: peer table has %d entries, filtering for prefix "
 			"%02X:%02X:%02X",
 			qparams.peer_count, prefix[0], prefix[1], prefix[2]);
 
@@ -786,7 +809,7 @@ static void p2p_client_do_connect(struct k_work *work)
 			if (memcmp(peer_buf[i].mac, prefix, 3) != 0) {
 				continue;
 			}
-			LOG_INF("P2P_CLIENT:   [%d] %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d", i,
+			LOG_INF("P2P_GC:   [%d] %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d", i,
 				peer_buf[i].mac[0], peer_buf[i].mac[1], peer_buf[i].mac[2],
 				peer_buf[i].mac[3], peer_buf[i].mac[4], peer_buf[i].mac[5],
 				peer_buf[i].rssi);
@@ -796,15 +819,15 @@ static void p2p_client_do_connect(struct k_work *work)
 		}
 
 		if (best < 0) {
-			LOG_WRN("P2P_CLIENT: no GO with configured prefix found, retry in %d s",
-				P2P_CLIENT_CONNECT_TIMEOUT_S);
+			LOG_WRN("P2P_GC: no GO with configured prefix found, retry in %d s",
+				P2P_GC_CONNECT_TIMEOUT_S);
 			k_work_reschedule_for_queue(&p2p_cli_workq,
 						    k_work_delayable_from_work(work),
-						    K_SECONDS(P2P_CLIENT_CONNECT_TIMEOUT_S));
+						    K_SECONDS(P2P_GC_CONNECT_TIMEOUT_S));
 			return;
 		}
 
-		LOG_INF("P2P_CLIENT: best GO %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d dBm, connecting",
+		LOG_INF("P2P_GC: best GO %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d dBm, connecting",
 			peer_buf[best].mac[0], peer_buf[best].mac[1], peer_buf[best].mac[2],
 			peer_buf[best].mac[3], peer_buf[best].mac[4], peer_buf[best].mac[5],
 			peer_buf[best].rssi);
@@ -820,15 +843,15 @@ static void p2p_client_do_connect(struct k_work *work)
 		int ret = net_mgmt(NET_REQUEST_WIFI_P2P_OPER, iface, &params, sizeof(params));
 
 		if (ret) {
-			LOG_WRN("P2P_CLIENT: prefix connect rejected (%d), retry in 10 s", ret);
+			LOG_WRN("P2P_GC: prefix connect rejected (%d), retry in 10 s", ret);
 			k_work_reschedule_for_queue(
 				&p2p_cli_workq, k_work_delayable_from_work(work), K_SECONDS(10));
 		} else {
-			LOG_INF("P2P_CLIENT: connect initiated -> pin 12345678 --join");
-			p2p_client_pending = true;
+			LOG_INF("P2P_GC: connect initiated -> pin 12345678 --join");
+			p2p_gc_pending = true;
 			k_work_reschedule_for_queue(&p2p_cli_workq,
 						    k_work_delayable_from_work(work),
-						    K_SECONDS(P2P_CLIENT_CONNECT_TIMEOUT_S));
+						    K_SECONDS(P2P_GC_CONNECT_TIMEOUT_S));
 		}
 		return;
 	}
@@ -836,10 +859,8 @@ static void p2p_client_do_connect(struct k_work *work)
 	/* ---- Exact-MAC mode ---- */
 	struct wifi_p2p_params params = {0};
 
-	if (sscanf(mac_str, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &params.peer_addr[0],
-		   &params.peer_addr[1], &params.peer_addr[2], &params.peer_addr[3],
-		   &params.peer_addr[4], &params.peer_addr[5]) != 6) {
-		LOG_ERR("P2P_CLIENT: invalid MAC '%s' in CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC",
+	if (!parse_mac6(mac_str, params.peer_addr)) {
+		LOG_ERR("P2P_GC: invalid MAC '%s' in CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC",
 			mac_str);
 		return;
 	}
@@ -852,40 +873,39 @@ static void p2p_client_do_connect(struct k_work *work)
 	int ret = net_mgmt(NET_REQUEST_WIFI_P2P_OPER, iface, &params, sizeof(params));
 
 	if (ret) {
-		LOG_WRN("P2P_CLIENT: connect to %s rejected (%d), retry in 10 s", mac_str, ret);
+		LOG_WRN("P2P_GC: connect to %s rejected (%d), retry in 10 s", mac_str, ret);
 		/* Don't set pending - command was rejected, retry sooner. */
 		k_work_reschedule_for_queue(&p2p_cli_workq, k_work_delayable_from_work(work),
 					    K_SECONDS(10));
 	} else {
-		LOG_INF("P2P_CLIENT: connect initiated -> wifi p2p connect %s pin 12345678 --join",
+		LOG_INF("P2P_GC: connect initiated -> wifi p2p connect %s pin 12345678 --join",
 			mac_str);
 		/* Command accepted.  Block further retries until CONNECT_RESULT
-		 * arrives or P2P_CLIENT_CONNECT_TIMEOUT_S passes. */
-		p2p_client_pending = true;
+		 * arrives or P2P_GC_CONNECT_TIMEOUT_S passes. */
+		p2p_gc_pending = true;
 		k_work_reschedule_for_queue(&p2p_cli_workq, k_work_delayable_from_work(work),
-					    K_SECONDS(P2P_CLIENT_CONNECT_TIMEOUT_S));
+					    K_SECONDS(P2P_GC_CONNECT_TIMEOUT_S));
 	}
 }
 
-void wifi_p2p_client_on_peer_found(const uint8_t *mac, int8_t rssi)
+void wifi_p2p_gc_on_peer_found(const uint8_t *mac, int8_t rssi)
 {
-	if (!p2p_find_running || p2p_client_connected || p2p_client_pending) {
+	if (!p2p_find_running || p2p_gc_connected || p2p_gc_pending) {
 		return;
 	}
 
-	const char *mac_str = CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC;
+	const char *mac_str = CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC;
 	uint8_t target[6];
 
-	if (sscanf(mac_str, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &target[0], &target[1], &target[2],
-		   &target[3], &target[4], &target[5]) != 6) {
+	if (!parse_mac6(mac_str, target)) {
 		return;
 	}
 
 	if (p2p_is_prefix_mode()) {
 		/* Prefix mode: DEVICE_FOUND events are unreliable (not fired for
 		 * cached peers). Ignore events here; the peer table is queried
-		 * directly after P2P_FIND completes via p2p_client_do_connect(). */
-		LOG_DBG("P2P_CLIENT: prefix-mode peer seen %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d "
+		 * directly after P2P_FIND completes via p2p_gc_do_connect(). */
+		LOG_DBG("P2P_GC: prefix-mode peer seen %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d "
 			"(table query used instead)",
 			mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], rssi);
 		return;
@@ -896,69 +916,69 @@ void wifi_p2p_client_on_peer_found(const uint8_t *mac, int8_t rssi)
 		return;
 	}
 
-	LOG_INF("P2P_CLIENT: target GO %s found - connecting immediately", mac_str);
+	LOG_INF("P2P_GC: target GO %s found - connecting immediately", mac_str);
 	p2p_find_running = false;
 	p2p_go_found = true;
-	k_work_reschedule_for_queue(&p2p_cli_workq, &p2p_client_retry_work, K_NO_WAIT);
+	k_work_reschedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_NO_WAIT);
 }
 
-void wifi_p2p_client_on_connect_result(bool success)
+void wifi_p2p_gc_on_connect_result(bool success)
 {
-	if (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC[0] == '\0') {
+	if (CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC[0] == '\0') {
 		return;
 	}
 
-	p2p_client_pending = false;
+	p2p_gc_pending = false;
 
 	if (success) {
-		p2p_client_connected = true;
-		k_work_cancel_delayable(&p2p_client_retry_work);
-		LOG_INF("P2P_CLIENT: connected to GO - auto-retry stopped");
+		p2p_gc_connected = true;
+		k_work_cancel_delayable(&p2p_gc_retry_work);
+		LOG_INF("P2P_GC: connected to GO - auto-retry stopped");
 	} else {
 		/* CONNECT_RESULT failure: reset all state so next retry does a
 		 * fresh P2P_FIND (prefix mode) or direct connect (exact-MAC mode). */
 		p2p_go_found = false;
 		p2p_find_running = false;
-		k_work_reschedule_for_queue(&p2p_cli_workq, &p2p_client_retry_work, K_SECONDS(10));
+		k_work_reschedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_SECONDS(10));
 	}
 }
 
-void wifi_p2p_client_on_disconnect(void)
+void wifi_p2p_gc_on_disconnect(void)
 {
-	if (CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC[0] == '\0') {
+	if (CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC[0] == '\0') {
 		return;
 	}
 
-	if (!p2p_client_connected) {
+	if (!p2p_gc_connected) {
 		return;
 	}
 
-	p2p_client_connected = false;
-	p2p_client_pending = false;
+	p2p_gc_connected = false;
+	p2p_gc_pending = false;
 	p2p_find_running = false;
 	p2p_go_found = false;
 	/* Wait 15 s before retrying: after a clean deauth wpa_supplicant starts
 	 * a background cleanup scan (~5-17 s on nRF7002).  Issuing P2P_CONNECT
 	 * too soon races with that scan and causes "Scan already in progress"
 	 * errors.  15 s gives the cleanup scan time to drain. */
-	LOG_INF("P2P_CLIENT: disconnected from GO - reconnect in 15 s");
-	k_work_reschedule_for_queue(&p2p_cli_workq, &p2p_client_retry_work, K_SECONDS(15));
+	LOG_INF("P2P_GC: disconnected from GO - reconnect in 15 s");
+	k_work_reschedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_SECONDS(15));
 }
 
-int wifi_run_p2p_client_mode(void)
+int wifi_run_p2p_gc_mode(void)
 {
-	const char *mac_str = CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC;
+	const char *mac_str = CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC;
 
 	if (mac_str[0] == '\0') {
-		LOG_INF("P2P_CLIENT: no target GO MAC set for auto-connect, follow guide to "
+		LOG_INF("P2P_GC: no target GO MAC set for auto-connect, follow guide to "
 			"connect manually.");
 		return 0;
 	}
 
-	LOG_INF("P2P_CLIENT: auto-connect -> %s (retry every 90 s until success)", mac_str);
+	LOG_INF("P2P_GC: auto-connect -> %s (retry every 90 s until success)", mac_str);
 
-	p2p_client_connected = false;
-	p2p_client_pending = false;
+	p2p_gc_connected = false;
+	p2p_gc_pending = false;
 	p2p_find_running = false;
 	p2p_go_found = false;
 
@@ -970,29 +990,29 @@ int wifi_run_p2p_client_mode(void)
 		p2p_cli_workq_started = true;
 	}
 
-	k_work_init_delayable(&p2p_client_retry_work, p2p_client_do_connect);
-	k_work_schedule_for_queue(&p2p_cli_workq, &p2p_client_retry_work, K_NO_WAIT);
+	k_work_init_delayable(&p2p_gc_retry_work, p2p_gc_do_connect);
+	k_work_schedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_NO_WAIT);
 
 	return 0;
 }
 
 #else /* stubs when P2P not enabled */
 
-int wifi_run_p2p_client_mode(void)
+int wifi_run_p2p_gc_mode(void)
 {
 	return 0;
 }
 
-void wifi_p2p_client_on_connect_result(bool success)
+void wifi_p2p_gc_on_connect_result(bool success)
 {
 	ARG_UNUSED(success);
 }
 
-void wifi_p2p_client_on_disconnect(void)
+void wifi_p2p_gc_on_disconnect(void)
 {
 }
 
-void wifi_p2p_client_on_peer_found(const uint8_t *mac, int8_t rssi)
+void wifi_p2p_gc_on_peer_found(const uint8_t *mac, int8_t rssi)
 {
 	ARG_UNUSED(mac);
 	ARG_UNUSED(rssi);

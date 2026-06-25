@@ -22,22 +22,22 @@ int network_wait_for_station_connected(k_timeout_t timeout);
  * @brief Called when the Wi-Fi association succeeds (L2 connected, before DHCP).
  *
  * Weak hook — override in the application.  Fired at NET_EVENT_WIFI_CONNECT_RESULT
- * success for STA and P2P_CLIENT modes.  At this point the device is associated
+ * success for STA and P2P_GC modes.  At this point the device is associated
  * with the AP but does not yet have a routable IP address.
  *
  * The default implementation is a no-op.
  *
- * @param mode  Active Wi-Fi mode (ZEGO_WIFI_MODE_STA or ZEGO_WIFI_MODE_P2P_CLIENT).
+ * @param mode  Active Wi-Fi mode (ZEGO_WIFI_MODE_STA or ZEGO_WIFI_MODE_P2P_GC).
  */
 void zego_on_net_event_wifi_connect(enum zego_wifi_mode mode);
 
 /**
- * @brief Called when STA or P2P_CLIENT obtains a DHCP-assigned IP address.
+ * @brief Called when STA or P2P_GC obtains a DHCP-assigned IP address.
  *
  * Weak hook — override in the application.  Fired after DHCP negotiation
  * completes and the device has a routable IP on the AP's subnet.
  *
- * @param mode     Active Wi-Fi mode (ZEGO_WIFI_MODE_STA or ZEGO_WIFI_MODE_P2P_CLIENT).
+ * @param mode     Active Wi-Fi mode (ZEGO_WIFI_MODE_STA or ZEGO_WIFI_MODE_P2P_GC).
  * @param ip_addr  Device IP address string (NUL-terminated).
  * @param mac_addr Device MAC address string ("XX:XX:XX:XX:XX:XX").
  * @param ssid     Connected SSID (NUL-terminated).
