@@ -101,6 +101,8 @@ static bool network_connected;
 static bool initial_scan_done; /* set on first NET_EVENT_WIFI_SCAN_DONE */
 /* SSID captured at L4_CONNECTED or re-confirmed at DHCP_BOUND */
 static char sta_ssid[WIFI_SSID_MAX_LEN + 1];
+/* IP from the last DHCP_BOUND - used to detect lease renewal vs. new address */
+static struct in_addr last_bound_ip;
 
 #if IS_ENABLED(CONFIG_WIFI_NM_WPA_SUPPLICANT_AP)
 /* SoftAP / P2P station table */
@@ -415,6 +417,7 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 			status ? status->status : -1, reason, wifi_disconn_reason_str(reason),
 			wifi_utils_get_last_ssid() ? wifi_utils_get_last_ssid() : "<unknown>");
 		network_connected = false;
+		memset(&last_bound_ip, 0, sizeof(last_bound_ip));
 		if (active_mode == ZEGO_WIFI_MODE_P2P_GC) {
 			wifi_p2p_gc_on_disconnect();
 		}
@@ -682,6 +685,19 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 		snprintf(sta_ssid, sizeof(sta_ssid), "%.*s", wstatus.ssid_len,
 			 (char *)wstatus.ssid);
 	}
+
+	/* Detect lease renewal: same IP, already connected -> skip full reconnect fan-out */
+#if defined(CONFIG_NET_DHCPV4)
+	bool is_renewal = network_connected &&
+			  net_ipv4_addr_cmp(&dhcpv4->requested_ip, &last_bound_ip);
+
+	if (is_renewal) {
+		LOG_INF("L3-NET_EVENT_IPV4_DHCP_BOUND: lease renewed (same ip=%s) - skipping reconnect",
+			ip);
+		return;
+	}
+	last_bound_ip = dhcpv4->requested_ip;
+#endif
 
 	LOG_INF("L3-NET_EVENT_IPV4_DHCP_BOUND: mode=%s ip=%s mask=%s gw=%s",
 		zego_mode_to_str(active_mode), ip, mask, gw);
