@@ -83,6 +83,14 @@ struct button_sm_object {
 
 static struct button_sm_object button_sm[NUM_BUTTONS];
 
+static const char *const button_names[] = {
+	CONFIG_ZEGO_BUTTON_NAME_0, CONFIG_ZEGO_BUTTON_NAME_1, CONFIG_ZEGO_BUTTON_NAME_2,
+	CONFIG_ZEGO_BUTTON_NAME_3, CONFIG_ZEGO_BUTTON_NAME_4,
+};
+
+BUILD_ASSERT(ARRAY_SIZE(button_names) >= NUM_BUTTONS,
+	     "button_names array must cover all configured buttons");
+
 /* ============================================================================
  * HELPER
  * ============================================================================
@@ -207,7 +215,7 @@ static enum smf_state_result click_wait_run(void *obj)
 		uint32_t duration_ms =
 			(uint32_t)(sm->release_timestamp_ms - sm->press_timestamp_ms);
 		publish_event(sm, BUTTON_SINGLE_CLICK, duration_ms);
-		LOG_INF("Button %d single click (%u ms)", sm->button_number, duration_ms);
+		LOG_INF("%s single click (%u ms)", button_names[sm->button_number], duration_ms);
 		smf_set_state(SMF_CTX(sm), &button_states[BTN_S_IDLE]);
 	} else if (sm->current_state && !sm->previous_state) {
 		k_work_cancel_delayable(&sm->double_click_work);
@@ -236,7 +244,7 @@ static enum smf_state_result pressed2_run(void *obj)
 
 		publish_event(sm, BUTTON_RELEASED, duration_ms);
 		publish_event(sm, BUTTON_DOUBLE_CLICK, duration_ms);
-		LOG_INF("Button %d double click", sm->button_number);
+		LOG_INF("%s double click", button_names[sm->button_number]);
 		smf_set_state(SMF_CTX(sm), &button_states[BTN_S_IDLE]);
 	}
 	sm->previous_state = sm->current_state;
@@ -248,7 +256,7 @@ static void long_press_entry(void *obj)
 	struct button_sm_object *sm = (struct button_sm_object *)obj;
 
 	publish_event(sm, BUTTON_LONG_PRESS, CONFIG_ZEGO_BUTTON_LONG_PRESS_MS);
-	LOG_INF("Button %d long press", sm->button_number);
+	LOG_INF("%s long press", button_names[sm->button_number]);
 }
 
 static enum smf_state_result long_press_run(void *obj)

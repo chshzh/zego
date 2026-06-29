@@ -76,6 +76,37 @@ config ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS
 	  After a press+release the module waits this long for a 2nd press.
 	  If none arrives, BUTTON_SINGLE_CLICK is published instead.
 
+config ZEGO_BUTTON_NAME_0
+	string "Display name for button index 0"
+	default "VOL- (idx 0)"    if BOARD_NRF5340_AUDIO_DK_NRF5340_CPUAPP
+	default "Button 1 (idx 0)" if BOARD_NRF7002DK_NRF5340_CPUAPP
+	default "BUTTON0 (idx 0)" if BOARD_NRF54LM20DK_NRF54LM20A_CPUAPP
+	default "Button 0"
+
+config ZEGO_BUTTON_NAME_1
+	string "Display name for button index 1"
+	default "VOL+ (idx 1)"    if BOARD_NRF5340_AUDIO_DK_NRF5340_CPUAPP
+	default "Button 2 (idx 1)" if BOARD_NRF7002DK_NRF5340_CPUAPP
+	default "BUTTON1 (idx 1)" if BOARD_NRF54LM20DK_NRF54LM20A_CPUAPP
+	default "Button 1"
+
+config ZEGO_BUTTON_NAME_2
+	string "Display name for button index 2"
+	default "PLAY/PAUSE (idx 2)" if BOARD_NRF5340_AUDIO_DK_NRF5340_CPUAPP
+	default "BUTTON2 (idx 2)"    if BOARD_NRF54LM20DK_NRF54LM20A_CPUAPP
+	default "Button 2"
+
+config ZEGO_BUTTON_NAME_3
+	string "Display name for button index 3"
+	default "BTN4 (idx 3)"    if BOARD_NRF5340_AUDIO_DK_NRF5340_CPUAPP
+	default "BUTTON3 (idx 3)" if BOARD_NRF54LM20DK_NRF54LM20A_CPUAPP
+	default "Button 3"
+
+config ZEGO_BUTTON_NAME_4
+	string "Display name for button index 4"
+	default "BTN5 (idx 4)" if BOARD_NRF5340_AUDIO_DK_NRF5340_CPUAPP
+	default "Button 4"
+
 config ZEGO_BUTTON_INIT_PRIORITY
 	int "Initialization priority (SYS_INIT APPLICATION level)"
 	default 90
