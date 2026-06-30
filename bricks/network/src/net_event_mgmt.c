@@ -83,7 +83,7 @@ LOG_MODULE_REGISTER(zego_net_event_mgmt, CONFIG_ZEGO_NETWORK_LOG_LEVEL);
 	((uint64_t)(NET_EVENT_WIFI_AP_ENABLE_RESULT | NET_EVENT_WIFI_AP_STA_CONNECTED |            \
 		    NET_EVENT_WIFI_AP_STA_DISCONNECTED))
 #define L3_WPA_SUPP_MASK ((uint64_t)(NET_EVENT_SUPPLICANT_READY | NET_EVENT_SUPPLICANT_NOT_READY))
-#define L3_IPV4_MASK     ((uint64_t)NET_EVENT_IPV4_DHCP_BOUND)
+#define L3_IPV4_MASK     ((uint64_t)(NET_EVENT_IPV4_DHCP_BOUND | NET_EVENT_IPV4_ADDR_DEL))
 /* NET_EVENT_L4_CONNECTED fires when *any* interface becomes routable (has an IP
  * and is up). Useful for multi-interface boards (WiFi + Ethernet) where you want
  * a single "network ready" signal without caring which interface delivered it.
@@ -157,6 +157,98 @@ static void dhcp_diag_handler(struct k_work *work)
 	net_dhcpv4_stop(iface);
 	LOG_DBG("P2P_GC: deferred DHCP stop done");
 }
+
+/* ============================================================================
+ * L3 CONNECTIVITY WATCHDOG (STA)
+ * ============================================================================
+ * A successful NET_EVENT_WIFI_CONNECT_RESULT is an L2 (802.11 association)
+ * event only — it does not guarantee an IP.  Without this watchdog, a STA that
+ * associates but never gets a DHCP lease (or whose lease later expires while
+ * the link stays up) sits "associated, no IP" forever, because the reconnect
+ * loop in wifi_ble_prov treats association as "connected" and stops retrying.
+ *
+ * The watchdog is armed when STA association succeeds and when a bound lease is
+ * lost, and cancelled on DHCP_BOUND and on DISCONNECT_RESULT.  If it fires it
+ * issues NET_REQUEST_WIFI_DISCONNECT, which produces a DISCONNECT_RESULT and
+ * re-arms the normal reconnect loop — escaping the half-connected state.
+ *
+ * Scoped to STA only: P2P_GC has its own reconnect logic (wifi_utils.c) and
+ * SoftAP/P2P_GO have no DHCP client.
+ */
+#if CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC > 0
+static struct k_work_delayable l3_watchdog_work;
+
+#if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
+/* When the BLE-provisioning brick is present it owns the reconnect loop
+ * (its DISCONNECT_RESULT handler re-associates).  When it is absent, an
+ * app-issued NET_REQUEST_WIFI_DISCONNECT does NOT auto-reconnect, so the
+ * watchdog must drive the re-association itself. */
+static struct k_work_delayable l3_reconnect_work;
+
+static void l3_reconnect_handler(struct k_work *work)
+{
+	struct net_if *iface = net_if_get_wifi_sta();
+
+	if (active_mode != ZEGO_WIFI_MODE_STA || iface == NULL || network_connected) {
+		return;
+	}
+	/* Runs on the system workqueue — sized for the deep WPA ctrl-socket
+	 * chain that NET_REQUEST_WIFI_CONNECT_STORED needs. */
+	int rc = net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, NULL, 0);
+
+	if (rc) {
+		LOG_WRN("L3 watchdog: reconnect (CONNECT_STORED) failed (%d), retrying", rc);
+		k_work_reschedule(&l3_reconnect_work, K_SECONDS(5));
+	}
+}
+#endif /* !CONFIG_ZEGO_WIFI_BLE_PROV */
+
+static void l3_watchdog_arm(void)
+{
+	if (active_mode != ZEGO_WIFI_MODE_STA) {
+		return;
+	}
+	k_work_reschedule(&l3_watchdog_work,
+			  K_SECONDS(CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC));
+}
+
+static void l3_watchdog_cancel(void)
+{
+	k_work_cancel_delayable(&l3_watchdog_work);
+#if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
+	k_work_cancel_delayable(&l3_reconnect_work);
+#endif
+}
+
+static void l3_watchdog_handler(struct k_work *work)
+{
+	struct net_if *iface = net_if_get_wifi_sta();
+
+	if (active_mode != ZEGO_WIFI_MODE_STA || network_connected || iface == NULL) {
+		return;
+	}
+
+	LOG_WRN("L3 watchdog: associated but no IP after %d s — forcing reconnect",
+		CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC);
+
+	/* Clean L2 teardown.  This produces a DISCONNECT_RESULT. */
+	int rc = net_mgmt(NET_REQUEST_WIFI_DISCONNECT, iface, NULL, 0);
+
+	if (rc) {
+		LOG_ERR("L3 watchdog: NET_REQUEST_WIFI_DISCONNECT failed (%d)", rc);
+	}
+
+#if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
+	/* No external reconnect loop — drive re-association ourselves once the
+	 * disconnect has settled. */
+	k_work_reschedule(&l3_reconnect_work, K_SECONDS(2));
+#endif
+	/* With ble_prov present, its DISCONNECT_RESULT handler re-associates. */
+}
+#else
+static inline void l3_watchdog_arm(void) {}
+static inline void l3_watchdog_cancel(void) {}
+#endif /* CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC > 0 */
 
 /* ============================================================================
  * EVENT CALLBACK STRUCTURES
@@ -372,6 +464,9 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 					net_if_get_device(iface) ? net_if_get_device(iface)->name
 								 : "?");
 				net_dhcpv4_restart(iface);
+				/* Associated at L2 — arm the watchdog; it is
+				 * cancelled when DHCP binds. */
+				l3_watchdog_arm();
 			}
 		} else if (!initial_scan_done && status->status == 1) {
 			/* Status=1 before the first scan completes is the normal
@@ -418,6 +513,9 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 			wifi_utils_get_last_ssid() ? wifi_utils_get_last_ssid() : "<unknown>");
 		network_connected = false;
 		memset(&last_bound_ip, 0, sizeof(last_bound_ip));
+		/* Link is down — the reconnect loop (wifi_ble_prov) owns recovery
+		 * now; stand the L3 watchdog down so it does not double-trigger. */
+		l3_watchdog_cancel();
 		if (active_mode == ZEGO_WIFI_MODE_P2P_GC) {
 			wifi_p2p_gc_on_disconnect();
 		}
@@ -655,9 +753,33 @@ static void l3_wpa_supp_event_handler(struct net_mgmt_event_callback *cb, uint64
 static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
 				  struct net_if *iface)
 {
+	if (mgmt_event == NET_EVENT_IPV4_ADDR_DEL) {
+		/* DHCP lease lost (expired / renewal failed) or address otherwise
+		 * removed.  If the Wi-Fi link is STILL associated, this is a lease
+		 * loss while connected — a "have link, no IP" zombie that no L2
+		 * event will recover.  Re-arm the watchdog to force a reconnect.
+		 * If the link is already down, the DISCONNECT_RESULT path owns
+		 * recovery, so ignore it here. */
+		struct wifi_iface_status wstatus = {0};
+
+		if (active_mode == ZEGO_WIFI_MODE_STA && network_connected &&
+		    net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &wstatus, sizeof(wstatus)) == 0 &&
+		    wstatus.state >= WIFI_STATE_ASSOCIATED) {
+			LOG_WRN("L3-NET_EVENT_IPV4_ADDR_DEL: lease lost while associated — "
+				"arming watchdog");
+			network_connected = false;
+			memset(&last_bound_ip, 0, sizeof(last_bound_ip));
+			l3_watchdog_arm();
+		}
+		return;
+	}
+
 	if (mgmt_event != NET_EVENT_IPV4_DHCP_BOUND) {
 		return;
 	}
+
+	/* Got a lease (new or renewed) — stand the L3 watchdog down. */
+	l3_watchdog_cancel();
 
 #if defined(CONFIG_NET_DHCPV4)
 	const struct net_if_dhcpv4 *dhcpv4 = cb->info;
@@ -858,6 +980,12 @@ int network_module_init(void)
 	 * net_mgmt_add_event_callback(&l4_event_cb); */
 
 	k_work_init_delayable(&dhcp_diag_work, dhcp_diag_handler);
+#if CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC > 0
+	k_work_init_delayable(&l3_watchdog_work, l3_watchdog_handler);
+#if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
+	k_work_init_delayable(&l3_reconnect_work, l3_reconnect_handler);
+#endif
+#endif
 
 	LOG_INF("All network event handlers initialized");
 	/* Mode startup is deferred to start_mode_work, submitted by NET_EVENT_SUPPLICANT_READY. */

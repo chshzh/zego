@@ -86,6 +86,33 @@ config ZEGO_WIFI_P2P_GC_TARGET_GO_MAC
 endmenu # "P2P GC Configuration"
 
 # ---------------------------------------------------------------------------
+# STA Configuration
+# ---------------------------------------------------------------------------
+
+menu "STA Configuration"
+
+config ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC
+	int "STA: DHCP-bound watchdog timeout (s, 0 = disabled)"
+	default 30
+	help
+	  L3 connectivity watchdog for STA mode.  A successful Wi-Fi
+	  association (NET_EVENT_WIFI_CONNECT_RESULT) only means the link is up
+	  at L2 — it does NOT mean an IP was obtained.  If DHCP never binds
+	  (NET_EVENT_IPV4_DHCP_BOUND) within this many seconds of association,
+	  or a bound lease is later lost while the link stays associated, the
+	  device is stuck "associated but no IP" with no usable connectivity.
+
+	  When this timer expires the module issues NET_REQUEST_WIFI_DISCONNECT,
+	  which produces a DISCONNECT_RESULT and re-arms the normal reconnect
+	  loop, breaking the device out of the half-connected state instead of
+	  waiting for a manual reset.
+
+	  Set to 0 to disable the watchdog.  The default (30 s) is comfortably
+	  longer than a healthy DHCP DISCOVER/OFFER/REQUEST/ACK cycle.
+
+endmenu # "STA Configuration"
+
+# ---------------------------------------------------------------------------
 # mDNS / DNS-SD
 # ---------------------------------------------------------------------------
 
