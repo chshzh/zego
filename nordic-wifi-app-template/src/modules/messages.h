@@ -34,6 +34,8 @@ enum app_wifi_state {
 	APP_WIFI_STATE_CONNECTED,
 	/** SoftAP active — first client connected. */
 	APP_WIFI_STATE_SOFTAP,
+	/** P2P pairing in progress (GO window open or GC discovering/joining) — BREATHE. */
+	APP_WIFI_STATE_PAIRING,
 	/** Link lost or fatal error. */
 	APP_WIFI_STATE_ERROR,
 };

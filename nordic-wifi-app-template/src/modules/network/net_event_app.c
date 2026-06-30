@@ -41,6 +41,29 @@ LOG_MODULE_REGISTER(net_event_app, LOG_LEVEL_INF);
 ZBUS_CHAN_DEFINE(APP_WIFI_STATE_CHAN, struct app_wifi_state_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY,
 		 ZBUS_MSG_INIT(.state = APP_WIFI_STATE_CONNECTING, .mode = ZEGO_WIFI_MODE_STA));
 
+/* Tracks whether a link is currently up, so zego_on_net_event_p2p_pairing(false)
+ * can resolve the LED back to CONNECTED vs ROTATE when pairing ends. */
+static bool s_connected;
+
+/*
+ * P2P pairing started/ended. Drives LED 0 BREATHE while pairing is active
+ * (both roles), reverting to the resolved state when it ends. Called by the
+ * zego/network P2P engine (GO: window open/close; GC: discovery start / connect
+ * success or give-up).
+ */
+void zego_on_net_event_p2p_pairing(bool active)
+{
+	struct app_wifi_state_msg msg = {
+		.mode = zego_wifi_get_mode(),
+		.state = active ? APP_WIFI_STATE_PAIRING
+				: (s_connected ? APP_WIFI_STATE_CONNECTED
+					       : APP_WIFI_STATE_CONNECTING),
+	};
+
+	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+	LOG_INF("P2P pairing %s", active ? "started - LED 0 BREATHE" : "ended");
+}
+
 void zego_on_net_event_wifi_ap_enabled(enum zego_wifi_mode mode, const char *ip_addr,
 				       const char *ssid)
 {
@@ -64,6 +87,8 @@ void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
 	struct led_msg led = {.type = LED_COMMAND_ON, .led_number = 0};
 
 	zbus_chan_pub(&LED_CMD_CHAN, &led, K_NO_WAIT);
+
+	s_connected = true;
 
 	struct app_wifi_state_msg msg = {
 		.mode = mode,
@@ -133,6 +158,8 @@ void zego_on_net_event_wifi_disconnect(void)
 	struct led_msg led = {.type = LED_COMMAND_ROTATE, .led_number = 0};
 
 	zbus_chan_pub(&LED_CMD_CHAN, &led, K_NO_WAIT);
+
+	s_connected = false;
 
 	struct app_wifi_state_msg msg = {
 		.state = APP_WIFI_STATE_ERROR,

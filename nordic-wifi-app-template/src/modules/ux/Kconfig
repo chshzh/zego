@@ -32,6 +32,16 @@ config APP_UX_INIT_PRIORITY
 	  ZEGO_BUTTON_INIT_PRIORITY (90) so LED and button are ready before
 	  the UX module starts ROTATE and registers observers.
 
+config APP_UX_BUTTON_IDX
+	int "Button index that carries the UX gestures"
+	default 0
+	range 0 8
+	help
+	  Index of the button (as reported in button_msg.button_number) that
+	  carries the UX gestures (single click, double-click, long press).
+	  Default 0 (BUTTON0 / SW0).  Set to 4 on the nRF5340 Audio DK to use
+	  BTN5 instead of VOL- (idx 0), leaving VOL- free for the application.
+
 config APP_UX_ROTATE_FIRST_LED
 	int "First LED index in the Wi-Fi ROTATE sequence"
 	default 0

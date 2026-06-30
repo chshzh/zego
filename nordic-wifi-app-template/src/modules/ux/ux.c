@@ -36,6 +36,7 @@
 #include "button.h"
 #include "led.h"
 #include "wifi.h"
+#include "wifi_utils.h"
 #include "../messages.h"
 #if defined(CONFIG_ZEGO_WIFI_BLE_PROV)
 #include "wifi_ble_prov.h"
@@ -62,7 +63,7 @@ static const char *mode_name(enum zego_wifi_mode m)
 	case ZEGO_WIFI_MODE_P2P_GO:
 		return "p2p_go";
 	case ZEGO_WIFI_MODE_P2P_GC:
-		return "p2p_client";
+		return "p2p_gc";
 	default:
 		return "unknown";
 	}
@@ -191,6 +192,9 @@ static void apply_wifi_state_led(enum app_wifi_state state)
 	case APP_WIFI_STATE_SOFTAP:
 		led_rotate();
 		break;
+	case APP_WIFI_STATE_PAIRING:
+		led_set(LED_COMMAND_BREATHE, 0);
+		break;
 	case APP_WIFI_STATE_ERROR:
 		led_set(LED_COMMAND_BLINK, 100);
 		break;
@@ -239,13 +243,15 @@ static void app_ux_led_work_fn(struct k_work *work)
 
 static K_WORK_DEFINE(app_ux_led_work, app_ux_led_work_fn);
 
-/* ── Button 0 listener ─────────────────────────────────────────────────── */
+/* ── UX gesture button listener ────────────────────────────────────────── */
 
 static void btn_listener_cb(const struct zbus_channel *chan)
 {
 	const struct button_msg *msg = zbus_chan_const_msg(chan);
 
-	if (msg->button_number != 0) {
+	/* Only the configured UX gesture button (idx 0 default; BTN5/idx 4 on the
+	 * nRF5340 Audio DK via CONFIG_APP_UX_BUTTON_IDX) carries the gestures. */
+	if (msg->button_number != CONFIG_APP_UX_BUTTON_IDX) {
 		return;
 	}
 
@@ -255,7 +261,16 @@ static void btn_listener_cb(const struct zbus_channel *chan)
 			mode_name(zego_wifi_get_mode()));
 		break;
 
-	case BUTTON_DOUBLE_CLICK:
+	case BUTTON_DOUBLE_CLICK: {
+		enum zego_wifi_mode mode = zego_wifi_get_mode();
+
+		/* In P2P modes the double-click triggers pairing; BLE provisioning is
+		 * disabled in those modes so there is no gesture conflict. */
+		if (mode == ZEGO_WIFI_MODE_P2P_GO || mode == ZEGO_WIFI_MODE_P2P_GC) {
+			LOG_INF("Double-click: triggering P2P pairing");
+			wifi_p2p_start_pairing();
+			break;
+		}
 #if defined(CONFIG_ZEGO_WIFI_BLE_PROV)
 		ble_prov_led_active = !ble_prov_led_active;
 		zego_wifi_ble_prov_advertise(ble_prov_led_active);
@@ -270,6 +285,7 @@ static void btn_listener_cb(const struct zbus_channel *chan)
 		LOG_INF("BLE provisioning not enabled on this board");
 #endif
 		break;
+	}
 
 	case BUTTON_LONG_PRESS:
 		do_mode_cycle();
