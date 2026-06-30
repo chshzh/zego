@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-16-13-30 |
-| PRD Version | 2026-06-16-13-30 |
+| Version | 2026-06-30-13-04 |
+| PRD Version | 2026-06-30-13-00 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -21,6 +21,9 @@
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK to Board Differences table; updated BLE prov note |
 | 2026-06-09-17-25 | Updated to PRD v2026-06-09-17-25: fixed Board Differences — nRF5340 Audio DK ROTATE is RGB2 only [3–5], not RGB1 |
 | 2026-06-16-13-30 | Updated to PRD v2026-06-16-13-30: FR-005 — SoftAP max 3 clients (`CONFIG_WIFI_MGMT_AP_MAX_NUM_STA=3`); net_event_app TODO log format specified for connect/disconnect events |
+| 2026-06-29-23-06 | Updated to PRD v2026-06-29-23-06: corrected "default on fresh flash" to `ZEGO_WIFI_MODE_STA` (0); mode-cycle text adds P2P_GC (validation-found doc fix). |
+| 2026-06-29-21-44 | Updated to PRD v2026-06-29-21-44: P2P pairing UX — added NVS settings key `net/p2p_gc_go_mac` (learned GO MAC, network brick's own `"net"` subtree) to the Wi-Fi mode selector section; module map and weak-hook mode column P2P_CLIENT→P2P_GC; noted UX→network `wifi_p2p_start_pairing()` call. |
+| 2026-06-30-13-04 | Updated to PRD v2026-06-30-13-00: added 7th weak hook `zego_on_net_event_p2p_pairing(bool)` (drives `APP_WIFI_STATE_PAIRING` → LED BREATHE on both roles); noted board-configurable UX gesture button (`CONFIG_APP_UX_BUTTON_IDX`, =4 on Audio DK). Debug-session reconcile: P2P WPS method is PBC; `CONFIG_WIFI_NM_WPA_SUPPLICANT_GLOBAL_HEAP=y` (system heap) required for the P2P_GO WPS Registrar. |
 
 ---
 
@@ -51,7 +54,7 @@ All feature modules are provided by the `zego/` shared library. The template reg
 | Module dir | Kconfig symbol | Provides |
 |---|---|---|
 | `zego/wifi` | `CONFIG_ZEGO_WIFI` | Startup banner, Wi-Fi mode selector, `zego_wifi_mode` shell command, NVS persistence |
-| `zego/network` | `CONFIG_ZEGO_NETWORK` | Wi-Fi event management (STA / SoftAP / P2P_GO / P2P_CLIENT), DHCP, net mgmt callbacks, weak-hook API |
+| `zego/network` | `CONFIG_ZEGO_NETWORK` | Wi-Fi event management (STA / SoftAP / P2P_GO / P2P_GC), P2P button pairing + NVS-saved GO MAC, DHCP, net mgmt callbacks, weak-hook API |
 | `zego/button` | `CONFIG_ZEGO_BUTTON` | GPIO button driver, gesture detection, `BUTTON_CHAN` publisher |
 | `zego/led` | `CONFIG_ZEGO_LED` | Per-LED state machine, `LED_CMD_CHAN` subscriber |
 | `zego/wifi_ble_prov` | `CONFIG_ZEGO_WIFI_BLE_PROV` | BLE GATT provisioning service (nRF Wi-Fi Provisioner compatible) |
@@ -85,6 +88,10 @@ void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode,
                                     const char *ssid);
 
 void zego_on_net_event_wifi_disconnect(void);
+
+/* P2P pairing started (true) / ended (false). net_event_app.c maps this to
+ * APP_WIFI_STATE_PAIRING so the UX LED breathes while pairing is active. */
+void zego_on_net_event_p2p_pairing(bool active);
 ```
 
 **Trigger events by mode:**
@@ -94,7 +101,7 @@ void zego_on_net_event_wifi_disconnect(void);
 | STA | DHCP bound (IPv4 address assigned) |
 | SoftAP | First client station associates (up to `CONFIG_WIFI_MGMT_AP_MAX_NUM_STA` = **3** clients; 4th is rejected) |
 | P2P_GO | First P2P client associates |
-| P2P_CLIENT | DHCP bound (IPv4 address assigned from GO) |
+| P2P_GC | Connected to GO (static IP 192.168.7.2 assigned at `CONNECT_RESULT`) |
 
 **SoftAP max-client limit — required `prj.conf` entry:**
 
@@ -143,9 +150,15 @@ Implemented entirely in `zego/wifi`. See [zego/wifi — wifi-spec.md](https://gi
 
 **Summary:**
 - NVS settings key: `"app/zego_wifi_mode"` (uint8_t)
-- Default on fresh flash: `ZEGO_WIFI_MODE_P2P_GO` (2)
-- Shell command: `uart:~$ zego_wifi_mode [sta|softap|p2p_go|p2p_client]`
+- Default on fresh flash: `ZEGO_WIFI_MODE_STA` (0) — set by `CONFIG_ZEGO_WIFI_DEFAULT_MODE_STA=y` in `prj.conf`
+- Shell command: `uart:~$ zego_wifi_mode [sta|softap|p2p_go|p2p_gc]`
 - Mode is written to NVS immediately; takes effect on next reboot
+
+**P2P_GC learned-GO persistence (added 2026-06-29):**
+- NVS settings key: `"net/p2p_gc_go_mac"` (6 raw MAC bytes), in the network brick's own `"net"` settings subtree (distinct from the mode selector's `"app"` subtree — two static handlers cannot share a subtree name), owned by `zego/network`
+- Written by `wifi_p2p_gc_on_connect_result()` after a successful pairing connect; read at boot by `wifi_run_p2p_gc_mode()`
+- Empty/absent = never paired (GC stays idle until a pairing double-click); a new pairing overwrites it
+- Negligible footprint (6 bytes); no partition-layout change
 
 ---
 
@@ -232,7 +245,7 @@ actual zego directory (e.g. `../../zego/modules/button`).
                      │ WIFI_MODE_CHAN
           ┌──────────▼──────────────────────────────────────┐
           │                  zego/network                    │
-          │  SoftAP path │ STA path │ P2P_GO │ P2P_CLIENT   │
+          │  SoftAP path │ STA path │ P2P_GO │ P2P_GC       │
           └──┬───────────────────────────────────────────────┘
              │ weak hooks
   ┌──────────▼───────────────┐
@@ -244,7 +257,8 @@ actual zego directory (e.g. `../../zego/modules/button`).
   │  your application module  │
   └───────────────────────────┘
 
-  zego/button ──BUTTON_CHAN──► (add your own subscriber)
+  zego/button ──BUTTON_CHAN──► app_ux (ux.c) ──► zego/led (LED_CMD_CHAN)
+                                     └─ double-click in P2P mode ──► zego/network wifi_p2p_start_pairing()
   zego/led    ◄──LED_CMD_CHAN── (add your own publisher)
   zego/wifi_ble_prov ──► (saves creds via settings → triggers STA connect)
 ```

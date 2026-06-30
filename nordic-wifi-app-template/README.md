@@ -19,12 +19,13 @@
 
 ### Features
 
-- **Four Wi-Fi modes (STA, SoftAP, P2P_GO, P2P_CLIENT)** — covers every nRF7x connectivity scenario; mode is selected at runtime, not at build time.
+- **Four Wi-Fi modes (STA, SoftAP, P2P_GO, P2P_GC)** — covers every nRF7x connectivity scenario; mode is selected at runtime, not at build time.
 - **Three STA provisioning methods** — shell `wifi connect` for one-off testing, `wifi cred add` for saved auto-connect credentials, and BLE provisioning via the *nRF Wi-Fi Provisioner* phone app (no USB cable required).
 - **Runtime mode switching with `zego_wifi_mode`** — persisted in NVS flash; survives power cycles so the device reconnects in the same mode after reboot.
 - **Button and LED channels (`BUTTON_CHAN`, `LED_CMD_CHAN`)** — Zbus channels wired up and ready for application logic immediately.
-- **LED 0 Wi-Fi state feedback** — ROTATE while connecting, solid ON when connected, BREATHE during BLE provisioning, fast blink on error; works the same across all three boards.
-- **Button 0 gesture UX** — single-click prints Wi-Fi status to UART; long press (≥ 3 s) cycles modes; double-click toggles BLE provisioning advertising (nRF54LM20DK only).
+- **LED 0 Wi-Fi state feedback** — ROTATE while connecting, solid ON when connected, BREATHE during BLE provisioning or while P2P pairing is in progress, fast blink on error; works the same across all three boards.
+- **UX gesture button** — single-click prints Wi-Fi status to UART; long press (≥ 3 s) cycles modes; double-click is mode-aware — it toggles BLE provisioning advertising in STA/SoftAP modes (nRF54LM20DK only) and triggers P2P pairing in P2P_GO/P2P_GC modes. The gesture button is idx 0 on nRF54LM20DK/nRF7002DK and **BTN5 (idx 4) on the nRF5340 Audio DK**.
+- **Button-press P2P pairing** — in P2P modes, a double-click on Button 0 pairs a GO and GC with no configured MAC: the GO opens a ~2-min WPS PIN window (fixed PIN `12345678`) and the GC discovers and joins it, saving the GO's MAC to NVS. Once paired, the GC reconnects automatically on disconnect and after power cycle until a new pairing is performed.
 - **Startup banner** — prints firmware version, board, MAC address, active mode, and per-mode connection instructions at every boot.
 - **Single customisation point** — `src/modules/network/net_event_app.c` with inline guide and TODO-annotated patterns for publishing your own Zbus channel on connect/disconnect.
 - **Live memory monitoring via [zego/memonitor](../bricks/memonitor)** — samples all `k_heap` instances and thread stack HWMs every 5 s; publishes `MEMONITOR_CHAN` zbus event on each sample; ZView live view available over JLink when `ZEGO_MEMONITOR_ZVIEW=y`.
@@ -72,21 +73,20 @@ At boot you will see a startup banner like:
 *** Nordic Wi-Fi App Template v3.3.0.1 | NCS v3.3.0 ***
 Board: nrf7002dk  MAC: AA:BB:CC:DD:EE:FF
 Mode: P2P_GO  |  Modules: [wifi] [network] [ux] [button] [led]
-P2P_GO: WPS PIN = 12345678 — connect your phone via Wi-Fi Direct settings
+P2P_GO: double-click Button 0 to open the WPS PIN pairing window for a P2P_GC device
 ```
 
 The firmware then starts the Wi-Fi subsystem and LED 0 begins ROTATING. Connection-mode instructions:
 
-- **P2P_GO** (default on fresh flash): device starts its own Wi-Fi Direct group automatically — connect your phone via *Wi-Fi Direct* settings using WPS PIN `12345678`; look for `DIRECT-xx` in your phone's network list.
+- **P2P_GO**: device starts its own Wi-Fi Direct group automatically. To pair a P2P_GC device, **double-click Button 0** on the GO — this opens a ~2-minute WPS PIN pairing window (fixed PIN `12345678`). (Only other DKs running P2P_GC mode can join; phones acting as P2P clients are not supported.)
 - **STA**: run `wifi connect -s <SSID> -p <pass> -k 1` in the UART shell; on success the terminal logs `Wi-Fi connected: mode=STA ip=192.168.x.x`.
 - **SoftAP**: phone connects to the hotspot advertised by the device; device IP is `192.168.7.1`.
-- **P2P_CLIENT**: connects to a P2P_GO (another DK or phone acting as GO).
-  - **Auto-connect (recommended)**: set `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` in `prj.conf` and rebuild. Two modes:
-    - **Exact MAC** (`F4:CE:36:00:AE:EC`): issues `--join` directly at boot; retries every 90 s.
-    - **MAC-prefix** (`F4:CE:36:00:00:00` — last 3 bytes = `00:00:00`): runs a 10 s social-channel scan, then queries the wpa_supplicant peer table; connects to the GO with the strongest RSSI that matches the 3-byte OUI prefix; useful for multi-GO deployments where all GOs share the same manufacturer OUI.
-  - **Manual**: run `wifi p2p find`, then `wifi p2p peer` to list discovered peers, then `wifi p2p connect <GO-MAC> pbc --join`.
+- **P2P_GC**: joins a P2P_GO's group; no GO MAC is configured at build time.
+  - **Pair**: double-click Button 0 on the GO (opens its pairing window), then double-click Button 0 on the GC. The GC discovers the GO that is pairing, joins it via WPS PIN `12345678 --join`, gets static IP `192.168.7.2/24`, and saves the GO's MAC to NVS.
+  - **Reconnect**: after pairing, the GC reconnects to the saved GO automatically on disconnect and after a power cycle — no button press needed. A new double-click pairing overwrites the saved GO.
+  - **Manual (advanced)**: run `wifi p2p find`, then `wifi p2p peer` to list discovered peers, then `wifi p2p connect <GO-MAC> pin 12345678 --join`.
 
-Switch mode with `zego_wifi_mode [sta|softap|p2p_go|p2p_client]` — the device reboots into the new mode and persists the setting.
+Switch mode with `zego_wifi_mode [sta|softap|p2p_go|p2p_gc]` — the device reboots into the new mode and persists the setting.
 
 **2. Buttons & LEDs**
 
@@ -95,15 +95,18 @@ Switch mode with `zego_wifi_mode [sta|softap|p2p_go|p2p_client]` — the device 
 | Board | Button | Gesture | Action |
 |-------|--------|---------|--------|
 | nRF54LM20DK + nRF7002EB2 | BUTTON0 (idx 0) | Single click | Print current Wi-Fi state to UART |
-| | | Double-click | Toggle BLE provisioning advertising on/off |
+| | | Double-click (STA / SoftAP) | Toggle BLE provisioning advertising on/off |
+| | | Double-click (P2P_GO / P2P_GC) | Trigger P2P pairing (GO opens WPS PIN window; GC discovers and joins) |
 | | | Long press ≥ 3 s | Cycle mode; save to NVS; reboot |
 | | BUTTON1–2 (idx 1–2) | Any | Available via `BUTTON_CHAN` (no default UX function) |
 | nRF7002DK | Button 1 / SW0 (idx 0) | Single click | Print current Wi-Fi state (mode, IP, SSID) to UART |
-| | | Long press ≥ 3 s | Cycle mode STA → SoftAP → P2P_GO → STA; save to NVS; reboot |
+| | | Double-click (P2P_GO / P2P_GC) | Trigger P2P pairing (GO opens WPS PIN window; GC discovers and joins) |
+| | | Long press ≥ 3 s | Cycle mode STA → SoftAP → P2P_GO → P2P_GC → STA; save to NVS; reboot |
 | | Button 2 / SW1 (idx 1) | Any | Available via `BUTTON_CHAN` (no default UX function) |
-| nRF5340 Audio DK + nRF7002EK | VOL- (idx 0) | Single click | Print current Wi-Fi state to UART |
+| nRF5340 Audio DK + nRF7002EK | **BTN5 (idx 4)** | Single click | Print current Wi-Fi state to UART |
+| | | Double-click (P2P_GO / P2P_GC) | Trigger P2P pairing (GO opens WPS PIN window; GC discovers and joins) |
 | | | Long press ≥ 3 s | Cycle mode; save to NVS; reboot |
-| | VOL+, PLAY/PAUSE, BTN4, BTN5 (idx 1–4) | Any | Available via `BUTTON_CHAN` (no default UX function) |
+| | VOL-, VOL+, PLAY/PAUSE, BTN4 (idx 0–3) | Any | Available via `BUTTON_CHAN` (no default UX function) |
 
 ### LEDs
 
@@ -123,7 +126,7 @@ LED 0 Wi-Fi state effects:
 | Connected (STA / P2P) | Solid ON |
 | SoftAP active, no clients | ROTATE |
 | SoftAP client connected | Solid ON |
-| BLE provisioning active | BREATHE |
+| BLE provisioning active, or P2P pairing in progress | BREATHE |
 | Disconnected / error | Fast BLINK (100 ms half-period) |
 
 **3. Application logic**
@@ -240,7 +243,7 @@ cd zego/nordic-wifi-app-template
 west build -p -b nrf54lm20dk/nrf54lm20a/cpuapp -d build_nrf54lm20dk -- \
   -Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002eb2
 
-# nRF7002DK — all four modes including P2P_GO / P2P_CLIENT
+# nRF7002DK — all four modes including P2P_GO / P2P_GC
 west build -p -b nrf7002dk/nrf5340/cpuapp -d build_nrf7002dk -- \
   -Dnordic-wifi-app-template_SNIPPET=wifi-p2p
 
@@ -249,7 +252,7 @@ west build -p -b nrf5340_audio_dk/nrf5340/cpuapp -d build_nrf5340_audio_dk -- \
   -Dnordic-wifi-app-template_SNIPPET=wifi-p2p -DSHIELD=nrf7002ek
 ```
 
-> The image-scoped `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p` applies the snippet only to the app image (not to `hci_ipc`), avoiding spurious Kconfig warnings on the net core. The snippet adds `CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P=y` and `CONFIG_NRF70_P2P_MODE=y`. Without it, `p2p_go` and `p2p_client` modes are unavailable at runtime.
+> The image-scoped `-Dnordic-wifi-app-template_SNIPPET=wifi-p2p` applies the snippet only to the app image (not to `hci_ipc`), avoiding spurious Kconfig warnings on the net core. The snippet adds `CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P=y` and `CONFIG_NRF70_P2P_MODE=y`. Without it, `p2p_go` and `p2p_gc` modes are unavailable at runtime.
 
 > **Toolchain wrapper** (if not in a west shell):
 > ```sh
@@ -301,16 +304,15 @@ The tag format is `v<ncs-version>.<build>` (e.g. `v3.3.0.1`). Major/minor/patch 
 
 ### Developer Notes
 
-- **Default mode on fresh flash is P2P_GO.** Switch to STA with `zego_wifi_mode sta` before running `wifi connect`. The current mode is always printed in the startup banner.
+- **Default mode on fresh flash is STA.** Switch modes with `zego_wifi_mode [sta|softap|p2p_go|p2p_gc]` (or cycle with a Button 0 long-press). The current mode is always printed in the startup banner.
 - **BLE provisioning is disabled by default on nRF7002DK and nRF5340 Audio DK** due to 1 MB flash constraints. Use the `overlay-nrf5340-wifi-ble-prov.conf` overlay to enable it; this disables P2P to recover flash headroom. On nRF54LM20DK (2 MB), BLE provisioning is on by default.
-- **NVS erase resets everything.** `--erase` (nRF7002DK / nRF5340 Audio DK) and `--recover` (nRF54LM20DK) wipe NVS — the device wakes in P2P_GO mode and Wi-Fi credentials must be re-entered.
+- **NVS erase resets everything.** `--erase` (nRF7002DK / nRF5340 Audio DK) and `--recover` (nRF54LM20DK) wipe NVS — the device wakes in the default STA mode, any saved P2P_GC GO pairing is forgotten, and Wi-Fi credentials must be re-entered.
 - **nRF5340 Audio DK LED ROTATE** uses only RGB1 (channels idx 0–2) so RGB2 and the mono LEDs stay available for application use.
 - **nRF5340 Audio DK DTS overlay** (`boards/nrf5340_audio_dk_nrf5340_cpuapp.overlay`) maps the nRF7002EK SPI bus to the Audio DK's Arduino header — this is required; the nRF54LM20DK shield handles its own pinout without an overlay.
 - **Customisation entry point** is `src/modules/network/net_event_app.c`. Override `zego_on_net_event_dhcp_bound()` and `zego_on_net_event_wifi_disconnect()` — the file contains inline TODO comments and a 4-step example for publishing a Zbus channel.
 - **Heap monitor** logs the high-water mark periodically (interval configurable via `CONFIG_APP_HEAP_MONITOR_INTERVAL_S`). Watch for steady growth as an early sign of leaks.
-- **P2P connection method differences:**
-  - **PBC (Push Button Config):** the GO must press/accept the WPS button to admit the client. On DK-as-GO this happens automatically; on phone-as-GO, accept the incoming connection request on the phone.
-  - **PIN:** the P2P_CLIENT side must enter the PIN code displayed on (or configured in) the GO. On DK-as-GO the PIN is `12345678`; enter it on the phone's Wi-Fi Direct screen when prompted. On DK-as-P2P_CLIENT pass it with `wifi p2p connect <MAC> pin 12345678 --join`.
+- **P2P pairing (button-driven, no configured MAC):** pairing uses WPS PIN with the fixed template PIN `12345678` (the DK-as-GO does not support WPS PBC acceptance — only PIN). Double-click Button 0 on the GO to open a ~2-min PIN window; double-click Button 0 on the GC to discover the pairing GO and join it. The GC saves the GO's MAC to NVS and reconnects automatically thereafter (on disconnect and across power cycles) until a new pairing overwrites it.
+  - **Manual (advanced):** `wifi p2p find` → `wifi p2p peer` → `wifi p2p connect <GO-MAC> pin 12345678 --join` on the GC, with the GO's PIN window open.
 - **Live memory and thread watermark monitoring with ZView:**
   Run ZView from the project root while the board is live. Replace the `-s` serial with your board's J-Link serial number (`nrfjprog --ids`).
 
@@ -336,8 +338,8 @@ The tag format is `v<ncs-version>.<build>` (e.g. `v3.3.0.1`). Major/minor/patch 
   **How to get representative watermarks:** Exercise all modes in one session before reading peak values. A typical sequence:
   1. Boot in SoftAP → connect 3 clients → disconnect one by one
   2. Switch to STA (`zego_wifi_mode sta`) → `wifi connect` → `wifi disconnect`
-  3. Switch to P2P_GO (`zego_wifi_mode p2p_go`) → connect DK client
-  4. Switch to P2P_CLIENT (`zego_wifi_mode p2p_client`) → `wifi p2p connect <GO MAC> pbc --join`
+  3. Switch to P2P_GO (`zego_wifi_mode p2p_go`) → double-click Button 0 to open pairing → connect DK client
+  4. Switch to P2P_GC (`zego_wifi_mode p2p_gc`) → double-click Button 0 to pair (or `wifi p2p connect <GO MAC> pin 12345678 --join`)
 
   ZView accumulates **high-water marks** (HWM) across the session — the peaks shown after this full cycle represent worst-case usage across all modes.
 

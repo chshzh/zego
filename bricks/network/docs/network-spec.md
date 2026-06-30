@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/network` |
-| Version | 2026-06-17-09-44 |
+| Version | 2026-06-30-13-04 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -16,6 +16,8 @@
 
 | Version | Summary of changes |
 |---|---|
+| 2026-06-30-13-04 | Reconciled to implemented code: WPS **PBC** (fixed PIN unsupported on nRF GO — `WIFI_WPS_PIN_SET` fails `wps_registrar_init()`); GO/GC use `pbc --join`. Root-cause + fix: `CONFIG_WIFI_NM_WPA_SUPPLICANT_GLOBAL_HEAP=y` (a dedicated supplicant heap starved the WPS Registrar). Added GC GO-capability peer filter (`group_capab` GO bit), pairing-trigger re-entrancy guard, and `zego_on_net_event_p2p_pairing(bool)` weak hook for pairing-active LED BREATHE. |
+| 2026-06-29-21-44 | P2P pairing redesign: removed `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` (exact + prefix modes). P2P_GC now learns the GO MAC at runtime via a button-triggered WPS PBC pairing (`wifi_p2p_start_pairing()`) and persists it to NVS key `net/p2p_gc_go_mac`; reconnects to the saved MAC on disconnect and after power cycle. P2P_GO arms WPS PBC continuously and refreshes the pairing window on double-click. WPS PBC is the headless method per `nrf/samples/wifi/p2p`. Renamed `wifi_run_p2p_client_mode()`→`wifi_run_p2p_gc_mode()` and timeouts `*_P2P_CLIENT_*`→`*_P2P_GC_*`; added `P2P_PAIR_FIND_TIMEOUT_S`. P2P_CLIENT→P2P_GC naming aligned in touched sections. |
 | 2026-06-17-09-44 | Added optional mDNS / DNS-SD support: `ZEGO_NETWORK_MDNS`, `ZEGO_NETWORK_MDNS_HTTP_PORT`; new `src/mdns.c`; `Kconfig.defaults` hostname defaults; updated Memory Estimate and Test Points |
 | 2026-06-04-17-10 | Initial spec — reverse-designed from source |
 | 2026-06-05-09-31 | Added Supported Hardware section; documented nRF5340 Audio DK + nRF7002EK |
@@ -33,8 +35,8 @@
 
 `zego/network` is the unified Wi-Fi / network event management layer for all zego-based
 applications. It handles the full lifecycle of all four Wi-Fi modes (SoftAP, STA, P2P_GO,
-P2P_CLIENT): waits for WPA supplicant ready, dispatches the selected mode's startup sequence,
-monitors network events across all layers (L2–L4), and fires six `__weak` callback hooks
+P2P_GC): waits for WPA supplicant ready, dispatches the selected mode's startup sequence,
+monitors network events across all layers (L2–L4), and fires seven `__weak` callback hooks
 that applications override to publish app-specific zbus channels.
 
 The module has no application-specific logic and contains no zbus channels of its own. It is
@@ -93,14 +95,14 @@ All hooks are `__weak` no-ops in `net_event_mgmt.c`. Override with strong defini
 /* net_event_mgmt.h — override in src/modules/network/net_event_app.c */
 
 /**
- * Called when STA / P2P_CLIENT association succeeds (L2 connected, before DHCP).
+ * Called when STA / P2P_GC association succeeds (L2 connected, before DHCP).
  * Device is associated but has no routable IP yet.
  */
 void zego_on_net_event_wifi_connect(enum zego_wifi_mode mode);
 
 /**
- * Called when STA / P2P_CLIENT obtains a DHCP-assigned IP, or when the first
- * SoftAP / P2P_GO client associates (static IP).
+ * Called when STA / P2P_GC obtains its IP (DHCP for STA, static for P2P_GC), or when
+ * the first SoftAP / P2P_GO client associates (static IP).
  */
 void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode,
                                   const char *ip_addr,   /* NUL-terminated dotted decimal */
@@ -132,22 +134,37 @@ void zego_on_net_event_wifi_ap_sta_connected(int sta_count);
  * the count after removal (0 = no clients remain).
  */
 void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients);
+
+/**
+ * Called by the P2P engine when a pairing attempt starts/ends, so the app can show a
+ * pairing-active LED BREATHE indication.
+ *   P2P_GC: active=true when discovery starts; active=false on connect success OR give-up.
+ *   P2P_GO: active=true when wifi_p2p_start_pairing() opens the window; active=false when
+ *           the window expires or a client connects.
+ */
+void zego_on_net_event_p2p_pairing(bool active);
 ```
 
 **Hook trigger map:**
 
 | Hook | Trigger event | Mode(s) |
 |---|---|---|
-| `zego_on_net_event_wifi_connect` | `NET_EVENT_WIFI_CONNECT_RESULT` success | STA, P2P_CLIENT |
-| `zego_on_net_event_dhcp_bound` | `NET_EVENT_IPV4_DHCP_BOUND` | STA, P2P_CLIENT |
+| `zego_on_net_event_wifi_connect` | `NET_EVENT_WIFI_CONNECT_RESULT` success | STA, P2P_GC |
+| `zego_on_net_event_dhcp_bound` | `NET_EVENT_IPV4_DHCP_BOUND` | STA, P2P_GC |
 | `zego_on_net_event_dhcp_bound` | `NET_EVENT_WIFI_AP_STA_CONNECTED` (first client) | SoftAP, P2P_GO |
-| `zego_on_net_event_wifi_disconnect` | `NET_EVENT_WIFI_DISCONNECT_RESULT` | STA, P2P_CLIENT |
+| `zego_on_net_event_wifi_disconnect` | `NET_EVENT_WIFI_DISCONNECT_RESULT` | STA, P2P_GC |
 | `zego_on_net_event_wifi_ap_enabled` | `NET_EVENT_WIFI_AP_ENABLE_RESULT` success | SoftAP, P2P_GO |
 | `zego_on_net_event_wifi_ap_sta_connected` | `NET_EVENT_WIFI_AP_STA_CONNECTED` | SoftAP, P2P_GO |
 | `zego_on_net_event_wifi_ap_sta_disconnected` | `NET_EVENT_WIFI_AP_STA_DISCONNECTED` | SoftAP, P2P_GO |
+| `zego_on_net_event_p2p_pairing(true)` | Pairing attempt starts (GC: discovery start; GO: pairing window opens) | P2P_GC, P2P_GO |
+| `zego_on_net_event_p2p_pairing(false)` | Pairing attempt ends (GC: connect success or give-up; GO: window expires or client connects) | P2P_GC, P2P_GO |
 
-> P2P_CLIENT detection: the mode is known at boot from `WIFI_MODE_CHAN`; `zego_on_net_event_dhcp_bound()`
-> is called with `mode=ZEGO_WIFI_MODE_P2P_CLIENT` directly from the `CONNECT_RESULT` handler.
+> `zego_on_net_event_p2p_pairing(bool)`: `net_event_app.c` maps `active=true` to
+> `APP_WIFI_STATE_PAIRING` and `active=false` back to the resolved current state, so the UX
+> LED shows a BREATHE pattern while a pairing attempt is in flight.
+
+> P2P_GC detection: the mode is known at boot from `WIFI_MODE_CHAN`; `zego_on_net_event_dhcp_bound()`
+> is called with `mode=ZEGO_WIFI_MODE_P2P_GC` directly from the `CONNECT_RESULT` handler.
 
 ---
 
@@ -164,107 +181,126 @@ void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients);
    SoftAP      → wifi_run_softap_mode()
    STA         → NET_REQUEST_WIFI_CONNECT_STORED
    P2P_GO      → wifi_run_p2p_go_mode()
-   P2P_CLIENT  → wifi_run_p2p_client_mode()
+   P2P_GC      → wifi_run_p2p_gc_mode()   (reconnect to saved GO MAC, if any; else idle)
 ```
 
 ---
 
-## P2P_CLIENT Auto-Connect Sequence
+## P2P_GC Reconnect Sequence (saved GO MAC)
 
-`wifi_run_p2p_client_mode()` drives connection to a known P2P_GO without any shell interaction.
-The target GO MAC is specified at compile time via `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC`.
+`wifi_run_p2p_gc_mode()` reconnects to a **previously-paired** GO without any shell or
+button interaction. There is **no compile-time GO MAC** — the target is the MAC learned
+during pairing and persisted in NVS (see [P2P_GC Pairing](#p2p_gc-pairing-sequence-button-triggered)).
+At boot the saved MAC is loaded from settings key `net/p2p_gc_go_mac`.
 
 ```
-1. Issue WIFI_P2P_CONNECT to target MAC using method=PBC and flag=--join
-   ("wifi p2p connect <MAC> pbc --join")
-   → set p2p_client_pending = true; schedule p2p_client_timeout_work in 90 s
+0. Load saved GO MAC from NVS (net/p2p_gc_go_mac).
+   → if empty (never paired): stay idle; do nothing until a pairing gesture (see below).
+   → if present: proceed to step 1.
+
+1. Issue WIFI_P2P_CONNECT to the saved MAC using method=PBC and flag=--join
+   ("wifi p2p connect <saved-MAC> pbc --join")
+   → set p2p_gc_pending = true; schedule p2p_gc_timeout_work in 90 s
 
 2a. NET_EVENT_WIFI_CONNECT_RESULT success →
-    → wifi_p2p_client_setup_static_ip(): assign 192.168.7.2/24 to wlan0
-    → zego_on_net_event_dhcp_bound(P2P_CLIENT, "192.168.7.2", mac, "P2P") called
-    → cancel timeout work; p2p_client_pending = false
+    → wifi_p2p_gc_setup_static_ip(): assign 192.168.7.2/24 to wlan0
+    → zego_on_net_event_dhcp_bound(P2P_GC, "192.168.7.2", mac, "P2P") called
+    → cancel timeout work; p2p_gc_pending = false
     → schedule dhcp_diag_work(100 ms) to stop any lingering DHCP client
 
-2b. NET_EVENT_WIFI_CONNECT_RESULT failure (GO not found) →
+2b. NET_EVENT_WIFI_CONNECT_RESULT failure (GO not reachable) →
     → log warning; timeout work still armed
 
-3.  p2p_client_timeout_work fires after P2P_CLIENT_CONNECT_TIMEOUT_S (90 s) →
+3.  p2p_gc_timeout_work fires after P2P_GC_CONNECT_TIMEOUT_S (90 s) →
     → wpa_supplicant has exhausted its 10 internal join-scan attempts and is idle
-    → p2p_client_pending = false; go back to step 1 (fresh P2P_CONNECT)
+    → p2p_gc_pending = false; go back to step 1 (fresh P2P_CONNECT to saved MAC)
 
-4.  NET_EVENT_WIFI_DISCONNECT_RESULT in P2P_CLIENT mode →
+4.  NET_EVENT_WIFI_DISCONNECT_RESULT in P2P_GC mode →
     → cancel any pending connect timeout
     → zego_on_net_event_wifi_disconnect() called
-    → schedule reconnect in P2P_CLIENT_RECONNECT_DELAY_S (15 s) to allow wpa_supplicant
+    → schedule reconnect in P2P_GC_RECONNECT_DELAY_S (15 s) to allow wpa_supplicant
       background cleanup scan to drain before next connect attempt
     → go back to step 1
 ```
 
-> **Why 90 s timeout?** `wpa_supplicant` attempts `P2P_MAX_JOIN_SCAN_ATTEMPTS` (10) scans
-> of ~8–9 s each before silently giving up. 90 s gives the 10-scan cycle a safe margin so
-> we never race with an in-progress scan when re-issuing `P2P_CONNECT`.
+> **Reconnect after power cycle**: because the GO MAC is persisted, a freshly-booted GC with
+> a saved MAC re-enters step 1 automatically. The paired GO keeps its WPS PBC armed
+> continuously (see [P2P_GO](#p2p_go-pairing-window)), so the `pbc --join` succeeds
+> without any button press on either device. Satisfies PRD FR-107 (5).
 
-> **Why 15 s reconnect delay?** After a clean GO deauth, `wpa_supplicant` starts a background
-> cleanup scan (5–17 s on nRF7002). Issuing `P2P_CONNECT` inside this window causes
-> `nrf_wifi_wpa_supp_scan2: Scan already in progress` errors and a stuck state.
+> **Why 90 s timeout / 15 s reconnect delay?** Same wpa_supplicant scan-cycle constraints as
+> before: `P2P_MAX_JOIN_SCAN_ATTEMPTS` (10) scans of ~8–9 s, and a 5–17 s post-deauth cleanup
+> scan that must drain before re-issuing `P2P_CONNECT`.
 
-> **Static IP instead of DHCP**: P2P_CLIENT always uses 192.168.7.2/24 (GO is 192.168.7.1).
-> `NET_EVENT_IPV4_DHCP_BOUND` is **not** used for P2P_CLIENT; `zego_on_net_event_dhcp_bound()`
-> is called directly from the `CONNECT_RESULT` success handler.
+> **Static IP instead of DHCP**: P2P_GC always uses 192.168.7.2/24 (GO is 192.168.7.1).
+> `NET_EVENT_IPV4_DHCP_BOUND` is **not** used; `zego_on_net_event_dhcp_bound()` is called
+> directly from the `CONNECT_RESULT` success handler.
 
 LED feedback flows through `APP_WIFI_STATE_CHAN` in `net_event_app.c` — the UX module sees
-`APP_WIFI_STATE_CONNECTING` during discovery and `APP_WIFI_STATE_CONNECTED` after CONNECT_RESULT,
-driving the same ROTATE → solid-ON LED transitions as STA mode.
+`APP_WIFI_STATE_CONNECTING` during the connect and `APP_WIFI_STATE_CONNECTED` after
+CONNECT_RESULT, driving the same ROTATE → solid-ON LED transitions as STA mode.
 
 ---
 
-## P2P_CLIENT MAC-Prefix Auto-Select Sequence
+## P2P_GC Pairing Sequence (button-triggered)
 
-When `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` ends in `:00:00:00` (e.g. `F4:CE:36:00:00:00`),
-`wifi_run_p2p_client_mode()` operates in **prefix mode** instead of exact-MAC mode.
-
-**Prefix detection**: at startup, the function checks whether bytes [3..5] of the configured
-MAC are all zero. If so, prefix mode is selected; otherwise exact-MAC mode runs unchanged.
+Pairing replaces the old compile-time target-MAC mechanism. It is triggered by
+`wifi_p2p_start_pairing()` (called from the UX module on a double-click of Button 0 while in
+P2P_GC mode — see ux-module spec). The GC discovers the GO that is currently in its WPS PBC
+pairing window, joins it (`pbc --join`), and **persists the GO's MAC** so all future
+reconnects use the saved-MAC path above.
 
 ```
-Prefix mode sequence:
+Pairing sequence (on wifi_p2p_start_pairing in P2P_GC mode):
 
-1. Issue WIFI_P2P_FIND (WIFI_P2P_FIND_ONLY_SOCIAL, timeout=P2P_PREFIX_FIND_TIMEOUT_S=10 s)
+1. Issue WIFI_P2P_FIND (WIFI_P2P_FIND_ONLY_SOCIAL, timeout=P2P_PAIR_FIND_TIMEOUT_S=10 s)
    Set p2p_find_running=true; reschedule work item in (10 + 2) s.
 
-   NOTE: NET_EVENT_WIFI_P2P_DEVICE_FOUND events are NOT used for candidate collection.
-   That event fires only for newly-discovered peers; cached peers (present in
-   wpa_supplicant's internal peer table from a prior session or scan) never re-fire the
-   event even though `wifi p2p peer` shows them. Using events would silently miss
-   already-known GOs.
+   NOTE: NET_EVENT_WIFI_P2P_DEVICE_FOUND events are NOT used for candidate collection
+   (cached peers never re-fire the event). The peer table is queried directly instead.
 
-2. After find window elapses (+2 s margin, p2p_find_running=true):
+2. After the find window elapses (+2 s margin):
    Set p2p_find_running=false.
    Query peer table: WIFI_P2P_PEER + broadcast MAC (0xFF:FF:FF:FF:FF:FF) via
-   NET_REQUEST_WIFI_P2P_OPER — equivalent to `wifi p2p peer` shell command.
-   Buffer: static peer_buf[P2P_PREFIX_MAX_CANDIDATES=5] (BSS; cleared with memset before
-   each query).
+   NET_REQUEST_WIFI_P2P_OPER — equivalent to `wifi p2p peer`.
+   Buffer: static peer_buf[P2P_PAIR_MAX_CANDIDATES=5] (BSS; memset before each query).
 
-3. Filter and select:
-   → for each entry in peer table: if MAC[0..2] matches the 3-byte prefix, log it
-   → keep the entry with highest RSSI (best=-1 if none match)
-   → if no match: log warning; schedule retry in P2P_CLIENT_CONNECT_TIMEOUT_S (90 s)
-   → if match found: issue WIFI_P2P_CONNECT (method=PBC, --join) to best RSSI MAC
+3. Select the GO:
+   → consider ONLY peers whose `group_capab` has the P2P Group-Owner bit set
+     (BIT(0), `P2P_GROUP_CAPAB_GROUP_OWNER`) — non-GO P2P devices (e.g. a phone
+     mid-discovery) are skipped so the GC never locks onto a nearby non-GO peer
+   → among those GO peers, keep the entry with the highest RSSI (handles the rare multi-GO case)
+   → if none found: log warning; schedule one retry in P2P_GC_CONNECT_TIMEOUT_S (90 s),
+     then give up the pairing attempt (return to idle) if still nothing
+   → if a GO is found: proceed to step 4
 
-4. Issue WIFI_P2P_CONNECT to selected MAC using method=PBC and flag=--join
-   → same flow as exact-MAC mode from this point
+4. Issue WIFI_P2P_CONNECT to the selected MAC using method=PBC and flag=--join
+   ("wifi p2p connect <selected-MAC> pbc --join")
+   → set p2p_gc_pending = true; arm the 90 s timeout (as in the reconnect sequence)
 
-5. On failure/disconnect:
-   → re-run from step 1 (fresh find+query, re-select best RSSI)
-   → this automatically follows a GO that moves channels or a better GO that appears
+5. On NET_EVENT_WIFI_CONNECT_RESULT success:
+   → save the selected GO MAC to NVS: settings_save_one("net/p2p_gc_go_mac", mac, 6)
+     (overwrites any previously-saved MAC — this is how re-pairing forgets the old GO)
+   → from here the saved-MAC reconnect path (above) owns all future (re)connects
 ```
 
-> **Why RSSI?** In a multi-GO deployment all GOs share the same OUI prefix. Connecting to
-> the strongest signal minimises latency and reduces retransmissions. On each reconnect the
-> scan is re-run so the client migrates to a closer GO if the layout changes.
+> **Why PBC?** The nRF DK acting as GO does **not** support a fixed WPS PIN: arming
+> `WIFI_WPS_PIN_SET` fails the GO's WPS Registrar init (`wps_registrar_init()`), so the GO
+> never reaches AP-ENABLED and cannot pair. PBC is the supported headless method (it is what
+> `nrf/samples/wifi/p2p` uses), needs no out-of-band PIN transfer, and works for button-only
+> pairing on both sides.
 
-> **Peer buffer**: `peer_buf` is `static` (BSS allocation, not stack). It is `memset` to zero
-> before every query, so no stale data from prior find cycles is carried over.
+> **Why discovery?** Without a configured MAC the GC must find the GO at runtime. The double
+> click on the GC is what expresses intent to pair; it joins whichever GO is currently armed.
+
+> **Pairing-trigger re-entrancy**: in P2P_GC mode `wifi_p2p_start_pairing()` ignores repeat
+> double-clicks while a pairing find/connect is already in flight (`p2p_find_running` /
+> `p2p_gc_pending`), guarding against a "Scan already in progress" error from wpa_supplicant.
+> A re-pair gesture while already connected is still honoured — it runs a fresh discovery and
+> overwrites the saved GO MAC.
+
+> **Multiple GOs**: if more than one GO is pairing simultaneously the highest-RSSI one wins.
+> This is a deliberate simplification — the expected case is one GO + one GC pairing at a time.
 
 ---
 
@@ -281,8 +317,8 @@ Prefix mode sequence:
 | `NET_EVENT_WIFI_AP_ENABLE_RESULT` success | `l2_ap_event_handler` (AP guard) | Re-assert static IP; call `zego_on_net_event_wifi_ap_enabled()` |
 | `NET_EVENT_WIFI_AP_STA_CONNECTED` | `l2_ap_event_handler` (AP guard) | Track station; `k_sem_give(&station_connected_sem)`; call `zego_on_net_event_dhcp_bound()` |
 | `NET_EVENT_WIFI_AP_STA_DISCONNECTED` | `l2_ap_event_handler` (AP guard) | Remove station from table; call `zego_on_net_event_wifi_ap_sta_disconnected()` |
-| `NET_EVENT_WIFI_CONNECT_RESULT` success (P2P_CLIENT) | `l2_wifi_conn_event_handler` | Assign static IP 192.168.7.2/24; call `zego_on_net_event_dhcp_bound()`; cancel timeout work |
-| `NET_EVENT_WIFI_DISCONNECT_RESULT` (P2P_CLIENT) | `l2_wifi_conn_event_handler` | Cancel timeout work; call `zego_on_net_event_wifi_disconnect()`; reschedule connect in 15 s |
+| `NET_EVENT_WIFI_CONNECT_RESULT` success (P2P_GC) | `l2_wifi_conn_event_handler` → `wifi_p2p_gc_on_connect_result(true)` | Assign static IP 192.168.7.2/24; call `zego_on_net_event_dhcp_bound()`; cancel timeout work; **if connect was a pairing attempt, persist the GO MAC to `net/p2p_gc_go_mac`** |
+| `NET_EVENT_WIFI_DISCONNECT_RESULT` (P2P_GC) | `l2_wifi_conn_event_handler` → `wifi_p2p_gc_on_disconnect()` | Cancel timeout work; call `zego_on_net_event_wifi_disconnect()`; reschedule connect to saved MAC in 15 s |
 | `NET_EVENT_IPV4_DHCP_BOUND` | `l3_ipv4_event_handler` | Log IP; re-query SSID; call `zego_on_net_event_dhcp_bound()` |
 | `NET_EVENT_L4_CONNECTED` | `l4_event_handler` | Log (early SSID capture placeholder) |
 | `NET_EVENT_L4_DISCONNECTED` | `l4_event_handler` | Log |
@@ -323,14 +359,17 @@ int network_wait_for_station_connected(k_timeout_t timeout);
 | Function | Purpose |
 |---|---|
 | `wifi_run_softap_mode()` | Set regulatory domain, start DHCP server, enable AP |
-| `wifi_run_p2p_go_mode()` | Create P2P group, arm WPS PBC (re-arms every 110 s); only DK P2P_CLIENT connections supported |
+| `wifi_run_p2p_go_mode()` | Create P2P group, arm WPS PBC (continuously re-armed); only DK P2P_GC connections supported |
 | `wifi_setup_dhcp_server()` | Assign static IP + start DHCPv4 server (idempotent) |
 | `wifi_utils_auto_connect_stored()` | Trigger `NET_REQUEST_WIFI_CONNECT_STORED` |
 | `wifi_utils_ensure_gateway_softap_credentials()` | Write default SoftAP creds to settings if absent |
 | `wifi_utils_get_last_ssid()` | Return last connected SSID string |
 | `wifi_softap_cancel_remind_timer()` | Cancel SoftAP periodic reminder work |
 | `wifi_p2p_go_cancel_wps_timer()` | Cancel P2P_GO WPS re-arm timer |
-| `wifi_run_p2p_client_mode()` | Start P2P connection to target GO; supports two modes: **exact MAC** (direct `--join`) and **MAC-prefix** (discover all matching GOs, connect to best RSSI) |
+| `wifi_p2p_go_rearm_wps_pin()` | Re-arm WPS PBC immediately (name kept for ABI; arms PBC). Used on client disconnect and to refresh the pairing window |
+| `wifi_run_p2p_gc_mode()` | If a GO MAC is saved in NVS, connect to it via `pbc --join` (reconnect path); else stay idle until paired |
+| `wifi_p2p_start_pairing()` | Mode-aware pairing trigger (called by UX on Button 0 double-click in P2P modes). In **P2P_GO**: refresh the WPS PBC pairing window. In **P2P_GC**: run discovery, join the pairing GO via `pbc --join`, and persist its MAC to `net/p2p_gc_go_mac`; re-entrant double-clicks are ignored while a find/connect is in flight. No-op in STA/SoftAP |
+| `wifi_p2p_gc_setup_static_ip()` | Assign 192.168.7.2/24 to wlan0 after a successful P2P_GC connect |
 | `wifi_print_status()` | Print Wi-Fi interface status to log |
 | `wifi_print_dhcp_ip()` | Print DHCP IP / netmask / GW to log |
 
@@ -348,9 +387,86 @@ int network_wait_for_station_connected(k_timeout_t timeout);
 | `CONFIG_ZEGO_WIIF_SOFTAP_BAND_5_GHZ` | bool (choice) | n | Use 5 GHz band |
 | `CONFIG_ZEGO_WIIF_SOFTAP_CHANNEL` | int (1–196) | 1 | SoftAP / P2P_GO channel |
 | `CONFIG_ZEGO_NETWORK_LOG_LEVEL` | choice | INF | Module log level |
-| `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` | string | `""` | Target P2P_GO MAC address. **Exact mode** (`XX:XX:XX:YY:YY:YY` where last 3 bytes are non-zero): connects directly to that MAC using `--join`, no discovery. **Prefix mode** (`XX:XX:XX:00:00:00`): runs P2P peer discovery, collects all GOs whose MAC starts with the first 3 bytes, connects to the one with highest RSSI |
-| `CONFIG_ZEGO_NETWORK_P2P_CLIENT_CONNECT_TIMEOUT_S` | int | 90 | Seconds to wait for CONNECT_RESULT before re-issuing P2P_CONNECT; must be > wpa_supplicant's internal join-scan cycle (~80 s for 10 attempts) |
-| `CONFIG_ZEGO_NETWORK_P2P_CLIENT_RECONNECT_DELAY_S` | int | 15 | Seconds to wait after disconnect before reconnecting; allows wpa_supplicant cleanup scan to drain |
+> **Removed**: `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` (and its exact-MAC / prefix-RSSI
+> auto-connect behaviour) is deleted. There is no replacement Kconfig — the target GO MAC is
+> learned at runtime during pairing and stored in NVS.
+
+**P2P_GC timing constants** are compile-time `#define`s in `bricks/network/src/wifi_utils.c`
+(not Kconfig):
+
+| Constant | Value | Purpose |
+|---|---|---|
+| `P2P_GC_CONNECT_TIMEOUT_S` | 90 | Wait for CONNECT_RESULT before re-issuing P2P_CONNECT; must exceed wpa_supplicant's ~64 s 10-scan join cycle |
+| `P2P_GC_RECONNECT_DELAY_S` | 15 | Wait after disconnect before reconnecting; lets the wpa_supplicant cleanup scan drain |
+| `P2P_PAIR_FIND_TIMEOUT_S` | 10 | Pairing discovery window (social-channel `WIFI_P2P_FIND`) before the peer table is queried |
+| `P2P_PAIR_MAX_CANDIDATES` | 5 | Peer-query buffer size |
+| `P2P_PAIR_MAX_FIND_CYCLES` | 2 | Empty discovery cycles before a pairing attempt gives up |
+
+**NVS persistence**: the learned GO MAC is stored at settings key **`net/p2p_gc_go_mac`**
+(6 raw MAC bytes) under a dedicated `"net"` settings subtree owned by the network brick
+(`SETTINGS_STATIC_HANDLER_DEFINE(zego_net_settings, "net", ...)`). A separate subtree from the
+wifi mode selector's `"app"` handler is required — two static handlers cannot share one subtree
+name. An empty/absent key means "never paired".
+
+---
+
+## P2P_GO Pairing Window
+
+`wifi_run_p2p_go_mode()` creates the P2P group (`WIFI_P2P_GROUP_ADD`, `persistent=-1`) and
+then arms **WPS PBC** (`WIFI_WPS_PBC` via `NET_REQUEST_WIFI_WPS_CONFIG`) so a P2P_GC can join.
+PBC is used because the nRF DK-as-GO does **not** support a fixed WPS PIN — arming
+`WIFI_WPS_PIN_SET` fails the GO's WPS Registrar init (`wps_registrar_init()`) so the GO never
+reaches AP-ENABLED. PBC is the supported headless method (it is what `nrf/samples/wifi/p2p`
+uses).
+
+```
+1. WIFI_P2P_GROUP_ADD                 → group created, SSID "DIRECT-xx"
+2. Arm WPS PBC (p2p_go_wps_work)      → GO is connectable by `pbc --join`
+3. Re-arm WPS PBC every P2P_GO_WPS_REARM_INTERVAL_S and on client disconnect
+   (wifi_p2p_go_rearm_wps_pin) so the GO stays connectable for reconnects.
+```
+
+The GO keeps WPS PBC **continuously armed** (periodic re-arm + re-arm on disconnect). This is
+required so a previously-paired GC can silently reconnect after a power cycle — the GO has no
+stored memory of which client it paired with (per the design decision: *GC stores GO MAC,
+GO stores nothing*), so it must remain connectable to any GC requesting PBC.
+
+### Double-click pairing trigger
+
+`wifi_p2p_start_pairing()` in P2P_GO mode opens/refreshes the pairing window:
+
+```
+wifi_p2p_start_pairing() [mode == P2P_GO]:
+  → log "P2P_GO: pairing window open (~PAIR_WINDOW_S) — double-click a P2P_GC to pair"
+  → wifi_p2p_go_rearm_wps_pin()   (refresh the WPS PBC pairing window immediately)
+```
+
+> The "~2-minute window" (PRD FR-006) is a UX announcement + fresh WPS PBC re-arm. Because PBC
+> is also continuously re-armed for reconnect, the GO does not hard-close the window; the
+> double click simply guarantees a fresh WPS state and signals intent in the log.
+
+---
+
+## P2P_GO WPS Registrar — heap requirement
+
+The P2P_GO hostapd path calls `wps_registrar_init()` when arming WPS, which allocates from the
+wpa_supplicant heap. With a **dedicated** supplicant K_HEAP
+(`CONFIG_WIFI_NM_WPA_SUPPLICANT_GLOBAL_HEAP=n`) that allocation failed, producing this chain:
+
+```
+Failed to initialize WPS Registrar
+→ Failed to initialize AP interface
+→ GO never reaches AP-ENABLED → cannot pair
+```
+
+**Fix**: use the **shared system heap** —
+`CONFIG_WIFI_NM_WPA_SUPPLICANT_GLOBAL_HEAP=y` (the NCS default), as `nrf/samples/wifi/p2p`
+does. Confirmed on hardware (nRF5340 Audio DK): with the shared heap the WPS Registrar
+initialises, the GO reaches AP-ENABLED, and pairing succeeds.
+
+> **Trade-off**: with the global heap the supplicant no longer has a separate ZView pool — its
+> allocations are accounted against the shared system heap rather than an isolated supplicant
+> heap.
 
 ---
 
@@ -436,7 +552,7 @@ Set to `y` in `prj.conf` if multiple devices share the same network segment.
 | SoftAP | Reliable | Multicast stays on 192.168.7.0/24; works as long as a client is connected |
 | P2P_GO | Reliable | Same as SoftAP — GO is the AP |
 | STA | Router-dependent | Most home routers pass mDNS multicast; enterprise APs sometimes block it |
-| P2P_CLIENT | Unreliable | Phone acting as GO rarely forwards mDNS multicast; direct IP is the reliable fallback |
+| P2P_GC | Reliable | GO is a DK acting as AP; multicast stays on 192.168.7.0/24 |
 
 ### Enabling in prj.conf
 
@@ -487,13 +603,16 @@ CONFIG_ZEGO_NETWORK_MDNS_HTTP_PORT=80
 | SoftAP enabled | `[zego_net_event_mgmt] SoftAP enabled: SSID='...' IP='192.168.7.1' waiting for client` |
 | STA connected (DHCP) | `[zego_net_event_mgmt] NET_EVENT_IPV4_DHCP_BOUND: ip=... ssid=...` |
 | Wi-Fi disconnected | `[zego_net_event_mgmt] NET_EVENT_WIFI_DISCONNECT_RESULT: status=... reason=...` |
-| P2P_CLIENT exact-MAC connect | `[zego_wifi_utils] P2P_CLIENT: connecting to GO F4:CE:36:00:AE:EC (--join)` |
-| P2P_CLIENT prefix scan start | `[zego_wifi_utils] P2P_CLIENT: prefix mode F4:CE:36:* - peer discovery (10 s)` |
-| P2P prefix peer table query | `[zego_wifi_utils] P2P_CLIENT: peer table has N entries, filtering for prefix F4:CE:36` |
-| P2P prefix candidate | `[zego_wifi_utils] P2P_CLIENT:   [N] F4:CE:36:XX:XX:XX RSSI=-NN` |
-| P2P_CLIENT best GO selected | `[zego_wifi_utils] P2P_CLIENT: best GO F4:CE:36:XX:XX:XX RSSI=-NN dBm, connecting` |
-| P2P_CLIENT no prefix match | `[zego_wifi_utils] P2P_CLIENT: no GO with configured prefix found, retry in 90 s` |
-| P2P_CLIENT connected | `[zego_net_event_mgmt] Wi-Fi connected: mode=P2P_CLIENT ip=... ssid=DIRECT-...` |
-| P2P_CLIENT reconnect | `[zego_wifi_utils] P2P_CLIENT: disconnected, retrying in 15 s...` |
+| P2P_GO pairing window | `[zego_wifi_utils] P2P_GO: pairing window open — double-click a P2P_GC to pair` |
+| P2P_GC reconnect to saved GO | `[zego_wifi_utils] P2P_GC: reconnecting to saved GO F4:CE:36:00:AE:EC (--join)` |
+| P2P_GC no saved GO (idle) | `[zego_wifi_utils] P2P_GC: no saved GO — double-click Button 0 to pair` |
+| P2P_GC pairing scan start | `[zego_wifi_utils] P2P_GC: pairing — peer discovery (10 s)` |
+| P2P_GC peer table query | `[zego_wifi_utils] P2P_GC: peer table has N entries, selecting GO` |
+| P2P_GC candidate | `[zego_wifi_utils] P2P_GC:   [N] F4:CE:36:XX:XX:XX RSSI=-NN` |
+| P2P_GC GO selected | `[zego_wifi_utils] P2P_GC: pairing with GO F4:CE:36:XX:XX:XX RSSI=-NN dBm` |
+| P2P_GC no GO found | `[zego_wifi_utils] P2P_GC: no GO in pairing window found, giving up` |
+| P2P_GC MAC persisted | `[zego_wifi_utils] P2P_GC: saved GO F4:CE:36:XX:XX:XX to NVS` |
+| P2P_GC connected | `[zego_net_event_mgmt] Wi-Fi connected: mode=P2P_GC ip=... ssid=DIRECT-...` |
+| P2P_GC reconnect | `[zego_wifi_utils] P2P_GC: disconnected, retrying in 15 s...` |
 | mDNS active (boot) | `[zego_mdns] mDNS: device reachable as <hostname>.local` |
 | mDNS HTTP DNS-SD (boot) | `[zego_mdns] mDNS: DNS-SD _http._tcp.local port=<N>` — only when `MDNS_HTTP_PORT > 0` |

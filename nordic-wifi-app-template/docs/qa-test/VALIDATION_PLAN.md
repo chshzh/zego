@@ -5,15 +5,14 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-16-14-32 |
-| PRD Version | 2026-06-16-13-30 |
-| Specs Version | 2026-06-16-13-30 |
+| Version | 2026-06-29-22-58 |
+| PRD Version | 2026-06-29-21-44 |
+| Specs Version | 2026-06-29-21-44 |
 | NCS Version | v3.3.0 |
-| Run type | Routine smoke test (post-feature: SoftAP max-3-clients + TODO log format) |
-| Boards | nRF7002DK (SN 1050793110), nRF54LM20DK+nRF7002EB2 (SN 1051869687) |
-| nRF5340 Audio DK | Not connected — same binary config as nRF7002DK; results apply by construction |
-| ZView | Yes — both boards, during Round 2 (SoftAP sustained load) |
-| Status | Approved |
+| Run type | Post-feature: P2P button-pairing UX — core pairing + power-cycle reconnect (FR-006, FR-107) |
+| Boards | 2× nRF5340 Audio DK + nRF7002EK (SN 1050136274 = GO, SN 1050111981 = GC) |
+| ZView | No (deferred) |
+| Status | Draft — pending execution |
 
 ---
 
@@ -22,208 +21,62 @@
 | Version | Summary of changes |
 |---|---|
 | 2026-06-16-14-32 | Initial plan — 3 rounds covering all P0 FRs + selected P1s; ZView in Round 2 |
+| 2026-06-29-22-58 | Re-scoped for P2P button-pairing feature: 3 rounds on a 2× Audio DK pair (no shell — button-driven + log observe). Covers FR-006 pairing window, FR-107 pair/persist/reconnect incl. power-cycle. |
 
 ---
 
 ## Board Addressing Map
 
-| Board | SN | App shell port | rtscts | Baud | J-Link target | App ELF |
-|---|---|---|---|---|---|---|
-| nRF7002DK | 1050793110 | `/dev/tty.usbmodem0010507931103` | False | 115200 | `nRF5340_xxAA` | `build_nrf7002dk/nordic-wifi-app-template/zephyr/zephyr.elf` |
-| nRF54LM20DK+nRF7002EB2 | 1051869687 | `/dev/tty.usbmodem0010518696871` | True | 115200 | `nRF54LM20A_M33` | `build_nrf54lm20dk/nordic-wifi-app-template/zephyr/zephyr.elf` |
+| Role | Board | Serial (`--dev-id`) | App-log VCOM | Build dir | Gesture button |
+|------|-------|---------------------|--------------|-----------|----------------|
+| **P2P_GO** | nRF54LM20DK + nRF7002EB2 | 1051839157 | `/dev/tty.usbmodem0010518391571` (rtscts=True) | `build_nrf54lm20dk` | BUTTON0 (idx 0) |
+| **P2P_GC** | nRF5340 Audio DK + nRF7002EK | 1050111981 | `/dev/tty.usbmodem0010501119811` | `build_nrf5340_audio_dk` | **BTN5 (idx 4)** |
+
+> Run note (2026-06-30): the original GO Audio DK (1050136274) dropped off USB mid-flash, so the GO role moved to the nRF54LM20DK. The GO gesture button is therefore idx 0 (BUTTON0); the BTN5/idx-4 gesture is validated on the GC (Audio DK) only.
+
+> The Audio DK build has `CONFIG_SHELL=y`. Wi-Fi **mode** is set over the UART shell with `zego_wifi_mode p2p_go` / `zego_wifi_mode p2p_gc` (saves to NVS + reboots). The **pairing trigger** (double-click Button 0 = VOL-) and **power-cycle** are still physical actions by the operator. Default mode on fresh flash is STA.
 
 ---
 
 ## Coverage Matrix
 
-| TC | PRD ID | Priority | Criterion (abbreviated) | Method | Round | Board(s) |
-|---|---|---|---|---|---|---|
-| TC-001 | FR-001 | P0 | Clean build — binary already present, verify boot banner printed | Log parse | R1 | both |
-| TC-002 | FR-002 | P0 | STA shell connect → DHCP IP logged | Shell | R1 | both |
-| TC-003 | FR-003 | P0 | `wifi cred add` → reboot → auto-reconnect | Shell + reboot | R1 | both |
-| TC-004 | FR-004 | P0 | BLE prov (nRF54LM20DK only) | **SKIP** — needs phone; out of scope for this run | — | — |
-| TC-005a | FR-005 | P0 | SoftAP: up to 3 clients join 192.168.7.1 | Shell + [HUMAN] connect phone/laptop | R2 | both |
-| TC-005b | FR-005 | P0 | TODO log format: "now X/3 devices connected" on every connect/disconnect | Log parse | R2 | both |
-| TC-006 | FR-006 | P0 | P2P_GO auto-starts at boot; WPS PBC armed; DK-as-CLIENT connects within 30 s | Log parse | R3 | nRF7002DK=GO |
-| TC-007 | FR-007 | P0 | Mode persists across reboot | Shell + reboot | R2 | both |
-| TC-008 | FR-008 | P0 | `zego_on_net_event_dhcp_bound()` fires with mode/ip/mac/ssid | Log parse | R1 | both |
-| TC-009 | FR-101 | P1 | Button press logs `button_msg` on `BUTTON_CHAN` | Log parse after button press | R1 | both |
-| TC-010 | FR-103 | P1 | Heap high-water mark logged periodically | Log parse | R1 | both |
-| TC-011 | FR-104 | P1 | Long-press Button 0 ≥ 3 s → mode cycles + reboot | **[HUMAN]** press button | R2 | both |
-| TC-012 | FR-105 | P1 | LED ROTATE while connecting; solid ON when connected; ROTATE when SoftAP no clients | **[HUMAN]** visual | R1+R2 | both |
-| TC-013 | FR-106 | P1 | Double-click toggles BLE prov (nRF54LM20DK) | **SKIP** — BLE prov out of scope this run | — | — |
-| TC-014 | FR-107 | P1 | P2P_CLIENT auto-connects to GO using `TARGET_GO_MAC`; static IP 192.168.7.2/24 assigned | Log parse | R3 | nRF54LM20DK=CLIENT |
-| TC-015 | FR-108 | P1 | MAC-prefix mode: `TARGET_GO_MAC` ending `:00:00:00` → scan + best RSSI | **SKIP** — requires custom build; out of scope this run | — | — |
+| TC | PRD ref | Criterion | Round | Execution |
+|----|---------|-----------|-------|-----------|
+| TC-1 | FR-006 (1) | P2P_GO creates group + arms WPS PIN at boot | R1 | Log observe (GO) |
+| TC-2 | FR-107 (1) | Fresh P2P_GC with no saved GO stays idle (does not auto-connect) | R1 | Log observe (GC) |
+| TC-3 | FR-006 (2) / FR-107 (2) | Double-click GO opens pairing window; double-click GC discovers + joins via `pin 12345678 --join` | R1 | [HUMAN] button + log |
+| TC-4 | FR-107 (3) | On successful pair, GC saves GO MAC to NVS (`net/p2p_gc_go_mac`) | R1 | Log: "saved GO … to NVS" |
+| TC-5 | FR-006 (3) | GO logs peer connected; static IP 192.168.7.x assigned | R1 | Log observe (both) |
+| TC-6 | FR-107 (5) | **Power-cycle GC → reconnects to saved GO automatically, no button, ~30 s** | R2 | [HUMAN] power-cycle + log |
+| TC-7 | FR-107 (4) | GC reconnects automatically after a link drop (GO power-cycle) | R2 | [HUMAN] power-cycle GO + log |
+| TC-8 | FR-107 (6) | New double-click pairing on GC overwrites the saved GO (re-pair = forget) | R3 | [HUMAN] button + log |
 
 ---
 
 ## Test Rounds
 
-### Round 1 — Boot + STA Connect \[both boards\] \[ZView start\]
+### Round R1 — Pair from scratch
+1. Flash both Audio DKs (erase NVS → both boot fresh in default STA).
+2. Set roles over the shell: `zego_wifi_mode p2p_go` on the GO board, `zego_wifi_mode p2p_gc` on the GC board (each saves to NVS + reboots).
+3. Confirm **GC** log: `Current Wi-Fi Mode: P2P_GC` + `P2P_GC: no saved GO - double-click Button 0 to pair`. → **TC-2**
+4. Confirm **GO** log: group created, `P2P_GO: WPS PIN active: 12345678`. → **TC-1**
+4. **[HUMAN]** Double-click Button 0 on **GO** → log `pairing window open`. → **TC-3a**
+5. **[HUMAN]** Double-click Button 0 on **GC** → `pairing - peer discovery`, then `pairing with GO …`, `connect initiated -> pin 12345678 --join`. → **TC-3b**
+6. Confirm **GC** log: `saved GO … to NVS`, `connected to GO`. → **TC-4**
+7. Confirm **GO** log: peer connected. → **TC-5**
 
-**Objective**: Verify clean boot banner, STA shell connect, saved-cred reconnect, net_event hook,
-button log, heap log.
+### Round R2 — Reconnect after power cycle (key criterion)
+1. **[HUMAN]** Power-cycle the **GC** board (reset/replug).
+2. Confirm **GC** boot log: `saved GO … - reconnecting`, then `connected to GO` within ~30 s, **no button press**. → **TC-6**
+3. **[HUMAN]** Power-cycle the **GO** board; confirm GC logs disconnect then reconnect when GO returns. → **TC-7**
 
-**Covers**: TC-001, TC-002, TC-003, TC-008, TC-009, TC-010, TC-012 (connecting phase)
-
-**ZView**: Start recording on both boards at the beginning of this round. Keep running through Round 2.
-
-**Prerequisites**: Both boards flashed with current build (already done). Default mode = P2P_GO on fresh NVS — switch to STA first.
-
-**Steps** (both boards independently, nRF54LM20DK shell: rtscts=True, nRF7002DK shell: rtscts=False):
-
-1. Open UART on board. Capture boot log. Verify banner `Nordic Wi-Fi App Template` printed.
-2. Switch to STA mode and reboot:
-   ```
-   zego_wifi_mode sta
-   ```
-3. After reboot, connect to AP:
-   ```
-   wifi connect -s BE92U_5G -k 1 -p @BillionWIFI
-   ```
-4. Wait for DHCP IP. Verify log contains:
-   - `TODO: Device has IP ... (mac=... ssid=...)` ← TC-008
-   - `[net_event_app]` log printed ← TC-001 banner check pass
-5. Check heap log printed within 2 minutes: `heap_monitor` or similar periodic line ← TC-010
-6. Press Button 0 once (short press). Verify `button_msg` log appears ← TC-009
-7. **[HUMAN]** Observe LED 0: ROTATE while connecting → solid ON when connected ← TC-012
-8. Add saved credential and reboot to test auto-reconnect:
-   ```
-   wifi cred add BE92U_5G WPA2-PSK @BillionWIFI -k 1
-   ```
-   Then reset board:
-   ```
-   kernel reboot cold
-   ```
-9. After reboot, verify auto-reconnect (no manual `wifi connect`). Log must show DHCP IP ← TC-003
-
-**Evidence to record**: Boot banner lines, DHCP log line, heap log line, button_msg log line, IP address.
+### Round R3 — Re-pair overwrites
+1. **[HUMAN]** Double-click Button 0 on **GO** (open window), then double-click Button 0 on **GC**.
+2. Confirm **GC** log: pairing runs again and `saved GO … to NVS` (overwrites). → **TC-8**
 
 ---
 
-### Round 2 — SoftAP + Mode Persistence \[both boards\] \[ZView]\]
-
-**Objective**: Verify SoftAP brings up hotspot, clients connect with correct TODO log format,
-mode persists across reboot. Long-press mode cycle.
-
-**Covers**: TC-005a, TC-005b, TC-007, TC-011, TC-012 (SoftAP LED phase)
-
-**ZView**: Active from Round 1 through this round. This round is the peak-watermark round for ZView.
-
-**Steps** (both boards):
-
-1. Switch to SoftAP mode:
-   ```
-   zego_wifi_mode softap
-   ```
-   Board reboots. Verify log: `SoftAP: connect to ...` banner.
-2. **[HUMAN]** Observe LED 0: should ROTATE (AP up, no clients) ← TC-012
-3. **[HUMAN]** Connect a phone or laptop to the SoftAP SSID. Verify log:
-   ```
-   net_event_app: AP client connected: now 1/3 devices connected
-   ```
-   ← TC-005a, TC-005b
-4. **[HUMAN]** Connect a second device. Verify log:
-   ```
-   net_event_app: AP client connected: now 2/3 devices connected
-   ```
-5. **[HUMAN]** Disconnect one device. Verify log:
-   ```
-   net_event_app: AP client disconnected: now 1/3 devices connected
-   ```
-6. **[HUMAN]** Disconnect last device. Verify log:
-   ```
-   net_event_app: AP client disconnected: now 0/3 devices connected
-   ```
-   Observe LED returns to ROTATE ← TC-012
-7. Verify mode persists — reboot and check SoftAP re-arms without shell command:
-   ```
-   kernel reboot cold
-   ```
-   After reboot: log must show SoftAP banner (not STA) ← TC-007
-8. **[HUMAN]** Long-press Button 0 for ≥ 3 s. Verify log shows mode changed and device reboots into next mode ← TC-011
-
-**Evidence to record**: TODO log lines with X/3 format, mode-persists log after reboot, button long-press reboot log.
-
----
-
-### Round 3 — P2P GO + CLIENT Pair \[cross-board\] \[ZView stop\]
-
-**Objective**: Verify P2P_GO auto-starts and DK-as-P2P_CLIENT auto-connects using TARGET_GO_MAC.
-
-**Covers**: TC-006, TC-014
-
-**Board assignment**:
-- **nRF7002DK** → P2P_GO
-- **nRF54LM20DK** → P2P_CLIENT
-
-**Steps**:
-
-1. On nRF7002DK: switch to P2P_GO mode:
-   ```
-   zego_wifi_mode p2p_go
-   ```
-   After reboot, capture boot log. Note the MAC address printed in banner:
-   `P2P_GO mode: group up, PBC armed - this DK's MAC: XX:XX:XX:XX:XX:XX`
-   Record as `<GO_MAC>`.
-2. Verify nRF7002DK log: P2P group created at boot; WPS PBC armed ← TC-006 (partial)
-3. On nRF54LM20DK: set `TARGET_GO_MAC` to `<GO_MAC>` and switch to P2P_CLIENT:
-   ```
-   zego_wifi_mode p2p_client
-   ```
-   > **Note**: `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` is a build-time Kconfig. If the
-   > current build has a different MAC configured, use the shell `wifi p2p connect <GO_MAC> pbc --join`
-   > fallback method to verify connectivity manually instead.
-4. Verify nRF54LM20DK log within 30 s:
-   - `auto-connecting to GO <GO_MAC>` ← TC-014 criterion 1
-   - `zego_on_net_event_dhcp_bound()` called with `mode=p2p_client ip=192.168.7.2` ← TC-014 criterion 2
-5. Verify nRF7002DK log: client association logged ← TC-006 complete
-6. Stop ZView recording on both boards.
-
-**Evidence to record**: P2P_GO boot MAC log, CLIENT "auto-connecting to GO" log, CLIENT dhcp_bound log with IP 192.168.7.2.
-
----
-
-## ZView Configuration
-
-**Prerequisite Kconfig** (check current build has these — board conf already sets them via `CONFIG_THREAD_MONITOR` etc.):
-```
-CONFIG_INIT_STACKS=y
-CONFIG_THREAD_MONITOR=y
-CONFIG_THREAD_STACK_INFO=y
-CONFIG_SYS_HEAP_RUNTIME_STATS=y
-CONFIG_THREAD_NAME=y
-```
-
-**Record commands** (run in NCS terminal, one per board, start before Round 1):
-```bash
-# nRF7002DK
-west zview record \
-  -e build_nrf7002dk/nordic-wifi-app-template/zephyr/zephyr.elf \
-  -r jlink -t nRF5340_xxAA -s 1050793110 \
-  -o /tmp/zview_nrf7002dk.ndjson.gz --duration 600
-
-# nRF54LM20DK
-west zview record \
-  -e build_nrf54lm20dk/nordic-wifi-app-template/zephyr/zephyr.elf \
-  -r jlink -t nRF54LM20A_M33 -s 1051869687 \
-  -o /tmp/zview_nrf54lm20dk.ndjson.gz --duration 600
-```
-
-**Extract peaks** (after recording stops):
-```bash
-west zview dump -i /tmp/zview_nrf7002dk.ndjson.gz --json \
-  | jq '.threads[] | {name, alloc:.stack_size, watermark:.runtime.stack_watermark_percent}'
-west zview dump -i /tmp/zview_nrf54lm20dk.ndjson.gz --json \
-  | jq '.threads[] | {name, alloc:.stack_size, watermark:.runtime.stack_watermark_percent}'
-```
-
----
-
-## Out of Scope (this run)
-
-| TC | FR | Reason |
-|---|---|---|
-| TC-004 | FR-004 | BLE provisioning — requires phone; schedule separately |
-| TC-013 | FR-106 | BLE double-click — same dependency |
-| TC-015 | FR-108 | MAC-prefix mode — requires custom `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC` build; schedule separately |
+## Execution Notes
+- Operator presses buttons; the assistant monitors both UART logs (vcom0) via `chsh-ag-terminal` and records evidence lines.
+- "Double-click" window = `CONFIG_ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS` (400 ms) — two quick presses.
+- Results captured in `docs/qa-test/VALIDATION_REPORT.md`.

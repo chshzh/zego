@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/app_main` |
-| Version | 2026-06-05-09-31 |
+| Version | 2026-06-29-21-44 |
 | PRD Version | N/A (standalone library module) |
 | Status | Stable |
 
@@ -17,6 +17,7 @@
 |---|---|
 | 2026-06-04-00-00 | Initial module spec — banner merged in from zego/banner; Wi-Fi mode selector; shell command; NVS persistence |
 | 2026-06-05-09-31 | Added nRF5340 Audio DK + nRF7002EK to Supported Hardware table |
+| 2026-06-29-21-44 | Naming alignment P2P_CLIENT→P2P_GC: `enum zego_wifi_mode` value `ZEGO_WIFI_MODE_P2P_GC`, shell token `p2p_gc`, mode-selector prose. NOTE: the startup-banner P2P connection instructions (printed by `wifi.c`) will be rewritten in implementation to describe button-triggered WPS PIN (12345678) pairing instead of the removed target-GO-MAC config (see network-spec / PRD FR-006/FR-107). |
 
 ---
 
@@ -30,7 +31,7 @@ projects.  It provides three interlocking responsibilities in a single module:
    Wi-Fi instructions and module lists without touching the shared code.
 
 2. **Wi-Fi mode selector** — persists the active Wi-Fi mode (STA / SoftAP / P2P_GO /
-   P2P_CLIENT) to NVS via the Zephyr `settings` subsystem.  Publishes the loaded mode
+   P2P_GC) to NVS via the Zephyr `settings` subsystem.  Publishes the loaded mode
    on `WIFI_MODE_CHAN` at `SYS_INIT APPLICATION` priority 0 so every network module
    starts in the correct mode.
 
@@ -79,7 +80,7 @@ enum zego_wifi_mode {
     ZEGO_WIFI_MODE_STA        = 0,  /* join an existing Wi-Fi network   */
     ZEGO_WIFI_MODE_SOFTAP     = 1,  /* create an access point           */
     ZEGO_WIFI_MODE_P2P_GO     = 2,  /* P2P Group Owner (Wi-Fi Direct)   */
-    ZEGO_WIFI_MODE_P2P_CLIENT = 3,  /* join a peer's P2P group          */
+    ZEGO_WIFI_MODE_P2P_GC     = 3,  /* P2P Group Client — join a peer's group */
 };
 
 struct wifi_mode_msg {
@@ -132,7 +133,7 @@ single key plus Wi-Fi credentials.
 Available when `CONFIG_SHELL=y`.
 
 ```
-zego_wifi_mode [softap|sta|p2p_go|p2p_client]
+zego_wifi_mode [softap|sta|p2p_go|p2p_gc]
 ```
 
 - With no argument: prints current mode and usage hint.

@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-19-12-44 |
-| PRD Version | 2026-06-19-12-44 |
+| Version | 2026-06-30-13-04 |
+| PRD Version | 2026-06-30-13-00 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -17,6 +17,9 @@
 
 | Version | Summary of changes |
 |---|---|
+| 2026-06-29-23-06 | Updated to PRD v2026-06-29-23-06: default-mode design-decision row corrected to STA (matches prj.conf); validation-found doc fix. |
+| 2026-06-29-21-44 | Updated to PRD v2026-06-29-21-44: P2P pairing UX overhaul. FR-108 retired (removed `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC`). FR-006/FR-107 rewritten — button-triggered WPS pairing; GC learns + persists GO MAC in NVS (`net/p2p_gc_go_mac`); reconnect on disconnect + power cycle. ux-module.md (mode-aware double-click → `wifi_p2p_start_pairing()`) and network-spec.md updated. (WPS method was reconciled to PBC on 2026-06-30 — see below.) P2P_CLIENT→P2P_GC naming aligned. |
+| 2026-06-30-13-04 | Updated to PRD v2026-06-30-13-00. UX tweaks: board-configurable UX gesture button (`CONFIG_APP_UX_BUTTON_IDX`, =4/BTN5 on Audio DK); LED BREATHE during P2P pairing via new `zego_on_net_event_p2p_pairing(bool)` hook + `APP_WIFI_STATE_PAIRING`. Debug-session reconcile: WPS **PBC** (not fixed PIN — `WIFI_WPS_PIN_SET` fails the nRF GO's WPS Registrar init); root-cause fix `WIFI_NM_WPA_SUPPLICANT_GLOBAL_HEAP=y` (dedicated heap starved the registrar); GC GO-capability peer filter + pairing re-entrancy guard. ux-module.md + network-spec.md updated. |
 | 2026-06-19-12-44 | Updated to PRD v2026-06-19-12-44: FR-103 updated to zego/memonitor brick — spec reference changed from architecture.md to memonitor-spec.md; description updated to heap + thread watermarks. |
 | 2026-06-04-18-00 | Added UX module spec (ux-module.md); updated spec index and PRD mapping for FR-104/105/106; noted APP_WIFI_STATE_CHAN in architecture summary |
 | 2026-06-04-22-00 | Updated ux.md and PRD for revised SoftAP LED behavior (ROTATE/solid ON) |
@@ -45,11 +48,11 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 |---|---|---|
 | [1-architecture.md](1-architecture.md) | System overview, module map, Zbus channels, SYS_INIT boot sequence, memory budget | All |
 | [zego/wifi — wifi-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi/docs/wifi-spec.md) | Startup banner, Wi-Fi mode selector, `zego_wifi_mode` shell command, NVS persistence, weak override hooks | FR-001, FR-006, FR-007 |
-| [zego/network — network-spec.md](https://github.com/chshzh/zego/blob/main/modules/network/docs/network-spec.md) | Wi-Fi event handling, STA/SoftAP/P2P_GO/P2P_CLIENT paths, net event mgmt, `zego_on_net_event_dhcp_bound` weak hook | FR-002–FR-008 |
+| [zego/network — network-spec.md](https://github.com/chshzh/zego/blob/main/modules/network/docs/network-spec.md) | Wi-Fi event handling, STA/SoftAP/P2P_GO/P2P_GC paths, P2P button pairing + NVS-saved GO MAC, net event mgmt, `zego_on_net_event_dhcp_bound` weak hook | FR-002–FR-008, FR-107 |
 | [zego/wifi_ble_prov — wifi-ble-prov-spec.md](https://github.com/chshzh/zego/blob/main/modules/wifi_ble_prov/docs/wifi-ble-prov-spec.md) | BLE provisioning (nRF Wi-Fi Provisioner), `WIFI_CHAN` owner, rotating credential reconnect | FR-004 |
 | [zego/button — button-spec.md](https://github.com/chshzh/zego/blob/main/modules/button/docs/button-spec.md) | Gesture detection (click, double-click, long press), `BUTTON_CHAN` | FR-101 |
 | [zego/led — led-spec.md](https://github.com/chshzh/zego/blob/main/modules/led/docs/led-spec.md) | Per-LED state machine (static, blink, breathe, rotate), `LED_CMD_CHAN` | FR-102 |
-| [ux-module.md](ux-module.md) | Button 0 gesture map, LED 0 Wi-Fi state machine, `APP_WIFI_STATE_CHAN` definition, BLE prov toggle | FR-104, FR-105, FR-106 |
+| [ux-module.md](ux-module.md) | UX gesture button (board-configurable index `CONFIG_APP_UX_BUTTON_IDX`; mode-aware double-click: BLE prov toggle or P2P pairing trigger), LED 0 Wi-Fi state machine incl. pairing BREATHE (`APP_WIFI_STATE_PAIRING`), `APP_WIFI_STATE_CHAN` definition | FR-104, FR-105, FR-106, FR-107 |
 
 ---
 
@@ -65,11 +68,16 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | Application customisation point | Weak-hook overrides in `src/modules/network/net_event_app.c` | Single predictable file to edit; no forking of shared zego modules |
 | STA provisioning | Three parallel options (shell, cred, BLE) | Supports all use cases without requiring build-time choice |
 | BLE prov on nRF7002DK / Audio DK | Disabled (`CONFIG_ZEGO_WIFI_BLE_PROV=n`) | BLE host stack + large app exceeds 1 MB flash; re-enable if flash allows |
-| Default mode | P2P_GO | Enables out-of-box demo with no network infrastructure |
+| Default mode | STA | Set via `CONFIG_ZEGO_WIFI_DEFAULT_MODE_STA=y`; STA is the most common first-use path. Switch to P2P/SoftAP via `zego_wifi_mode` or a Button 0 long-press |
 | All modules from zego | No in-tree application modules except `net_event_app.c` and `ux.c` | Template stays minimal; feature modules are shared across all zego apps |
 | `APP_WIFI_STATE_CHAN` | Defined in `net_event_app.c`; declared in `messages.h` | Decouples network events from LED/UX logic without making the UX module depend on `zego/network` internals |
-| P2P_CLIENT auto-connect strategy | Direct `--join` to known GO MAC (`CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC`) instead of P2P discovery | Discovery+PBC+PIN sequence is unreliable on nRF7002; `--join` is deterministic and avoids scan race conditions |
-| P2P_CLIENT static IP | 192.168.7.2/24 assigned at `CONNECT_RESULT` instead of waiting for DHCP | `wpa_supplicant` on nRF7002 does not issue a DHCP lease for P2P_CLIENT; static assignment is instant and avoids a 15 s `SIGNAL_POLL` timeout |
+| P2P pairing WPS method | WPS **PBC** (Push Button Config), not a fixed PIN | A fixed PIN via `WIFI_WPS_PIN_SET` **fails the nRF GO's `wps_registrar_init()`** (confirmed on hardware), so it is unusable. PBC is the supported headless method on the nRF GO (per `nrf/samples/wifi/p2p`) and needs no out-of-band secret — the GC joins with `pbc --join`. |
+| P2P_GO WPS Registrar heap | Supplicant uses the **shared system heap** (`WIFI_NM_WPA_SUPPLICANT_GLOBAL_HEAP=y`, the NCS default) | A dedicated supplicant K_HEAP (`=n`, originally chosen for per-pool ZView monitoring) **starved `wps_registrar_init()`** → "Failed to initialize WPS Registrar" → the GO AP never reached AP-ENABLED. The global heap fixes it and freed ~10% RAM. Root-caused on hardware via supplicant DEBUG logging. |
+| P2P pairing model | Button-triggered pairing; GC learns the GO MAC at runtime and persists it to NVS (`net/p2p_gc_go_mac`); no compile-time MAC | Removes the `CONFIG_..._TARGET_GO_MAC` build dependency; double-click on both devices matches a "press a button to pair" UX; reconnect reuses the deterministic `pbc --join`-to-known-MAC path. The GC filters discovered peers to actual GOs (`group_capab` GO bit) so it doesn't lock onto nearby non-GO P2P devices. |
+| P2P silent reconnect mechanism | GO keeps WPS PBC **continuously armed**; GC reconnects to the saved MAC (no pairing gesture on reconnect) | Forced by the *GC-stores-MAC, GO-stores-nothing* persistence choice: the GO has no memory of its client, so it must stay connectable for the GC to rejoin after a power cycle. Persistent-group/invitation reconnect was rejected as higher-risk and would require GO-side peer storage. |
+| UX gesture button index | Board-configurable via `CONFIG_APP_UX_BUTTON_IDX` (default 0; **4 / BTN5 on nRF5340 Audio DK**) | Lets each board pick which physical button carries the UX gestures without forking `ux.c`; the Audio DK frees VOL- (idx 0) for the application and uses BTN5. |
+| Pairing LED feedback | LED 0 BREATHEs during P2P pairing (both roles), via the `zego_on_net_event_p2p_pairing(bool)` weak hook → `APP_WIFI_STATE_PAIRING` | Keeps the LED state machine driven by network events (single source of truth) rather than a local UX timer, so the breathe reliably ends when pairing connects/fails. |
+| P2P_GC static IP | 192.168.7.2/24 assigned at `CONNECT_RESULT` instead of waiting for DHCP | `wpa_supplicant` on nRF7002 does not issue a DHCP lease for P2P_GC; static assignment is instant and avoids a 15 s `SIGNAL_POLL` timeout |
 | BLE provisioner mode gate | `wifi_ble_prov_init()` exits early when mode ≠ STA | Prevents BLE GATT notification spam in P2P and SoftAP modes; module remains compiled-in so runtime mode switch to STA still works |
 
 ---
@@ -83,17 +91,17 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | FR-003 STA saved credentials | [network-spec.md](../../network/docs/network-spec.md) | Specified |
 | FR-004 STA BLE provisioning | [wifi-ble-prov-spec.md](../../wifi_ble_prov/docs/wifi-ble-prov-spec.md) | Specified |
 | FR-005 SoftAP mode | [network-spec.md](../../network/docs/network-spec.md) | Specified |
-| FR-006 P2P_GO mode | [network-spec.md](../../network/docs/network-spec.md) | Specified |
+| FR-006 P2P_GO mode + pairing window | [network-spec.md](../../network/docs/network-spec.md) | Specified |
 | FR-007 Mode persistence | [wifi-spec.md](../../wifi/docs/wifi-spec.md) | Specified |
 | FR-008 Net event hook | [1-architecture.md](1-architecture.md) | Specified |
 | FR-101 Button events | [button-spec.md](../../button/docs/button-spec.md) | Specified |
 | FR-102 LED control | [led-spec.md](../../led/docs/led-spec.md) | Specified |
 | FR-103 Heap + thread watermarks | [zego/memonitor — memonitor-spec.md](https://github.com/chshzh/zego/blob/main/bricks/memonitor/docs/memonitor-spec.md) | Specified |
 | FR-104 Button 0 mode cycle | [ux-module.md](ux-module.md) | Specified |
-| FR-105 LED Wi-Fi state feedback | [ux-module.md](ux-module.md) | Specified |
-| FR-106 BLE prov double-click | [ux-module.md](ux-module.md) | Specified |
-| FR-107 P2P_CLIENT auto-connect | [network-spec.md](../../network/docs/network-spec.md) | Specified |
-| FR-108 P2P_CLIENT MAC-prefix auto-select | [network-spec.md](../../network/docs/network-spec.md) | Specified |
+| FR-105 LED Wi-Fi state feedback (incl. pairing BREATHE) | [ux-module.md](ux-module.md) + [network-spec.md](../../network/docs/network-spec.md) | Specified |
+| FR-106 BLE prov double-click (STA/SoftAP only) | [ux-module.md](ux-module.md) | Specified |
+| FR-107 P2P_GC button pairing + NVS reconnect | [network-spec.md](../../network/docs/network-spec.md) + [ux-module.md](ux-module.md) | Specified |
+| FR-108 *(removed — superseded by FR-107 pairing)* | — | Retired |
 
 ---
 
