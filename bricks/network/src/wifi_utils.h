@@ -94,7 +94,7 @@ int wifi_set_mode(int mode);
 int wifi_set_tx_injection_mode(void);
 
 /**
- * @brief Start P2P_GO mode: create autonomous group, set WPS PIN (12345678).
+ * @brief Start P2P_GO mode: create autonomous group, arm WPS PBC.
  *
  * @return 0 on success, negative error code on failure.
  */
@@ -111,61 +111,66 @@ void wifi_softap_cancel_remind_timer(void);
 void wifi_p2p_go_cancel_wps_timer(void);
 
 /**
- * @brief Re-arm WPS PIN on the GO so a disconnected client can reconnect.
+ * @brief Re-arm WPS PBC on the GO so a (disconnected) client can (re)connect.
  *
- * Call this when a P2P_GO station disconnects.  This function re-sets the
- * WPS PIN so the client can reconnect using:
- *   DK:    wifi p2p connect <MAC> pin 12345678 --join
- *   Phone: Wi-Fi Direct -> select DK -> enter PIN 12345678
+ * Call this when a P2P_GO station disconnects, or to refresh the pairing
+ * window.  Re-arms WPS PBC so a P2P_GC can join using:
+ *   wifi p2p connect <GO MAC> pbc --join
+ * (Name kept for ABI stability; the GO uses PBC, not a PIN.)
  */
 void wifi_p2p_go_rearm_wps_pin(void);
 
 /**
  * @brief Start P2P_GC mode.
  *
- * If CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC is set, automatically initiates
- * 'wifi p2p connect <MAC> pbc --join', retrying every 10 s until success.
- * Otherwise prints manual-connect instructions and returns.
+ * Loads the saved GO MAC from NVS (settings key "net/p2p_gc_go_mac").  If a GO
+ * was previously paired, immediately reconnects to it via
+ * 'wifi p2p connect <MAC> pbc --join', retrying until success.  If no GO is
+ * saved, stays idle until wifi_p2p_start_pairing() is called.
  *
  * @return 0 on success, negative error code on failure.
  */
 int wifi_run_p2p_gc_mode(void);
 
 /**
- * @brief Notify P2P_GC auto-connect of a CONNECT_RESULT event.
+ * @brief Trigger button-driven P2P pairing (mode-aware).
+ *
+ * Call on a Button 0 double-click while in a P2P mode:
+ *   - P2P_GO: refresh the WPS PBC pairing window (re-arm so a GC can join).
+ *   - P2P_GC: run discovery, join the strongest P2P_GO via WPS PBC
+ *             'pbc --join', and persist its MAC to NVS on success
+ *             (overwriting any previous pairing).
+ * No-op in STA / SoftAP modes.
+ */
+void wifi_p2p_start_pairing(void);
+
+/**
+ * @brief Notify P2P_GC of a CONNECT_RESULT event.
  *
  * Call from the CONNECT_RESULT handler for P2P_GC mode:
- *   - success=true  → cancel retry work
- *   - success=false → schedule next attempt in 10 s
- *
- * No-op if CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC is empty (manual mode).
+ *   - success=true  → stop retries; if this was a pairing connect, persist the
+ *                     learned GO MAC to NVS.
+ *   - success=false → schedule the next attempt in 10 s.
  *
  * @param success true if CONNECT_RESULT status == 0, false otherwise.
  */
 void wifi_p2p_gc_on_connect_result(bool success);
 
 /**
- * @brief Notify P2P_GC auto-connect of a DISCONNECT_RESULT event.
+ * @brief Notify P2P_GC of a DISCONNECT_RESULT event.
  *
- * Resets the connected + pending flags and schedules a reconnect attempt
- * in 5 s so the GC re-joins the GO automatically after link loss.
- *
- * No-op if CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC is empty or if the
- * GC was not connected.
+ * Resets the connected/pending flags and schedules the next attempt: pairing
+ * discovery if a re-pair is in progress, otherwise a reconnect to the saved GO.
+ * Ignores spurious disconnects when neither connected nor pairing.
  */
 void wifi_p2p_gc_on_disconnect(void);
 
 /**
- * @brief Notify P2P_GC that a P2P peer was found during the pre-discovery scan.
+ * @brief Notify P2P_GC that a P2P peer was found during a discovery scan.
  *
- * Called from the NET_EVENT_WIFI_P2P_DEVICE_FOUND handler.
- *
- * In **exact-MAC mode**: if @p mac matches CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC,
- * immediately cancels the find phase and schedules WIFI_P2P_CONNECT.
- *
- * In **prefix mode** (last 3 bytes of target MAC are 00:00:00): accumulates all
- * discovered peers whose MAC matches the configured 3-byte OUI prefix, then
- * connects to the one with the best (highest) @p rssi once the find completes.
+ * Called from the NET_EVENT_WIFI_P2P_DEVICE_FOUND handler.  Pairing uses a
+ * direct peer-table query after P2P_FIND completes (cached peers do not
+ * re-fire this event), so this handler only logs for diagnostics.
  *
  * @param mac  6-byte P2P device address from the discovery event.
  * @param rssi Signal strength reported in the discovery event (dBm).

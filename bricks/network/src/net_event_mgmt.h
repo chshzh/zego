@@ -93,4 +93,20 @@ void zego_on_net_event_wifi_ap_enabled(enum zego_wifi_mode mode, const char *ip_
  */
 void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients);
 
+/**
+ * @brief Called when P2P pairing starts (@p active = true) or ends
+ *        (@p active = false).
+ *
+ * Weak hook — override in the application to drive a pairing indication
+ * (e.g. LED BREATHE).  Fired on both roles:
+ *   - P2P_GO: true when the WPS PBC pairing window is (re)opened, false when
+ *     the window expires or a client connects.
+ *   - P2P_GC: true when discovery starts, false on connect success or give-up.
+ *
+ * The default implementation is a no-op.
+ *
+ * @param active  true = pairing in progress, false = pairing ended.
+ */
+void zego_on_net_event_p2p_pairing(bool active);
+
 #endif /* NET_EVENT_MGMT_H */

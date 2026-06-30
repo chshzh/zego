@@ -399,6 +399,11 @@ void __weak zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 	ARG_UNUSED(remaining_clients);
 }
 
+void __weak zego_on_net_event_p2p_pairing(bool active)
+{
+	ARG_UNUSED(active);
+}
+
 /* ============================================================================
  * L2: INTERFACE EVENT HANDLER  (NET_EVENT_IF_UP / NET_EVENT_IF_DOWN)
  * ============================================================================
@@ -842,14 +847,14 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 	}
 	wifi_print_status();
 
-	bool is_p2p_gc = (active_mode == ZEGO_WIFI_MODE_P2P_GC) ||
-			 (strncmp(sta_ssid, "DIRECT-", 7) == 0);
+	bool is_p2p_gc =
+		(active_mode == ZEGO_WIFI_MODE_P2P_GC) || (strncmp(sta_ssid, "DIRECT-", 7) == 0);
 	char mac[18];
 
 	iface_mac_to_str(iface, mac);
 
-	zego_on_net_event_dhcp_bound(is_p2p_gc ? ZEGO_WIFI_MODE_P2P_GC : ZEGO_WIFI_MODE_STA,
-				     ip, mac, sta_ssid);
+	zego_on_net_event_dhcp_bound(is_p2p_gc ? ZEGO_WIFI_MODE_P2P_GC : ZEGO_WIFI_MODE_STA, ip,
+				     mac, sta_ssid);
 }
 
 /* ============================================================================

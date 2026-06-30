@@ -68,22 +68,11 @@ config ZEGO_WIIF_SOFTAP_CHANNEL
 endmenu # "SoftAP Configuration"
 
 # ---------------------------------------------------------------------------
-# P2P Client Configuration
+# P2P GC: no build-time configuration.
+# The target GO MAC is learned at runtime via button-triggered WPS PIN pairing
+# (wifi_p2p_start_pairing) and persisted in NVS at settings key
+# "net/p2p_gc_go_mac".  See bricks/network/docs/network-spec.md.
 # ---------------------------------------------------------------------------
-
-menu "P2P GC Configuration"
-depends on WIFI_NM_WPA_SUPPLICANT_P2P
-
-config ZEGO_WIFI_P2P_GC_TARGET_GO_MAC
-	string "P2P_GC: target GO MAC for auto-connect"
-	default ""
-	help
-	  When non-empty (e.g. "F4:CE:36:00:6E:B1"), P2P_GC mode
-	  automatically runs 'wifi p2p connect <MAC> pbc --join' at boot,
-	  retrying every 10 s until CONNECT_RESULT: success.
-	  Leave empty to connect manually via the shell.
-
-endmenu # "P2P GC Configuration"
 
 # ---------------------------------------------------------------------------
 # STA Configuration

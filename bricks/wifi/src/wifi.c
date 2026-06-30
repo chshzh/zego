@@ -194,55 +194,24 @@ void zego_banner_wifi_info(void)
 				 _mac->addr[0], _mac->addr[1], _mac->addr[2], _mac->addr[3],
 				 _mac->addr[4], _mac->addr[5]);
 		}
-		if (CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC[0] != '\0') {
-			LOG_INF(CLR_PRP
-				"P2P_GC DK is configured to auto-connect to this GO." CLR_RST);
-		} else {
-			LOG_INF(CLR_PRP "P2P_GC can connect via WPS PIN using one of the options "
-					"below:" CLR_RST);
-			LOG_INF(CLR_PRP "[ DK as P2P_GC ]" CLR_RST);
-			LOG_INF(CLR_PRP
-				"  P2P_GC DK:  wifi p2p connect %s pin 12345678 --join" CLR_RST,
-				mac_str);
-			LOG_INF(CLR_PRP "[ Phone as P2P_GC ]" CLR_RST);
-			LOG_INF(CLR_PRP
-				"  1. Phone: Turn on Wi-Fi, disconnect from other APs" CLR_RST);
-			LOG_INF(CLR_PRP
-				"  2. Phone: Wi-Fi Direct -> wait for DK, select it, enter PIN "
-				"12345678" CLR_RST);
-		}
+		LOG_INF(CLR_PRP "P2P_GO: GO MAC %s" CLR_RST, mac_str);
+		LOG_INF(CLR_PRP "  To pair a P2P_GC DK: double-click Button 0 here to open the "
+				"WPS PIN window," CLR_RST);
+		LOG_INF(CLR_PRP "  then double-click Button 0 on the P2P_GC DK." CLR_RST);
+		LOG_INF(CLR_PRP "  Manual (on the GC): wifi p2p connect %s pbc --join" CLR_RST,
+			mac_str);
 		break;
 	}
 #endif /* CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED */
 
 #if CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
 	case ZEGO_WIFI_MODE_P2P_GC:
-		if (CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC[0] != '\0') {
-			LOG_INF(CLR_PRP
-				"P2P_GC mode: auto-connecting to GO %s (pin 12345678 --join, "
-				"retry every 90 s)" CLR_RST,
-				CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC);
-		} else {
-			LOG_INF(CLR_PRP "P2P_GC mode: connect to a P2P_GO DK via WPS PIN:" CLR_RST);
-			LOG_INF(CLR_PRP "[ DK GO ]" CLR_RST);
-			LOG_INF(CLR_PRP
-				"  If you have the GO's MAC(see GO logs), run directly:" CLR_RST);
-			LOG_INF(CLR_PRP
-				"    wifi p2p connect <GO MAC> pin 12345678 --join" CLR_RST);
-			LOG_INF(CLR_PRP "  Otherwise, discover first:" CLR_RST);
-			LOG_INF(CLR_PRP "  1. wifi p2p find" CLR_RST);
-			LOG_INF(CLR_PRP "  2. wifi p2p peer       (note GO MAC)" CLR_RST);
-			LOG_INF(CLR_PRP
-				"  3. wifi p2p connect <GO MAC> pin 12345678 --join" CLR_RST);
-			LOG_INF(CLR_PRP "[ Phone GO ] (NOT recommended -- Android routing + mDNS "
-					"blocked)" CLR_RST);
-			LOG_INF(CLR_PRP
-				"  1. Phone: Turn on Wi-Fi, disconnect from other APs" CLR_RST);
-			LOG_INF(CLR_PRP "  2. wifi p2p find" CLR_RST);
-			LOG_INF(CLR_PRP "  3. wifi p2p peer       (find phone MAC)" CLR_RST);
-			LOG_INF(CLR_PRP "  4. wifi p2p connect <phone MAC> pbc -g 0" CLR_RST);
-			LOG_INF(CLR_PRP "  5. Phone: accept the invitation" CLR_RST);
-		}
+		LOG_INF(CLR_PRP "P2P_GC mode: double-click Button 0 to pair with a P2P_GO DK "
+				"(its pairing window must be open)." CLR_RST);
+		LOG_INF(CLR_PRP "  Once paired, the GO MAC is saved to NVS and the GC reconnects "
+				"automatically after reboot." CLR_RST);
+		LOG_INF(CLR_PRP "  Manual: wifi p2p find -> wifi p2p peer -> "
+				"wifi p2p connect <GO MAC> pbc --join" CLR_RST);
 		break;
 #endif /* CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED */
 

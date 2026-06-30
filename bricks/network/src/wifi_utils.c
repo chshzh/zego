@@ -22,11 +22,14 @@
 #include <zephyr/net/socket.h>
 #include <zephyr/net/wifi_credentials.h>
 #include <zephyr/net/wifi_utils.h>
+#include <zephyr/settings/settings.h>
 #include <zephyr/sys/util.h>
 #include <errno.h>
 #include <string.h>
 
+#include <wifi.h>
 #include "wifi_utils.h"
+#include "net_event_mgmt.h" /* zego_on_net_event_p2p_pairing() */
 
 LOG_MODULE_REGISTER(zego_wifi_utils, CONFIG_ZEGO_NETWORK_LOG_LEVEL);
 
@@ -376,7 +379,7 @@ static void softap_remind_handler(struct k_work *work)
 #else
 		"(unconfigured)"
 #endif
-		);
+	);
 	k_work_schedule(&softap_remind_work, K_SECONDS(SOFTAP_REMIND_TIMEOUT_S));
 }
 
@@ -501,9 +504,14 @@ int wifi_print_status(void)
  *   1. group_add   - create an autonomous (non-persistent) P2P group.
  *                    CONNECT_RESULT fires once the group is up; net_event_mgmt.c
  *                    starts the DHCP server there.
- *   2. wps_pin     - set WPS PIN (12345678).  Clients join with:
- *                      DK:    wifi p2p connect <THIS_MAC> pin 12345678 --join
- *                      Phone: Wi-Fi Direct -> select DK -> enter PIN 12345678
+ *   2. wps_pbc     - arm WPS PBC (WIFI_WPS_PBC), continuously re-armed.  A P2P_GC
+ *                    DK joins with:
+ *                      wifi p2p connect <THIS_MAC> pbc --join
+ *                    PBC needs no out-of-band secret, so button-only pairing
+ *                    works.  A FIXED PIN (WIFI_WPS_PIN_SET) is NOT used: it fails
+ *                    the WPS Registrar init on the nRF GO and tears down the AP
+ *                    interface.  The nRF GO supports PBC or a GO-generated random
+ *                    PIN (WIFI_WPS_PIN_GET) only - see nrf/samples/wifi/p2p.
  *
  * NOTE: P2P_FIND (discovery scan) must NOT be called on a running GO.
  * A GO is already beaconing on its operating channel; clients find it by
@@ -522,10 +530,22 @@ K_THREAD_STACK_DEFINE(p2p_wps_workq_stack, P2P_WPS_WORKQ_STACK_SIZE);
 static struct k_work_q p2p_wps_workq;
 static bool p2p_wps_workq_started;
 static struct k_work_delayable p2p_go_wps_retry_work;
+static struct k_work_delayable p2p_go_pair_window_work;
 
-#define P2P_GO_WPS_PIN              "12345678"
-/* Re-arm WPS PIN after this many seconds if no client has connected. */
+/* Re-arm WPS PBC after this many seconds so the GO stays connectable. */
 #define P2P_GO_WPS_REARM_INTERVAL_S 300
+
+/* How long the LED breathes after a GO pairing double-click (UX cue only — the
+ * GO actually stays connectable continuously). */
+#define P2P_GO_PAIR_WINDOW_S 120
+
+/* Pairing window elapsed: stop the BREATHE indication. zego_on_net_event_p2p_pairing
+ * resolves the LED back to CONNECTED (if a client joined) or ROTATE otherwise. */
+static void p2p_go_pair_window_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	zego_on_net_event_p2p_pairing(false);
+}
 
 static void p2p_go_set_wps_pin_handler(struct k_work *work)
 {
@@ -536,23 +556,25 @@ static void p2p_go_set_wps_pin_handler(struct k_work *work)
 		return;
 	}
 
-	struct wifi_wps_config_params wps = {.oper = WIFI_WPS_PIN_SET};
-
-	snprintf(wps.pin, sizeof(wps.pin), "%s", P2P_GO_WPS_PIN);
+	/* Arm WPS PBC (Push Button Config).  The nRF GO supports PBC and
+	 * GO-generated PIN (WIFI_WPS_PIN_GET); it does NOT support a fixed PIN via
+	 * WIFI_WPS_PIN_SET - that fails the WPS Registrar init and tears down the
+	 * AP interface.  PBC is the headless-friendly method: the GC joins with
+	 * 'pbc --join' and no PIN needs to be conveyed out of band. */
+	struct wifi_wps_config_params wps = {.oper = WIFI_WPS_PBC};
 
 	int ret = net_mgmt(NET_REQUEST_WIFI_WPS_CONFIG, iface, &wps, sizeof(wps));
 
 	if (ret) {
-		LOG_ERR("P2P_GO: WPS PIN set failed (%d)", ret);
+		LOG_ERR("P2P_GO: WPS PBC arm failed (%d)", ret);
 	} else {
-		LOG_INF("P2P_GO: WPS PIN active: %s", P2P_GO_WPS_PIN);
+		LOG_INF("P2P_GO: WPS PBC armed - GC can join with 'pbc --join'");
 		LOG_INF("P2P_GO: GO is beaconing - clients discover via Wi-Fi Direct scan");
 	}
 
-	/* Re-arm periodically so the GO remains connectable after the PIN window expires.
-	 * DO NOT call P2P_FIND here - it always fails on a running GO because the
-	 * radio is anchored to the group channel and cannot scan social channels.
-	 * Clients find this GO by scanning ch1/6/11 and reading the Probe Response. */
+	/* Re-arm periodically so the GO remains connectable after the PBC walk
+	 * timer expires.  DO NOT call P2P_FIND here - it always fails on a running
+	 * GO because the radio is anchored to the group channel. */
 	k_work_reschedule_for_queue(&p2p_wps_workq, k_work_delayable_from_work(work),
 				    K_SECONDS(P2P_GO_WPS_REARM_INTERVAL_S));
 }
@@ -569,8 +591,23 @@ void wifi_p2p_go_rearm_wps_pin(void)
 	if (!p2p_wps_workq_started) {
 		return;
 	}
-	LOG_INF("P2P_GO: re-arming WPS PIN for client reconnect");
+	LOG_INF("P2P_GO: re-arming WPS PBC for client (re)connect");
 	k_work_reschedule_for_queue(&p2p_wps_workq, &p2p_go_wps_retry_work, K_NO_WAIT);
+}
+
+/* P2P_GO double-click: refresh the PBC window and start the LED-breathe cue for
+ * P2P_GO_PAIR_WINDOW_S (the GO stays connectable continuously; the window is a
+ * UX cue). The window-end work clears the breathe. */
+static void wifi_p2p_go_open_pairing_window(void)
+{
+	LOG_INF("P2P_GO: pairing window open (~%d s) - double-click a P2P_GC to pair",
+		P2P_GO_PAIR_WINDOW_S);
+	wifi_p2p_go_rearm_wps_pin();
+	zego_on_net_event_p2p_pairing(true);
+	if (p2p_wps_workq_started) {
+		k_work_reschedule_for_queue(&p2p_wps_workq, &p2p_go_pair_window_work,
+					    K_SECONDS(P2P_GO_PAIR_WINDOW_S));
+	}
 }
 
 int wifi_run_p2p_go_mode(void)
@@ -596,7 +633,7 @@ int wifi_run_p2p_go_mode(void)
 		return ret;
 	}
 
-	LOG_INF("P2P_GO: group created - setting WPS PIN and starting discovery");
+	LOG_INF("P2P_GO: group created - arming WPS PBC");
 
 	if (!p2p_wps_workq_started) {
 		k_work_queue_init(&p2p_wps_workq);
@@ -606,6 +643,7 @@ int wifi_run_p2p_go_mode(void)
 		p2p_wps_workq_started = true;
 	}
 	k_work_init_delayable(&p2p_go_wps_retry_work, p2p_go_set_wps_pin_handler);
+	k_work_init_delayable(&p2p_go_pair_window_work, p2p_go_pair_window_handler);
 	k_work_schedule_for_queue(&p2p_wps_workq, &p2p_go_wps_retry_work, K_NO_WAIT);
 
 	return 0;
@@ -631,30 +669,33 @@ void wifi_p2p_go_rearm_wps_pin(void)
 #endif /* CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P && CONFIG_WIFI_NM_WPA_SUPPLICANT_WPS */
 
 /* ============================================================================
- * P2P_GC AUTO-CONNECT
+ * P2P_GC PAIRING + AUTO-RECONNECT
  * ============================================================================
  *
- * When CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC is a non-empty string, P2P_GC
- * automatically runs 'wifi p2p connect <MAC> pin 12345678 --join' at boot and reconnects
- * automatically whenever the P2P group is lost.
+ * There is no compile-time GO MAC.  The GC learns its GO at runtime:
  *
- * Connect / retry flow:
- *   - p2p_gc_do_connect() fires when the retry timer expires.
- *   - A "pending connect" flag (p2p_gc_pending) prevents sending a new connect
- *     command while one is already in-flight, avoiding "scan already in progress"
- *     errors from wpa_supplicant.
- *   - If net_mgmt returns 0 (command accepted): set pending, wait for CONNECT_RESULT.
- *       success  → wifi_p2p_gc_on_connect_result(true)  → cancel retries
- *       No success after 30 s → retry timer fires, clears pending, tries again.
- *   - If net_mgmt returns error (rejected): reschedule immediately.
+ *   Pairing (button):  wifi_p2p_start_pairing() runs a P2P_FIND, picks the
+ *                      best-RSSI peer that is a P2P GO (group_capab GO bit),
+ *                      joins it with 'wifi p2p connect <MAC> pbc --join', and on
+ *                      CONNECT_RESULT success persists the GO MAC to NVS
+ *                      (settings key "net/p2p_gc_go_mac").
  *
- * Disconnect / reconnect flow:
- *   - wifi_p2p_gc_on_disconnect() is called from the DISCONNECT_RESULT handler.
- *   - Resets p2p_gc_connected + p2p_gc_pending.
- *   - Schedules a reconnect attempt in 5 s.
+ *   Reconnect:         at boot, and after any disconnect, the GC connects
+ *                      directly to the saved GO MAC, retrying until success.
+ *                      The GO keeps its WPS PBC armed continuously, so this
+ *                      succeeds with no button press after a power cycle.
  *
- * The connect runs on a dedicated 4 KB work queue (net_mgmt P2P connect can
- * overflow the 2 KB sysworkq stack, same as wps_pbc above).
+ * WPS PBC is used, not a fixed PIN: WIFI_WPS_PIN_SET fails the WPS Registrar
+ * init on the nRF GO; PBC is the supported headless method (see nrf/samples/wifi/p2p).
+ *
+ * State:
+ *   - p2p_pairing_active routes p2p_gc_do_connect() into discovery+learn;
+ *     otherwise it does a direct connect to saved_go_mac (reconnect).
+ *   - p2p_gc_pending blocks new connect commands while one is in flight,
+ *     avoiding "scan already in progress" errors from wpa_supplicant.
+ *
+ * All net_mgmt P2P calls run on a dedicated 4 KB work queue (they can overflow
+ * the 2 KB sysworkq stack, same as the GO WPS work above).
  */
 
 #if defined(CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P)
@@ -664,10 +705,17 @@ K_THREAD_STACK_DEFINE(p2p_cli_workq_stack, P2P_CLI_WORKQ_STACK_SIZE);
 static struct k_work_q p2p_cli_workq;
 static bool p2p_cli_workq_started;
 static struct k_work_delayable p2p_gc_retry_work;
+
 static bool p2p_gc_connected;
-static bool p2p_gc_pending;   /* connect cmd accepted, waiting for result */
-static bool p2p_find_running; /* WIFI_P2P_FIND is currently active */
-static bool p2p_go_found;     /* target GO was found during pre-discovery */
+static bool p2p_gc_pending;     /* connect cmd accepted, waiting for result */
+static bool p2p_find_running;   /* WIFI_P2P_FIND is currently active */
+static bool p2p_pairing_active; /* button-triggered pairing in progress */
+
+static uint8_t saved_go_mac[6];     /* learned GO MAC, persisted in NVS */
+static bool have_saved_go;          /* saved_go_mac is valid */
+static uint8_t pending_go_mac[6];   /* GO selected during the current pairing */
+static bool have_pending_mac;       /* pending_go_mac is valid (pairing connect) */
+static uint8_t pairing_find_cycles; /* empty discovery cycles in this pairing */
 
 /* wpa_supplicant --join makes exactly P2P_MAX_JOIN_SCAN_ATTEMPTS (10) scan
  * attempts, each ~4.6 s + 1 s retry gap, then emits GROUP_FORMATION_FAILURE
@@ -678,66 +726,111 @@ static bool p2p_go_found;     /* target GO was found during pre-discovery */
  * guaranteeing no "scan already in progress" on the fresh P2P_CONNECT. */
 #define P2P_GC_CONNECT_TIMEOUT_S 90
 
-/* Prefix-mode find window: social-channel scan duration.  After this elapses
- * we stop the find and query the wpa_supplicant peer table directly.
- * We do NOT rely on NET_EVENT_WIFI_P2P_DEVICE_FOUND for prefix mode:
- * that event fires only for newly-discovered peers; if the GO is already
- * in wpa_supplicant's peer cache (from a previous session or scan) the
- * event is not re-fired even though the peer is visible. */
-#define P2P_PREFIX_FIND_TIMEOUT_S 10
+/* After a clean deauth wpa_supplicant runs a background cleanup scan
+ * (~5-17 s on nRF7002).  Wait this long before re-issuing P2P_CONNECT. */
+#define P2P_GC_RECONNECT_DELAY_S 15
+
+/* Pairing find window: social-channel scan duration.  After this elapses we
+ * stop the find and query the wpa_supplicant peer table directly.  We do NOT
+ * rely on NET_EVENT_WIFI_P2P_DEVICE_FOUND: that event fires only for newly-
+ * discovered peers; a GO already in wpa_supplicant's peer cache is not
+ * re-reported even though it is visible in 'wifi p2p peer'. */
+#define P2P_PAIR_FIND_TIMEOUT_S 10
 
 /* Size of the local peer-query buffer used after P2P_FIND completes. */
-#define P2P_PREFIX_MAX_CANDIDATES 5
+#define P2P_PAIR_MAX_CANDIDATES 5
 
-/* Parse "AA:BB:CC:DD:EE:FF" into 6 bytes. Returns true on success.
- * Note: newlib-nano's sscanf does not implement the "hh" length modifier,
- * so "%hhx" silently fails to convert. Parse into unsigned int with "%x"
- * (supported) and narrow to uint8_t. */
-static bool parse_mac6(const char *s, uint8_t out[6])
+/* Give up a pairing attempt after this many empty discovery cycles. */
+#define P2P_PAIR_MAX_FIND_CYCLES 2
+
+/* ---- NVS persistence of the learned GO MAC (settings subtree "net") ----
+ * A separate subtree from the wifi mode selector's "app" handler: two static
+ * handlers cannot share one subtree name. */
+#define P2P_GC_GO_MAC_KEY "net/p2p_gc_go_mac"
+
+static int net_settings_set_cb(const char *key, size_t len, settings_read_cb read_cb, void *cb_arg)
 {
-	unsigned int v[6];
+	if (strcmp(key, "p2p_gc_go_mac") == 0 && len == sizeof(saved_go_mac)) {
+		uint8_t buf[6];
+		ssize_t rc = read_cb(cb_arg, buf, sizeof(buf));
 
-	if (sscanf(s, "%x:%x:%x:%x:%x:%x", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) != 6) {
-		return false;
+		if (rc == (ssize_t)sizeof(buf)) {
+			memcpy(saved_go_mac, buf, sizeof(saved_go_mac));
+			have_saved_go = true;
+		}
 	}
-	for (int i = 0; i < 6; i++) {
-		out[i] = (uint8_t)v[i];
-	}
-	return true;
+	return 0;
 }
 
-/* Return true if the target GO MAC ends in :00:00:00 (prefix mode). */
-static bool p2p_is_prefix_mode(void)
-{
-	const char *s = CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC;
-	uint8_t b[6];
+SETTINGS_STATIC_HANDLER_DEFINE(zego_net_settings, "net", NULL, net_settings_set_cb, NULL, NULL);
 
-	if (!parse_mac6(s, b)) {
-		return false;
+static void p2p_gc_load_saved_go(void)
+{
+	/* settings_subsys_init() is idempotent; the wifi mode selector (SYS_INIT
+	 * priority 0) has already run it, but call it for self-containment. */
+	(void)settings_subsys_init();
+	(void)settings_load_subtree("net"); /* triggers net_settings_set_cb */
+}
+
+static void p2p_gc_save_go(const uint8_t mac[6])
+{
+	int ret = settings_save_one(P2P_GC_GO_MAC_KEY, mac, 6);
+
+	if (ret) {
+		LOG_ERR("P2P_GC: failed to persist GO MAC: %d", ret);
+	} else {
+		LOG_INF("P2P_GC: saved GO %02X:%02X:%02X:%02X:%02X:%02X to NVS", mac[0], mac[1],
+			mac[2], mac[3], mac[4], mac[5]);
 	}
-	return (b[3] == 0 && b[4] == 0 && b[5] == 0);
+}
+
+/* Issue 'wifi p2p connect <mac> pbc --join'.  Returns net_mgmt rc.
+ * PBC (not PIN): the nRF GO accepts WPS PBC; a fixed PIN is unsupported. */
+static int p2p_gc_issue_connect(struct net_if *iface, const uint8_t mac[6])
+{
+	struct wifi_p2p_params params = {0};
+
+	memcpy(params.peer_addr, mac, 6);
+	params.oper = WIFI_P2P_CONNECT;
+	params.connect.method = WIFI_P2P_METHOD_PBC;
+	params.connect.join = true;
+
+	return net_mgmt(NET_REQUEST_WIFI_P2P_OPER, iface, &params, sizeof(params));
+}
+
+/* Mark a connect as in-flight and arm the timeout retry. */
+static void p2p_gc_arm_timeout(struct k_work *work)
+{
+	p2p_gc_pending = true;
+	k_work_reschedule_for_queue(&p2p_cli_workq, k_work_delayable_from_work(work),
+				    K_SECONDS(P2P_GC_CONNECT_TIMEOUT_S));
 }
 
 static void p2p_gc_do_connect(struct k_work *work)
 {
 	if (p2p_gc_connected) {
+		/* Re-pair requested while connected: drop the current group first.
+		 * The DISCONNECT_RESULT handler reschedules into pairing discovery
+		 * because p2p_pairing_active is set.  This net_mgmt call runs on the
+		 * 4 KB P2P work queue (not the button listener), as required. */
+		if (p2p_pairing_active) {
+			struct net_if *iface = net_if_get_first_wifi();
+
+			LOG_INF("P2P_GC: re-pairing - disconnecting current GO first");
+			if (iface) {
+				(void)net_mgmt(NET_REQUEST_WIFI_DISCONNECT, iface, NULL, 0);
+			}
+		}
 		return;
 	}
 
 	if (p2p_gc_pending) {
 		/* 90 s with no CONNECT_RESULT: wpa_supplicant exhausted its 10
-		 * join-scan attempts and is now idle.  Reset all state and retry. */
-		LOG_INF("P2P_GC: %ds Timeout, and GO not found - restarting P2P connect",
+		 * join-scan attempts and is now idle.  Reset and retry. */
+		LOG_INF("P2P_GC: %ds timeout, GO not reachable - restarting",
 			P2P_GC_CONNECT_TIMEOUT_S);
 		p2p_gc_pending = false;
-		p2p_go_found = false;
 		p2p_find_running = false;
-	}
-
-	const char *mac_str = CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC;
-
-	if (mac_str[0] == '\0') {
-		return;
 	}
 
 	struct net_if *iface = net_if_get_first_wifi();
@@ -749,52 +842,46 @@ static void p2p_gc_do_connect(struct k_work *work)
 		return;
 	}
 
-	/* ---- Prefix mode: run P2P_FIND, then query peer table for best RSSI ---- */
-	if (p2p_is_prefix_mode()) {
+	/* ---- Pairing: discover GOs, pick best RSSI, connect, learn MAC ---- */
+	if (p2p_pairing_active) {
 		if (!p2p_find_running) {
-			/* Start a fresh discovery scan.
-			 * Note: do NOT reset any candidate state here - prefix mode now
-			 * queries the peer table directly after find completes. */
 			struct wifi_p2p_params find_params = {0};
 
 			find_params.oper = WIFI_P2P_FIND;
 			find_params.discovery_type = WIFI_P2P_FIND_ONLY_SOCIAL;
-			find_params.timeout = P2P_PREFIX_FIND_TIMEOUT_S;
+			find_params.timeout = P2P_PAIR_FIND_TIMEOUT_S;
 
 			int ret = net_mgmt(NET_REQUEST_WIFI_P2P_OPER, iface, &find_params,
 					   sizeof(find_params));
 
 			if (ret) {
-				LOG_WRN("P2P_GC: prefix find failed (%d), retry in 10 s", ret);
+				LOG_WRN("P2P_GC: pairing find failed (%d), retry in 10 s", ret);
 				k_work_reschedule_for_queue(&p2p_cli_workq,
 							    k_work_delayable_from_work(work),
 							    K_SECONDS(10));
 				return;
 			}
 			p2p_find_running = true;
-			LOG_INF("P2P_GC: prefix mode %c%c:%c%c:%c%c:* - peer discovery (%d s)",
-				mac_str[0], mac_str[1], mac_str[3], mac_str[4], mac_str[6],
-				mac_str[7], P2P_PREFIX_FIND_TIMEOUT_S);
-			/* Re-schedule to fire when the find window expires. */
+			LOG_INF("P2P_GC: pairing - peer discovery (%d s)", P2P_PAIR_FIND_TIMEOUT_S);
 			k_work_reschedule_for_queue(&p2p_cli_workq,
 						    k_work_delayable_from_work(work),
-						    K_SECONDS(P2P_PREFIX_FIND_TIMEOUT_S + 2));
+						    K_SECONDS(P2P_PAIR_FIND_TIMEOUT_S + 2));
 			return;
 		}
 
 		/* Find window elapsed: query the wpa_supplicant peer table directly.
-		 * DEVICE_FOUND events are unreliable for prefix mode - they only fire
-		 * for newly-discovered peers; cached peers from prior sessions are
-		 * silently skipped even though they appear in 'wifi p2p peer'. */
+		 * DEVICE_FOUND events are unreliable - they only fire for newly-
+		 * discovered peers; cached peers are silently skipped even though
+		 * they appear in 'wifi p2p peer'. */
 		p2p_find_running = false;
 
-		static struct wifi_p2p_device_info peer_buf[P2P_PREFIX_MAX_CANDIDATES];
+		static struct wifi_p2p_device_info peer_buf[P2P_PAIR_MAX_CANDIDATES];
 		struct wifi_p2p_params qparams = {0};
 
 		memset(peer_buf, 0, sizeof(peer_buf));
 		qparams.peers = peer_buf;
 		qparams.oper = WIFI_P2P_PEER;
-		qparams.peer_count = P2P_PREFIX_MAX_CANDIDATES;
+		qparams.peer_count = P2P_PAIR_MAX_CANDIDATES;
 		memset(qparams.peer_addr, 0xFF, 6); /* broadcast = all peers */
 
 		int qret = net_mgmt(NET_REQUEST_WIFI_P2P_OPER, iface, &qparams, sizeof(qparams));
@@ -806,194 +893,198 @@ static void p2p_gc_do_connect(struct k_work *work)
 			return;
 		}
 
-		/* Filter by OUI prefix and pick best RSSI. */
-		uint8_t mac6[6];
-		uint8_t *prefix = mac6;
-
-		(void)parse_mac6(mac_str, mac6);
-
-		LOG_INF("P2P_GC: peer table has %d entries, filtering for prefix "
-			"%02X:%02X:%02X",
-			qparams.peer_count, prefix[0], prefix[1], prefix[2]);
+		/* Select the strongest-RSSI peer that is actually a P2P Group Owner.
+		 * P2P Group Capability bit 0 (P2P_GROUP_CAPAB_GROUP_OWNER) is set on a
+		 * device currently acting as a GO.  Filtering on it avoids locking onto
+		 * nearby non-GO P2P devices (phones mid-discovery, etc.). */
+#define P2P_GROUP_CAPAB_GROUP_OWNER BIT(0)
+		LOG_INF("P2P_GC: peer table has %d entries, selecting GO", qparams.peer_count);
 
 		int best = -1;
 
 		for (int i = 0; i < qparams.peer_count; i++) {
-			if (memcmp(peer_buf[i].mac, prefix, 3) != 0) {
-				continue;
-			}
-			LOG_INF("P2P_GC:   [%d] %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d", i,
+			bool is_go = (peer_buf[i].group_capab & P2P_GROUP_CAPAB_GROUP_OWNER) != 0;
+
+			LOG_INF("P2P_GC:   [%d] %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d GO=%d", i,
 				peer_buf[i].mac[0], peer_buf[i].mac[1], peer_buf[i].mac[2],
 				peer_buf[i].mac[3], peer_buf[i].mac[4], peer_buf[i].mac[5],
-				peer_buf[i].rssi);
+				peer_buf[i].rssi, is_go);
+			if (!is_go) {
+				continue; /* skip non-GO P2P devices */
+			}
 			if (best < 0 || peer_buf[i].rssi > peer_buf[best].rssi) {
 				best = i;
 			}
 		}
 
 		if (best < 0) {
-			LOG_WRN("P2P_GC: no GO with configured prefix found, retry in %d s",
-				P2P_GC_CONNECT_TIMEOUT_S);
+			pairing_find_cycles++;
+			if (pairing_find_cycles >= P2P_PAIR_MAX_FIND_CYCLES) {
+				LOG_WRN("P2P_GC: no GO found while pairing - giving up");
+				p2p_pairing_active = false;
+				zego_on_net_event_p2p_pairing(false); /* stop LED breathe */
+				if (have_saved_go) {
+					/* fall back to reconnecting the previous GO */
+					k_work_reschedule_for_queue(
+						&p2p_cli_workq, k_work_delayable_from_work(work),
+						K_SECONDS(P2P_GC_RECONNECT_DELAY_S));
+				}
+				return;
+			}
+			LOG_WRN("P2P_GC: no GO found yet, retrying discovery (%u/%u)",
+				pairing_find_cycles, P2P_PAIR_MAX_FIND_CYCLES);
 			k_work_reschedule_for_queue(&p2p_cli_workq,
-						    k_work_delayable_from_work(work),
-						    K_SECONDS(P2P_GC_CONNECT_TIMEOUT_S));
+						    k_work_delayable_from_work(work), K_SECONDS(2));
 			return;
 		}
 
-		LOG_INF("P2P_GC: best GO %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d dBm, connecting",
-			peer_buf[best].mac[0], peer_buf[best].mac[1], peer_buf[best].mac[2],
-			peer_buf[best].mac[3], peer_buf[best].mac[4], peer_buf[best].mac[5],
-			peer_buf[best].rssi);
+		memcpy(pending_go_mac, peer_buf[best].mac, 6);
+		have_pending_mac = true;
 
-		struct wifi_p2p_params params = {0};
+		LOG_INF("P2P_GC: pairing with GO %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d dBm",
+			pending_go_mac[0], pending_go_mac[1], pending_go_mac[2], pending_go_mac[3],
+			pending_go_mac[4], pending_go_mac[5], peer_buf[best].rssi);
 
-		memcpy(params.peer_addr, peer_buf[best].mac, 6);
-		params.oper = WIFI_P2P_CONNECT;
-		params.connect.method = WIFI_P2P_METHOD_KEYPAD;
-		snprintf(params.connect.pin, sizeof(params.connect.pin), "12345678");
-		params.connect.join = true;
-
-		int ret = net_mgmt(NET_REQUEST_WIFI_P2P_OPER, iface, &params, sizeof(params));
+		int ret = p2p_gc_issue_connect(iface, pending_go_mac);
 
 		if (ret) {
-			LOG_WRN("P2P_GC: prefix connect rejected (%d), retry in 10 s", ret);
+			LOG_WRN("P2P_GC: pairing connect rejected (%d), retry in 10 s", ret);
+			have_pending_mac = false;
 			k_work_reschedule_for_queue(
 				&p2p_cli_workq, k_work_delayable_from_work(work), K_SECONDS(10));
 		} else {
-			LOG_INF("P2P_GC: connect initiated -> pin 12345678 --join");
-			p2p_gc_pending = true;
-			k_work_reschedule_for_queue(&p2p_cli_workq,
-						    k_work_delayable_from_work(work),
-						    K_SECONDS(P2P_GC_CONNECT_TIMEOUT_S));
+			LOG_INF("P2P_GC: connect initiated -> pbc --join");
+			p2p_gc_arm_timeout(work);
 		}
 		return;
 	}
 
-	/* ---- Exact-MAC mode ---- */
-	struct wifi_p2p_params params = {0};
+	/* ---- Reconnect: direct connect to the saved GO MAC ---- */
+	if (have_saved_go) {
+		have_pending_mac = false; /* reconnect, not a learning connect */
 
-	if (!parse_mac6(mac_str, params.peer_addr)) {
-		LOG_ERR("P2P_GC: invalid MAC '%s' in CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC",
-			mac_str);
+		int ret = p2p_gc_issue_connect(iface, saved_go_mac);
+
+		if (ret) {
+			LOG_WRN("P2P_GC: reconnect to %02X:%02X:%02X:%02X:%02X:%02X rejected (%d), "
+				"retry in 10 s",
+				saved_go_mac[0], saved_go_mac[1], saved_go_mac[2], saved_go_mac[3],
+				saved_go_mac[4], saved_go_mac[5], ret);
+			k_work_reschedule_for_queue(
+				&p2p_cli_workq, k_work_delayable_from_work(work), K_SECONDS(10));
+		} else {
+			LOG_INF("P2P_GC: reconnecting to saved GO "
+				"%02X:%02X:%02X:%02X:%02X:%02X (pbc --join)",
+				saved_go_mac[0], saved_go_mac[1], saved_go_mac[2], saved_go_mac[3],
+				saved_go_mac[4], saved_go_mac[5]);
+			p2p_gc_arm_timeout(work);
+		}
 		return;
 	}
 
-	params.oper = WIFI_P2P_CONNECT;
-	params.connect.method = WIFI_P2P_METHOD_KEYPAD;
-	snprintf(params.connect.pin, sizeof(params.connect.pin), "12345678");
-	params.connect.join = true;
+	/* No saved GO and not pairing: stay idle until a pairing double-click. */
+	LOG_DBG("P2P_GC: idle (no saved GO; double-click Button 0 to pair)");
+}
 
-	int ret = net_mgmt(NET_REQUEST_WIFI_P2P_OPER, iface, &params, sizeof(params));
-
-	if (ret) {
-		LOG_WRN("P2P_GC: connect to %s rejected (%d), retry in 10 s", mac_str, ret);
-		/* Don't set pending - command was rejected, retry sooner. */
-		k_work_reschedule_for_queue(&p2p_cli_workq, k_work_delayable_from_work(work),
-					    K_SECONDS(10));
-	} else {
-		LOG_INF("P2P_GC: connect initiated -> wifi p2p connect %s pin 12345678 --join",
-			mac_str);
-		/* Command accepted.  Block further retries until CONNECT_RESULT
-		 * arrives or P2P_GC_CONNECT_TIMEOUT_S passes. */
-		p2p_gc_pending = true;
-		k_work_reschedule_for_queue(&p2p_cli_workq, k_work_delayable_from_work(work),
-					    K_SECONDS(P2P_GC_CONNECT_TIMEOUT_S));
+/* Begin a button-triggered pairing.  Only sets state and schedules work - this
+ * may run in the button ZBUS_LISTENER context, so it must not call net_mgmt
+ * directly (those P2P calls need the 4 KB work queue).  The actual discovery,
+ * and the disconnect-first step when re-pairing while connected, run inside
+ * p2p_gc_do_connect() on p2p_cli_workq. */
+static void p2p_gc_start_pairing_internal(void)
+{
+	/* Ignore repeat double-clicks while a pairing is already in flight - a
+	 * fresh P2P_FIND/CONNECT issued mid-operation fails with "Scan already in
+	 * progress".  A re-pair while *connected* is still allowed (pairing_active
+	 * is false then) and overwrites the saved GO. */
+	if (p2p_pairing_active || p2p_find_running || p2p_gc_pending) {
+		LOG_INF("P2P_GC: pairing already in progress - ignoring double-click");
+		return;
 	}
+
+	LOG_INF("P2P_GC: pairing requested - searching for a P2P_GO");
+	p2p_pairing_active = true;
+	p2p_gc_pending = false;
+	p2p_find_running = false;
+	have_pending_mac = false;
+	pairing_find_cycles = 0;
+
+	/* Start the LED-breathe cue immediately on the double-click. */
+	zego_on_net_event_p2p_pairing(true);
+
+	k_work_reschedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_NO_WAIT);
 }
 
 void wifi_p2p_gc_on_peer_found(const uint8_t *mac, int8_t rssi)
 {
-	if (!p2p_find_running || p2p_gc_connected || p2p_gc_pending) {
-		return;
-	}
-
-	const char *mac_str = CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC;
-	uint8_t target[6];
-
-	if (!parse_mac6(mac_str, target)) {
-		return;
-	}
-
-	if (p2p_is_prefix_mode()) {
-		/* Prefix mode: DEVICE_FOUND events are unreliable (not fired for
-		 * cached peers). Ignore events here; the peer table is queried
-		 * directly after P2P_FIND completes via p2p_gc_do_connect(). */
-		LOG_DBG("P2P_GC: prefix-mode peer seen %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d "
-			"(table query used instead)",
-			mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], rssi);
-		return;
-	}
-
-	/* Exact-MAC mode: connect immediately on first match. */
-	if (memcmp(mac, target, 6) != 0) {
-		return;
-	}
-
-	LOG_INF("P2P_GC: target GO %s found - connecting immediately", mac_str);
-	p2p_find_running = false;
-	p2p_go_found = true;
-	k_work_reschedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_NO_WAIT);
+	/* Pairing uses a direct peer-table query after P2P_FIND, not these events
+	 * (cached peers do not re-fire DEVICE_FOUND).  Log for diagnostics only. */
+	LOG_DBG("P2P_GC: peer seen %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d", mac[0], mac[1], mac[2],
+		mac[3], mac[4], mac[5], rssi);
 }
 
 void wifi_p2p_gc_on_connect_result(bool success)
 {
-	if (CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC[0] == '\0') {
-		return;
-	}
-
 	p2p_gc_pending = false;
 
 	if (success) {
 		p2p_gc_connected = true;
 		k_work_cancel_delayable(&p2p_gc_retry_work);
+
+		/* If this connect was a pairing attempt, persist the learned GO MAC.
+		 * This overwrites any previously-saved GO - re-pairing forgets the
+		 * old one (PRD FR-107 (6)). */
+		if (p2p_pairing_active && have_pending_mac) {
+			memcpy(saved_go_mac, pending_go_mac, sizeof(saved_go_mac));
+			have_saved_go = true;
+			p2p_gc_save_go(saved_go_mac);
+		}
+		p2p_pairing_active = false;
+		have_pending_mac = false;
 		LOG_INF("P2P_GC: connected to GO - auto-retry stopped");
 	} else {
-		/* CONNECT_RESULT failure: reset all state so next retry does a
-		 * fresh P2P_FIND (prefix mode) or direct connect (exact-MAC mode). */
-		p2p_go_found = false;
+		/* Failure: keep p2p_pairing_active as-is so the retry repeats the
+		 * same phase (pairing discovery, or reconnect to saved MAC). */
 		p2p_find_running = false;
+		have_pending_mac = false;
 		k_work_reschedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_SECONDS(10));
 	}
 }
 
 void wifi_p2p_gc_on_disconnect(void)
 {
-	if (CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC[0] == '\0') {
-		return;
-	}
-
-	if (!p2p_gc_connected) {
+	/* Ignore spurious disconnects when we were neither connected nor pairing
+	 * (e.g. the late AP-inactivity deauth that can fire minutes later). */
+	if (!p2p_gc_connected && !p2p_pairing_active) {
 		return;
 	}
 
 	p2p_gc_connected = false;
 	p2p_gc_pending = false;
 	p2p_find_running = false;
-	p2p_go_found = false;
-	/* Wait 15 s before retrying: after a clean deauth wpa_supplicant starts
-	 * a background cleanup scan (~5-17 s on nRF7002).  Issuing P2P_CONNECT
-	 * too soon races with that scan and causes "Scan already in progress"
-	 * errors.  15 s gives the cleanup scan time to drain. */
-	LOG_INF("P2P_GC: disconnected from GO - reconnect in 15 s");
-	k_work_reschedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_SECONDS(15));
+
+	/* Wait before retrying: after a clean deauth wpa_supplicant runs a
+	 * background cleanup scan (~5-17 s on nRF7002); issuing P2P_CONNECT or
+	 * P2P_FIND too soon races with it ("Scan already in progress"). */
+	if (p2p_pairing_active) {
+		LOG_INF("P2P_GC: disconnected - starting pairing discovery in %d s",
+			P2P_GC_RECONNECT_DELAY_S);
+	} else {
+		LOG_INF("P2P_GC: disconnected from GO - reconnect in %d s",
+			P2P_GC_RECONNECT_DELAY_S);
+	}
+	k_work_reschedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work,
+				    K_SECONDS(P2P_GC_RECONNECT_DELAY_S));
 }
 
 int wifi_run_p2p_gc_mode(void)
 {
-	const char *mac_str = CONFIG_ZEGO_WIFI_P2P_GC_TARGET_GO_MAC;
-
-	if (mac_str[0] == '\0') {
-		LOG_INF("P2P_GC: no target GO MAC set for auto-connect, follow guide to "
-			"connect manually.");
-		return 0;
-	}
-
-	LOG_INF("P2P_GC: auto-connect -> %s (retry every 90 s until success)", mac_str);
-
 	p2p_gc_connected = false;
 	p2p_gc_pending = false;
 	p2p_find_running = false;
-	p2p_go_found = false;
+	p2p_pairing_active = false;
+	have_pending_mac = false;
+	pairing_find_cycles = 0;
 
 	if (!p2p_cli_workq_started) {
 		k_work_queue_init(&p2p_cli_workq);
@@ -1002,11 +1093,42 @@ int wifi_run_p2p_gc_mode(void)
 				   NULL);
 		p2p_cli_workq_started = true;
 	}
-
 	k_work_init_delayable(&p2p_gc_retry_work, p2p_gc_do_connect);
-	k_work_schedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_NO_WAIT);
+
+	p2p_gc_load_saved_go();
+
+	if (have_saved_go) {
+		LOG_INF("P2P_GC: saved GO %02X:%02X:%02X:%02X:%02X:%02X - reconnecting "
+			"(retry every %d s until success)",
+			saved_go_mac[0], saved_go_mac[1], saved_go_mac[2], saved_go_mac[3],
+			saved_go_mac[4], saved_go_mac[5], P2P_GC_CONNECT_TIMEOUT_S);
+		k_work_schedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_NO_WAIT);
+	} else {
+		LOG_INF("P2P_GC: no saved GO - double-click Button 0 to pair with a P2P_GO");
+	}
 
 	return 0;
+}
+
+void wifi_p2p_start_pairing(void)
+{
+	enum zego_wifi_mode mode = zego_wifi_get_mode();
+
+	switch (mode) {
+	case ZEGO_WIFI_MODE_P2P_GO:
+#if defined(CONFIG_WIFI_NM_WPA_SUPPLICANT_WPS)
+		wifi_p2p_go_open_pairing_window();
+#else
+		LOG_WRN("P2P_GO pairing requires CONFIG_WIFI_NM_WPA_SUPPLICANT_WPS");
+#endif
+		break;
+	case ZEGO_WIFI_MODE_P2P_GC:
+		p2p_gc_start_pairing_internal();
+		break;
+	default:
+		LOG_WRN("P2P pairing is only available in P2P_GO / P2P_GC mode");
+		break;
+	}
 }
 
 #else /* stubs when P2P not enabled */
@@ -1029,6 +1151,10 @@ void wifi_p2p_gc_on_peer_found(const uint8_t *mac, int8_t rssi)
 {
 	ARG_UNUSED(mac);
 	ARG_UNUSED(rssi);
+}
+
+void wifi_p2p_start_pairing(void)
+{
 }
 
 #endif /* CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P */
