@@ -64,6 +64,18 @@ int wifi_utils_ensure_gateway_softap_credentials(void);
 int wifi_utils_auto_connect_stored(void);
 
 /**
+ * @brief Check whether any Wi-Fi credential is currently stored.
+ *
+ * Used to distinguish "STA has nothing to connect to" (no retry possible)
+ * from "STA is between connection attempts" (keep retrying) at STA mode
+ * start and on every STA disconnect.
+ *
+ * @return true if at least one SSID is stored, false if none are (or if
+ *         CONFIG_WIFI_CREDENTIALS is disabled).
+ */
+bool wifi_utils_has_stored_credentials(void);
+
+/**
  * @brief Set Wi-Fi regulatory domain (from CONFIG_ZEGO_WIIF_SOFTAP_REG_DOMAIN).
  *
  * @return 0 on success, negative error code on failure.
@@ -125,8 +137,11 @@ void wifi_p2p_go_rearm_wps_pin(void);
  *
  * Loads the saved GO MAC from NVS (settings key "net/p2p_gc_go_mac").  If a GO
  * was previously paired, immediately reconnects to it via
- * 'wifi p2p connect <MAC> pbc --join', retrying until success.  If no GO is
- * saved, stays idle until wifi_p2p_start_pairing() is called.
+ * 'wifi p2p connect <MAC> pbc --join', retrying indefinitely until success.
+ * If no GO is saved, automatically starts pairing discovery (same as
+ * wifi_p2p_start_pairing()) — no button press required — and retries
+ * indefinitely until a GO is found and joined.  A double-click still works at
+ * any time to (re-)start pairing, e.g. to target a different GO.
  *
  * @return 0 on success, negative error code on failure.
  */

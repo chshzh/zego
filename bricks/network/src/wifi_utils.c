@@ -82,6 +82,25 @@ int wifi_utils_ensure_gateway_softap_credentials(void)
 #endif
 }
 
+static void count_ssid_cb(void *cb_arg, const char *ssid, size_t ssid_len)
+{
+	ARG_UNUSED(ssid);
+	ARG_UNUSED(ssid_len);
+	(*(int *)cb_arg)++;
+}
+
+bool wifi_utils_has_stored_credentials(void)
+{
+#if !defined(CONFIG_WIFI_CREDENTIALS)
+	return true; /* credential storage disabled - assume connectable, don't blink */
+#else
+	int count = 0;
+
+	wifi_credentials_for_each_ssid(count_ssid_cb, &count);
+	return count > 0;
+#endif
+}
+
 int wifi_utils_auto_connect_stored(void)
 {
 #if !defined(CONFIG_WIFI_CREDENTIALS_CONNECT_STORED)
@@ -709,13 +728,13 @@ static struct k_work_delayable p2p_gc_retry_work;
 static bool p2p_gc_connected;
 static bool p2p_gc_pending;     /* connect cmd accepted, waiting for result */
 static bool p2p_find_running;   /* WIFI_P2P_FIND is currently active */
-static bool p2p_pairing_active; /* button-triggered pairing in progress */
+static bool p2p_pairing_active; /* pairing in progress (auto-started or button-triggered) */
 
 static uint8_t saved_go_mac[6];     /* learned GO MAC, persisted in NVS */
 static bool have_saved_go;          /* saved_go_mac is valid */
 static uint8_t pending_go_mac[6];   /* GO selected during the current pairing */
 static bool have_pending_mac;       /* pending_go_mac is valid (pairing connect) */
-static uint8_t pairing_find_cycles; /* empty discovery cycles in this pairing */
+static uint8_t pairing_find_cycles; /* empty discovery cycles so far (log only) */
 
 /* wpa_supplicant --join makes exactly P2P_MAX_JOIN_SCAN_ATTEMPTS (10) scan
  * attempts, each ~4.6 s + 1 s retry gap, then emits GROUP_FORMATION_FAILURE
@@ -739,9 +758,6 @@ static uint8_t pairing_find_cycles; /* empty discovery cycles in this pairing */
 
 /* Size of the local peer-query buffer used after P2P_FIND completes. */
 #define P2P_PAIR_MAX_CANDIDATES 5
-
-/* Give up a pairing attempt after this many empty discovery cycles. */
-#define P2P_PAIR_MAX_FIND_CYCLES 2
 
 /* ---- NVS persistence of the learned GO MAC (settings subtree "net") ----
  * A separate subtree from the wifi mode selector's "app" handler: two static
@@ -893,46 +909,48 @@ static void p2p_gc_do_connect(struct k_work *work)
 			return;
 		}
 
-		/* Select the strongest-RSSI peer that is actually a P2P Group Owner.
-		 * P2P Group Capability bit 0 (P2P_GROUP_CAPAB_GROUP_OWNER) is set on a
-		 * device currently acting as a GO.  Filtering on it avoids locking onto
-		 * nearby non-GO P2P devices (phones mid-discovery, etc.). */
-#define P2P_GROUP_CAPAB_GROUP_OWNER BIT(0)
+		/* Select the peer to connect to.
+		 *
+		 * supp_api.c does not parse group_capab= from the P2P_PEER response,
+		 * so group_capab is always 0 and cannot be used to identify the GO.
+		 * config_methods (WPS PBC capability) is not reliably parsed either -
+		 * it reflects the peer's general device capabilities, not whether it
+		 * currently has WPS PBC armed, so it does not identify the target GO.
+		 * Instead, just pick the strongest-RSSI peer: the intent of the
+		 * button-press pairing gesture is to join whichever GO is nearest. */
 		LOG_INF("P2P_GC: peer table has %d entries, selecting GO", qparams.peer_count);
 
-		int best = -1;
+		int best_any = -1;     /* strongest RSSI overall */
+		int saved_go_idx = -1; /* index of the saved GO in the peer table */
 
 		for (int i = 0; i < qparams.peer_count; i++) {
-			bool is_go = (peer_buf[i].group_capab & P2P_GROUP_CAPAB_GROUP_OWNER) != 0;
+			bool has_pbc = (peer_buf[i].config_methods & 0x0080) != 0;
+			bool is_saved =
+				have_saved_go && memcmp(peer_buf[i].mac, saved_go_mac, 6) == 0;
 
-			LOG_INF("P2P_GC:   [%d] %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d GO=%d", i,
+			LOG_INF("P2P_GC:   [%d] %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d PBC=%d%s", i,
 				peer_buf[i].mac[0], peer_buf[i].mac[1], peer_buf[i].mac[2],
 				peer_buf[i].mac[3], peer_buf[i].mac[4], peer_buf[i].mac[5],
-				peer_buf[i].rssi, is_go);
-			if (!is_go) {
-				continue; /* skip non-GO P2P devices */
+				peer_buf[i].rssi, has_pbc, is_saved ? " (saved GO)" : "");
+			if (is_saved) {
+				saved_go_idx = i;
 			}
-			if (best < 0 || peer_buf[i].rssi > peer_buf[best].rssi) {
-				best = i;
+			if (best_any < 0 || peer_buf[i].rssi > peer_buf[best_any].rssi) {
+				best_any = i;
 			}
 		}
 
+		/* Prefer the saved GO when re-pairing (keeps the learned MAC sticky
+		 * across retries); otherwise join the strongest-RSSI peer. */
+		int best = (saved_go_idx >= 0) ? saved_go_idx : best_any;
+
 		if (best < 0) {
 			pairing_find_cycles++;
-			if (pairing_find_cycles >= P2P_PAIR_MAX_FIND_CYCLES) {
-				LOG_WRN("P2P_GC: no GO found while pairing - giving up");
-				p2p_pairing_active = false;
-				zego_on_net_event_p2p_pairing(false); /* stop LED breathe */
-				if (have_saved_go) {
-					/* fall back to reconnecting the previous GO */
-					k_work_reschedule_for_queue(
-						&p2p_cli_workq, k_work_delayable_from_work(work),
-						K_SECONDS(P2P_GC_RECONNECT_DELAY_S));
-				}
-				return;
-			}
-			LOG_WRN("P2P_GC: no GO found yet, retrying discovery (%u/%u)",
-				pairing_find_cycles, P2P_PAIR_MAX_FIND_CYCLES);
+			LOG_WRN("P2P_GC: no peer found yet, retrying discovery (attempt %u)",
+				pairing_find_cycles);
+			/* Retries indefinitely - a pairing attempt (automatic at boot
+			 * or double-click-triggered) never gives up on its own; it
+			 * keeps searching until it succeeds or the mode changes. */
 			k_work_reschedule_for_queue(&p2p_cli_workq,
 						    k_work_delayable_from_work(work), K_SECONDS(2));
 			return;
@@ -1031,9 +1049,11 @@ void wifi_p2p_gc_on_connect_result(bool success)
 		p2p_gc_connected = true;
 		k_work_cancel_delayable(&p2p_gc_retry_work);
 
-		/* If this connect was a pairing attempt, persist the learned GO MAC.
-		 * This overwrites any previously-saved GO - re-pairing forgets the
-		 * old one (PRD FR-107 (6)). */
+		/* Persist the GO MAC so auto-reconnect works after reboot or
+		 * disconnect.  Only saves when a button-driven pairing learned
+		 * the MAC via peer discovery.  Manual 'wifi p2p connect' does
+		 * not save here — avoid NET_REQUEST_WIFI_IFACE_STATUS which
+		 * sends SIGNAL_POLL and times out in P2P_GC mode. */
 		if (p2p_pairing_active && have_pending_mac) {
 			memcpy(saved_go_mac, pending_go_mac, sizeof(saved_go_mac));
 			have_saved_go = true;
@@ -1104,7 +1124,9 @@ int wifi_run_p2p_gc_mode(void)
 			saved_go_mac[4], saved_go_mac[5], P2P_GC_CONNECT_TIMEOUT_S);
 		k_work_schedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_NO_WAIT);
 	} else {
-		LOG_INF("P2P_GC: no saved GO - double-click Button 0 to pair with a P2P_GO");
+		LOG_INF("P2P_GC: no saved GO - starting pairing discovery "
+			"(retries until a GO is found; double-click Button 0 works too)");
+		p2p_gc_start_pairing_internal();
 	}
 
 	return 0;
