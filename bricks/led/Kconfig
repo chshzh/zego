@@ -140,12 +140,12 @@ config ZEGO_LED_BLINK_PERIOD_MS
 
 config ZEGO_LED_BREATHE_PERIOD_MS
 	int "Breathe ramp duration per direction in milliseconds"
-	default 3000
+	default 1500
 	range 200 30000
 	help
 	  Time for one ramp direction (fade-up or fade-down) when
 	  LED_COMMAND_BREATHE is sent with period_ms = 0.
-	  Full cycle = 2 × this value (default: 3 s up + 3 s down = 6 s total).
+	  Full cycle = 2 × this value (default: 1.5 s up + 1.5 s down = 3 s total).
 	  Number of PWM steps = this value / CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS.
 
 config ZEGO_LED_BREATHE_PWM_PERIOD_MS
