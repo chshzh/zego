@@ -233,7 +233,7 @@ void zego_banner_app_extra(void)
 #endif
 	LOG_INF("  " CLR_BLU "wifi" CLR_RST "              (zego)");
 
-#if CONFIG_WIFI_MODULE
+#if CONFIG_ZEGO_NETWORK
 	LOG_INF("  " CLR_BLU "network" CLR_RST "           (zego)");
 #endif
 #if CONFIG_ZEGO_WIFI_BLE_PROV
