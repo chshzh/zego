@@ -51,6 +51,21 @@ struct wifi_msg {
 ZBUS_CHAN_DECLARE(WIFI_CHAN);
 
 /**
+ * @brief BLE provisioning phone connection event message.
+ */
+struct ble_prov_msg {
+	bool connected; /**< true when a provisioning app connects, false on disconnect. */
+};
+
+/**
+ * @brief Zbus channel: BLE provisioning phone connect/disconnect events.
+ *
+ * Defined in wifi_ble_prov.c. Subscribe in ux.c to drive LED BREATHE
+ * while a provisioning app is connected over BLE.
+ */
+ZBUS_CHAN_DECLARE(BLE_PROV_CONN_CHAN);
+
+/**
  * @brief Start or stop BLE provisioning advertisement at runtime.
  *
  * Allows the application to enable or disable the BLE provisioning

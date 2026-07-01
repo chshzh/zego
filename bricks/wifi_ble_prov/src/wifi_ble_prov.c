@@ -33,6 +33,10 @@ LOG_MODULE_REGISTER(zego_wifi_ble_prov, CONFIG_ZEGO_WIFI_BLE_PROV_LOG_LEVEL);
 /* WIFI_CHAN is owned by this module - all other users declare it via the header. */
 ZBUS_CHAN_DEFINE(WIFI_CHAN, struct wifi_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY, ZBUS_MSG_INIT(0));
 
+/* BLE_PROV_CONN_CHAN: publishes phone connect/disconnect events for LED feedback. */
+ZBUS_CHAN_DEFINE(BLE_PROV_CONN_CHAN, struct ble_prov_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY,
+		 ZBUS_MSG_INIT(.connected = false));
+
 #define WIFI_RECONNECT_DELAY_SEC 5
 #define WIFI_RECONNECT_RETRY_SEC 180
 
@@ -375,6 +379,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	LOG_INF("BT Connected");
 	current_conn = bt_conn_ref(conn);
 	k_work_cancel_delayable(&update_adv_data_work);
+	struct ble_prov_msg ble_msg = {.connected = true};
+	zbus_chan_pub(&BLE_PROV_CONN_CHAN, &ble_msg, K_NO_WAIT);
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -388,6 +394,8 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 				    K_SECONDS(ADV_PARAM_UPDATE_DELAY));
 	k_work_reschedule_for_queue(&adv_daemon_work_q, &update_adv_data_work,
 				    K_SECONDS(ADV_PARAM_UPDATE_DELAY + 1));
+	struct ble_prov_msg ble_msg = {.connected = false};
+	zbus_chan_pub(&BLE_PROV_CONN_CHAN, &ble_msg, K_NO_WAIT);
 }
 
 static void identity_resolved(struct bt_conn *conn, const bt_addr_le_t *rpa,
