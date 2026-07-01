@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-30-13-04 |
-| PRD Version | 2026-06-30-13-00 |
+| Version | 2026-07-01-10-54 |
+| PRD Version | 2026-07-01-10-50 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -17,6 +17,7 @@
 
 | Version | Summary of changes |
 |---|---|
+| 2026-07-01-10-54 | Updated to PRD v2026-07-01-10-50: disconnection-handling overhaul (FR-003, FR-005, FR-006, FR-105, FR-107). Added 2 design decisions (below): P2P_GC auto-pairing at boot, and the "retry indefinitely, BLINK only when impossible" LED philosophy. `network-spec.md`, `ux-module.md`, and `1-architecture.md` updated — see their own changelogs for details. |
 | 2026-06-29-23-06 | Updated to PRD v2026-06-29-23-06: default-mode design-decision row corrected to STA (matches prj.conf); validation-found doc fix. |
 | 2026-06-29-21-44 | Updated to PRD v2026-06-29-21-44: P2P pairing UX overhaul. FR-108 retired (removed `CONFIG_ZEGO_WIFI_P2P_CLIENT_TARGET_GO_MAC`). FR-006/FR-107 rewritten — button-triggered WPS pairing; GC learns + persists GO MAC in NVS (`net/p2p_gc_go_mac`); reconnect on disconnect + power cycle. ux-module.md (mode-aware double-click → `wifi_p2p_start_pairing()`) and network-spec.md updated. (WPS method was reconciled to PBC on 2026-06-30 — see below.) P2P_CLIENT→P2P_GC naming aligned. |
 | 2026-06-30-13-04 | Updated to PRD v2026-06-30-13-00. UX tweaks: board-configurable UX gesture button (`CONFIG_APP_UX_BUTTON_IDX`, =4/BTN5 on Audio DK); LED BREATHE during P2P pairing via new `zego_on_net_event_p2p_pairing(bool)` hook + `APP_WIFI_STATE_PAIRING`. Debug-session reconcile: WPS **PBC** (not fixed PIN — `WIFI_WPS_PIN_SET` fails the nRF GO's WPS Registrar init); root-cause fix `WIFI_NM_WPA_SUPPLICANT_GLOBAL_HEAP=y` (dedicated heap starved the registrar); GC GO-capability peer filter + pairing re-entrancy guard. ux-module.md + network-spec.md updated. |
@@ -79,6 +80,8 @@ For product requirements, see [`docs/pm-prd/PRD.md`](../pm-prd/PRD.md).
 | Pairing LED feedback | LED 0 BREATHEs during P2P pairing (both roles), via the `zego_on_net_event_p2p_pairing(bool)` weak hook → `APP_WIFI_STATE_PAIRING` | Keeps the LED state machine driven by network events (single source of truth) rather than a local UX timer, so the breathe reliably ends when pairing connects/fails. |
 | P2P_GC static IP | 192.168.7.2/24 assigned at `CONNECT_RESULT` instead of waiting for DHCP | `wpa_supplicant` on nRF7002 does not issue a DHCP lease for P2P_GC; static assignment is instant and avoids a 15 s `SIGNAL_POLL` timeout |
 | BLE provisioner mode gate | `wifi_ble_prov_init()` exits early when mode ≠ STA | Prevents BLE GATT notification spam in P2P and SoftAP modes; module remains compiled-in so runtime mode switch to STA still works |
+| LED retry philosophy | ROTATE for as long as any automatic reconnect/pairing retry is in progress; fast BLINK reserved for the single case where reconnection is structurally impossible (STA, zero stored credentials) | BLINK on every disconnect (the prior behavior) misrepresented transient AP reboots and out-of-range periods as an error needing attention, when the firmware was already about to retry on its own. Narrowing BLINK's meaning to "action needed" makes it an actionable signal again. |
+| P2P_GC auto-pairing at boot | With no saved GO, `wifi_run_p2p_gc_mode()` starts pairing discovery immediately (no button press) and retries indefinitely; the double-click gesture remains available for manual (re-)pairing | The original button-only design (FR-107, 2026-06-29) required a physical gesture even for a device with no prior pairing, which is unnecessary friction when there is only one sensible action (find a GO and join it). The double-click stays useful for re-pairing with a different GO. |
 
 ---
 

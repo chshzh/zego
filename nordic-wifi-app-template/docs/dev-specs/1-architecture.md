@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Project | nordic-wifi-app-template |
-| Version | 2026-06-30-13-04 |
-| PRD Version | 2026-06-30-13-00 |
+| Version | 2026-07-01-10-54 |
+| PRD Version | 2026-07-01-10-50 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -24,6 +24,7 @@
 | 2026-06-29-23-06 | Updated to PRD v2026-06-29-23-06: corrected "default on fresh flash" to `ZEGO_WIFI_MODE_STA` (0); mode-cycle text adds P2P_GC (validation-found doc fix). |
 | 2026-06-29-21-44 | Updated to PRD v2026-06-29-21-44: P2P pairing UX — added NVS settings key `net/p2p_gc_go_mac` (learned GO MAC, network brick's own `"net"` subtree) to the Wi-Fi mode selector section; module map and weak-hook mode column P2P_CLIENT→P2P_GC; noted UX→network `wifi_p2p_start_pairing()` call. |
 | 2026-06-30-13-04 | Updated to PRD v2026-06-30-13-00: added 7th weak hook `zego_on_net_event_p2p_pairing(bool)` (drives `APP_WIFI_STATE_PAIRING` → LED BREATHE on both roles); noted board-configurable UX gesture button (`CONFIG_APP_UX_BUTTON_IDX`, =4 on Audio DK). Debug-session reconcile: P2P WPS method is PBC; `CONFIG_WIFI_NM_WPA_SUPPLICANT_GLOBAL_HEAP=y` (system heap) required for the P2P_GO WPS Registrar. |
+| 2026-07-01-10-54 | Updated to PRD v2026-07-01-10-50: `zego_on_net_event_wifi_disconnect()` gains a `bool will_retry` parameter (§3.1); clarified the SoftAP TODO log format's "/3" is SoftAP-specific and does not apply to P2P_GO's client count; added §5 note on P2P_GC auto-pairing at boot. See `network-spec.md` and `ux-module.md` for the full disconnection-handling and LED-trigger changes. |
 
 ---
 
@@ -87,7 +88,11 @@ void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode,
                                     const char *mac_addr,
                                     const char *ssid);
 
-void zego_on_net_event_wifi_disconnect(void);
+/* will_retry: true if the module will keep retrying automatically (STA with
+ * >=1 stored credential; P2P_GC always). false only for STA with zero stored
+ * credentials - the one case where reconnection isn't possible. Drives
+ * APP_WIFI_STATE_CONNECTING (ROTATE) vs APP_WIFI_STATE_ERROR (BLINK). */
+void zego_on_net_event_wifi_disconnect(bool will_retry);
 
 /* P2P pairing started (true) / ended (false). net_event_app.c maps this to
  * APP_WIFI_STATE_PAIRING so the UX LED breathes while pairing is active. */
@@ -116,6 +121,13 @@ CONFIG_WIFI_MGMT_AP_MAX_NUM_STA=3
 |---|---|
 | `zego_on_net_event_wifi_ap_sta_connected(sta_count)` | `"AP client connected: now %d/3 devices connected"` |
 | `zego_on_net_event_wifi_ap_sta_disconnected(remaining_clients)` | `"AP client disconnected: now %d/3 devices connected"` |
+
+> The `/3` in the log format is **SoftAP-specific** (`CONFIG_WIFI_MGMT_AP_MAX_NUM_STA=3`). Both
+> callbacks are shared with P2P_GO (see the SoftAP/P2P_GO shared AP handler note above), which
+> has no fixed client cap — in practice exactly one P2P_GC connects, but this is informational
+> only and not enforced. The literal `/3` text is still fine to log in P2P_GO context (it is
+> template example code the developer is expected to customise), but don't read it as a P2P_GO
+> limit.
 
 ### 3.2 Extending with a custom Zbus channel
 
@@ -157,7 +169,8 @@ Implemented entirely in `zego/wifi`. See [zego/wifi — wifi-spec.md](https://gi
 **P2P_GC learned-GO persistence (added 2026-06-29):**
 - NVS settings key: `"net/p2p_gc_go_mac"` (6 raw MAC bytes), in the network brick's own `"net"` settings subtree (distinct from the mode selector's `"app"` subtree — two static handlers cannot share a subtree name), owned by `zego/network`
 - Written by `wifi_p2p_gc_on_connect_result()` after a successful pairing connect; read at boot by `wifi_run_p2p_gc_mode()`
-- Empty/absent = never paired (GC stays idle until a pairing double-click); a new pairing overwrites it
+- Empty/absent = never paired — **`wifi_run_p2p_gc_mode()` now auto-starts pairing discovery immediately** (no button press required) and retries indefinitely until a GO is found; a double-click still works at any time to (re-)pair, e.g. with a different GO. See `network-spec.md` for the full sequence.
+- A new pairing overwrites the saved MAC
 - Negligible footprint (6 bytes); no partition-layout change
 
 ---

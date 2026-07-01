@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Module | app_ux |
-| Version | 2026-06-30-13-04 |
-| PRD Version | 2026-06-30-13-00 |
+| Version | 2026-07-01-10-54 |
+| PRD Version | 2026-07-01-10-50 |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
 | Status | Current |
@@ -17,6 +17,7 @@
 
 | Version | Summary of changes |
 |---|---|
+| 2026-07-01-10-54 | Updated to PRD v2026-07-01-10-50: (1) `APP_WIFI_STATE_ERROR` (fast BLINK) is now driven by `zego_on_net_event_wifi_disconnect(false)` specifically — the STA-zero-stored-credentials case — instead of firing on every disconnect; a disconnect that will auto-retry now publishes `APP_WIFI_STATE_CONNECTING` (`zego_on_net_event_wifi_disconnect(true)`) so LED 0 ROTATEs instead. P2P_GC never reaches `ERROR` since it always retries. (2) P2P pairing BREATHE now also covers auto-started pairing (no saved GO at boot), not just the double-click-triggered case — no state-machine change, since both paths already published the same `APP_WIFI_STATE_PAIRING`. (3) Restructured §4 from a single state-keyed table into a state→effect table plus a new effect→per-board-LED-index table (with exact Kconfig symbols), replacing the prose board-difference notes, for easier scanning given how differently the nRF5340 Audio DK maps effects to physical LEDs. |
 | 2026-06-04-18-00 | Initial spec — Button 0 gestures, LED 0 Wi-Fi state feedback |
 | 2026-06-04-22-00 | SoftAP LED behavior: ROTATE when no clients (was slow BLINK); solid ON when client connected; ROTATE again when last client disconnects. Added `zego_on_net_event_softap_sta_disconnected()` hook. Updated APP_WIFI_STATE_CHAN table and state machine diagram. |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK: Button 0 = VOL-; ROTATE chases RGB1 only (3 LEDs); BLE prov double-click disabled (1 MB flash); board differences note added |
@@ -25,6 +26,7 @@
 | 2026-06-09-17-25 | PRD Version sync to v2026-06-09-17-25 (FR-107 P2P_CLIENT added to PRD; no UX spec change required — P2P_CLIENT uses same ROTATE→solid-ON LED transitions as STA mode) |
 | 2026-06-29-23-06 | Mode-cycle gesture text corrected to STA → SoftAP → P2P_GO → P2P_GC → STA (P2P_GC was missing); validation-found doc fix. |
 | 2026-06-29-21-44 | Updated to PRD v2026-06-29-21-44: Button 0 double-click is now mode-aware — BLE-prov toggle in STA/SoftAP, P2P pairing trigger in P2P_GO/P2P_GC (calls `wifi_p2p_start_pairing()` in zego/network). P2P_CLIENT→P2P_GC naming aligned. |
+| 2026-06-30-15-11 | Add `CONFIG_APP_UX_PAIRING_LED_IDX`: nRF5340 Audio DK BREATHE (BLE prov + P2P pairing) targets index 5 (blue channel of RGB2) only. PRD Version bumped to 2026-06-30-15-11. |
 | 2026-06-30-13-04 | Updated to PRD v2026-06-30-13-00: (1) UX gesture button is now board-configurable via `CONFIG_APP_UX_BUTTON_IDX` (default 0; **=4 / BTN5 on nRF5340 Audio DK** instead of VOL-). (2) LED 0 BREATHEs during P2P pairing as well as BLE prov — new `APP_WIFI_STATE_PAIRING` state, driven by the network brick's `zego_on_net_event_p2p_pairing(bool)` weak hook (both roles, while pairing active). Reconciled WPS PIN → **PBC** wording to match the implemented code. |
 
 ---
@@ -48,6 +50,7 @@ Enable with `CONFIG_APP_UX_MODULE=y`.
 | `CONFIG_APP_UX_ROTATE_COUNT` | `0` | Number of LEDs in the ROTATE sweep. `0` = LED module default (`ROTATE_NUM_LEDS` from idx 0). |
 | `CONFIG_APP_UX_CONNECTED_LED` | `0` | LED index turned ON for the CONNECTED state. Set to `4` on nRF5340 Audio DK (green channel of RGB2). |
 | `CONFIG_APP_UX_CONNECTED_LED_GREEN_ONLY` | `n` | When `y`, also send OFF to `CONNECTED_LED-1` and `CONNECTED_LED+1` for a pure-colour indicator. Set `y` on nRF5340 Audio DK. |
+| `CONFIG_APP_UX_PAIRING_LED_IDX` | `0` | LED index that BREATHEs during BLE provisioning and P2P pairing. Set to `5` on nRF5340 Audio DK (blue channel of RGB2). `0` = same LED as `ROTATE_FIRST_LED`. |
 
 ---
 
@@ -61,7 +64,7 @@ ignores `BUTTON_CHAN` events whose `button_number != CONFIG_APP_UX_BUTTON_IDX`.
 |---------|-----------|--------|
 | Single click | — | Print current Wi-Fi mode to UART log |
 | Double-click (STA / SoftAP modes) | `ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS` | Toggle BLE provisioning (BREATHE ↔ last Wi-Fi state LED) + `zego_wifi_ble_prov_advertise()` — nRF54LM20DK only (`CONFIG_ZEGO_WIFI_BLE_PROV=y`) |
-| Double-click (P2P_GO / P2P_GC modes) | `ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS` | Trigger P2P pairing: call `wifi_p2p_start_pairing()` (zego/network) — GO refreshes its WPS PBC window, GC discovers + joins the pairing GO and saves its MAC. All boards with P2P enabled |
+| Double-click (P2P_GO / P2P_GC modes) | `ZEGO_BUTTON_DOUBLE_CLICK_WINDOW_MS` | Trigger P2P pairing: call `wifi_p2p_start_pairing()` (zego/network) — GO refreshes its WPS PBC window, GC discovers + joins the pairing GO and saves its MAC. On P2P_GC this is optional — the same pairing sequence already auto-starts at boot when no GO is saved (see network-spec.md); the double-click lets the user (re-)pair with a different GO at any time. All boards with P2P enabled |
 | Long press | `ZEGO_BUTTON_LONG_PRESS_MS` (default 3000 ms) | Cycle mode STA → SoftAP → P2P_GO → P2P_GC → STA; save via `settings_save_one("app/zego_wifi_mode")`; `sys_reboot(SYS_REBOOT_COLD)` |
 
 > **Double-click dispatch is mode-aware.** The `BUTTON_DOUBLE_CLICK` handler reads
@@ -88,9 +91,13 @@ LED 0 is driven by `APP_WIFI_STATE_CHAN` (published by `net_event_app.c`) and by
 Boot
  │
  ▼
-[ROTATE] ◄── APP_WIFI_STATE_CONNECTING published (or at SYS_INIT)
+[ROTATE] ◄── APP_WIFI_STATE_CONNECTING published (at SYS_INIT, and on any disconnect
+ │            that will auto-retry: zego_on_net_event_wifi_disconnect(true))
  │
  ├──► APP_WIFI_STATE_CONNECTED  ──► [Solid ON]
+ │       │
+ │       └── disconnect, will_retry=true ──► APP_WIFI_STATE_CONNECTING ──► [ROTATE]  (loops
+ │           back here on the next successful reconnect)
  │
  ├──► APP_WIFI_STATE_SOFTAP     ──► [ROTATE]  (AP up, no clients)
  │       │
@@ -99,35 +106,57 @@ Boot
  │               └── APP_WIFI_STATE_SOFTAP ──► [ROTATE]  (last client left)
  │
  ├──► APP_WIFI_STATE_ERROR      ──► [Fast BLINK 100 ms]
+ │       (only reachable via zego_on_net_event_wifi_disconnect(false): STA mode start or
+ │        disconnect with zero stored Wi-Fi credentials. P2P_GC never reaches this state —
+ │        it always retries, so will_retry is unconditionally true for P2P_GC.)
  │
- └──► APP_WIFI_STATE_PAIRING    ──► [BREATHE]   (P2P pairing in progress)
-         │
-         └── pairing ends → next state event (CONNECTED → Solid ON, else SOFTAP/ERROR)
+ └──► APP_WIFI_STATE_PAIRING    ──► [BREATHE]   (P2P pairing in progress — started
+         │                          automatically at boot with no saved GO, or by double-click)
+         └── pairing ends → next state event (CONNECTED → Solid ON, else SOFTAP/CONNECTING)
 
 Double-click (nRF54LM20DK, CONFIG_ZEGO_WIFI_BLE_PROV=y):
   ble_prov_led_active = false → true   ──► [BREATHE]
   ble_prov_led_active = true  → false  ──► restore last Wi-Fi state LED
 ```
 
-| `app_wifi_state` | LED 0 effect | `period_ms` |
-|------------------|-------------|-------------|
-| `CONNECTING` (boot) | ROTATE | Kconfig default |
-| `CONNECTED` (STA/P2P) | Solid ON | — |
-| `SOFTAP` (AP up, no clients) | ROTATE | Kconfig default |
-| `CONNECTED` (SoftAP client joined) | Solid ON | — |
-| `PAIRING` (P2P pairing active) | BREATHE | Kconfig default |
-| `ERROR` (disconnected) | BLINK | 100 ms |
-| BLE prov active (local toggle) | BREATHE | Kconfig default |
+| `app_wifi_state` | LED 0 effect | `period_ms` | Published when |
+|------------------|-------------|-------------|-----------------|
+| `CONNECTING` | ROTATE | Kconfig default | SYS_INIT (boot); or `zego_on_net_event_wifi_disconnect(true)` — a retry will happen automatically |
+| `CONNECTED` | Solid ON | — | `zego_on_net_event_dhcp_bound()` — STA/P2P link up, or first SoftAP/P2P_GO client joins |
+| `SOFTAP` | ROTATE | Kconfig default | AP enabled with no clients, or last client just left |
+| `PAIRING` | BREATHE | Kconfig default | `zego_on_net_event_p2p_pairing(true)` — pairing active (automatic or double-click-triggered) |
+| `ERROR` | Fast BLINK | 100 ms | `zego_on_net_event_wifi_disconnect(false)` — **only** case: STA with zero stored credentials |
+
+> **BLINK is not a generic "disconnected" indicator.** It fires only when reconnection is
+> structurally impossible (STA, nothing stored to retry with). Any disconnect where a retry
+> will occur — STA with stored credentials, or P2P_GC (always) — publishes `CONNECTING`
+> (ROTATE), not `ERROR`. This keeps the LED meaning "trying" during transient AP reboots,
+> out-of-range periods, etc., reserving BLINK for "you need to configure something."
 
 > **Pairing BREATHE**: while a P2P pairing attempt is active the LED breathes (same visual as
 > BLE prov). It applies on **both roles** — the GO while its pairing window is open, the GC
-> while discovering/joining. When pairing ends, the network brick drives the next state event
-> (`CONNECTED` → solid ON on success; otherwise `SOFTAP`/`ERROR`), so the LED reverts
+> while discovering/joining, whether that pairing was started automatically (no saved GO at
+> boot) or via double-click. When pairing ends, the network brick drives the next state event
+> (`CONNECTED` → solid ON on success; otherwise `SOFTAP`/`CONNECTING`), so the LED reverts
 > automatically. The breathe is gated on `APP_WIFI_STATE_PAIRING`, not on a local UX timer.
 
-> **ROTATE LED count**: On nRF54LM20DK (4 LEDs) ROTATE chases across all four. On nRF7002DK (2 LEDs) it chases across both. On nRF5340 Audio DK (9 LEDs total) ROTATE chases across **RGB2 only (indices 3–5)**, controlled by `CONFIG_APP_UX_ROTATE_FIRST_LED=3` and `CONFIG_APP_UX_ROTATE_COUNT=3`. RGB1 and mono LEDs remain off during the effect.
->
-> **Connected state on nRF5340 Audio DK**: the UX module sends `LED_COMMAND_ON` to LED 4 (green channel of RGB2) and `LED_COMMAND_OFF` to LEDs 3 and 5 (red and blue channels), producing a solid-green indicator. Controlled by `CONFIG_APP_UX_CONNECTED_LED=4` and `CONFIG_APP_UX_CONNECTED_LED_GREEN_ONLY=y`.
+### Effect → per-board LED index
+
+Which physical LED(s) light up for a given effect differs by board — the nRF5340 Audio DK
+dedicates RGB2 to Wi-Fi state and uses different channels per effect, while the other boards
+drive all their LEDs together:
+
+| Effect | nRF54LM20DK + nRF7002EB2 | nRF7002DK | nRF5340 Audio DK + nRF7002EK | Kconfig |
+|--------|--------------------------|-----------|-------------------------------|---------|
+| ROTATE | idx 0–3 (all 4 chase) | idx 0–1 (both chase) | idx 3–5, RGB2 all 3 channels chase | `CONFIG_APP_UX_ROTATE_FIRST_LED` / `_COUNT` (default 0/0 = LED module's `ZEGO_LED_ROTATE_NUM_LEDS` from idx 0; Audio DK sets `3`/`3`) |
+| Solid ON | idx 0 | idx 0 | idx 4 Green only; idx 3, 5 held OFF | `CONFIG_APP_UX_CONNECTED_LED` (default 0; Audio DK sets `4` + `CONFIG_APP_UX_CONNECTED_LED_GREEN_ONLY=y`) |
+| BREATHE | idx 0 | idx 0 | idx 5 Blue only | `CONFIG_APP_UX_PAIRING_LED_IDX` (default 0; Audio DK sets `5`) |
+| Fast BLINK | idx 0 | idx 0 | idx 3 Red only | `CONFIG_APP_UX_ERROR_LED_IDX` (default 0; Audio DK sets `3`) |
+
+> RGB1 (idx 0–2) and the mono LEDs (idx 6–8) on the nRF5340 Audio DK are never touched by this
+> state machine — they remain free for application use. Values above are verified against the
+> Kconfig defaults in `src/modules/ux/Kconfig` and the overrides in
+> `boards/nrf5340_audio_dk_nrf5340_cpuapp.conf`.
 
 ---
 
@@ -138,17 +167,21 @@ Defined in `src/modules/network/net_event_app.c`. Declared in `src/modules/messa
 | Event | Published when |
 |-------|----------------|
 | `APP_WIFI_STATE_CONNECTED` | `zego_on_net_event_dhcp_bound()` — any mode (STA, P2P_GC, SoftAP client joined) |
+| `APP_WIFI_STATE_CONNECTING` | `zego_on_net_event_wifi_disconnect(true)` — disconnected but a retry will happen automatically |
 | `APP_WIFI_STATE_SOFTAP` | `zego_on_net_event_wifi_ap_enabled()` (AP enabled) or `zego_on_net_event_wifi_ap_sta_disconnected()` with `remaining_clients == 0` |
-| `APP_WIFI_STATE_PAIRING` | `zego_on_net_event_p2p_pairing(true)` — P2P pairing started (GO window opened, or GC discovery began) |
-| `APP_WIFI_STATE_ERROR` | `zego_on_net_event_wifi_disconnect()` |
+| `APP_WIFI_STATE_PAIRING` | `zego_on_net_event_p2p_pairing(true)` — P2P pairing started (GO window opened; or GC discovery began, automatically at boot or via double-click) |
+| `APP_WIFI_STATE_ERROR` | `zego_on_net_event_wifi_disconnect(false)` — reconnection is not possible (STA, zero stored credentials) |
 
-> **`zego_on_net_event_p2p_pairing(bool active)`** is a new weak hook in `zego/network`,
+> **`zego_on_net_event_p2p_pairing(bool active)`** is a weak hook in `zego/network`,
 > called by the P2P engine on pairing start (`active=true`) and end (`active=false`). On
 > `true`, `net_event_app.c` publishes `APP_WIFI_STATE_PAIRING`. On `false`, it re-publishes
-> the resolved current state (`CONNECTED` if the link is up, else `SOFTAP`/`ERROR`) so the LED
-> leaves BREATHE. See the network spec for exactly when the engine calls it.
+> the resolved current state (`CONNECTED` if the link is up, else `SOFTAP`/`CONNECTING`) so the
+> LED leaves BREATHE. See the network spec for exactly when the engine calls it.
 
-> `APP_WIFI_STATE_CONNECTING` is not published explicitly — the UX module's `SYS_INIT` starts ROTATE at boot unconditionally.
+> **`zego_on_net_event_wifi_disconnect(bool will_retry)`**: `net_event_app.c` maps
+> `will_retry=true` to `APP_WIFI_STATE_CONNECTING` (ROTATE resumes) and `will_retry=false` to
+> `APP_WIFI_STATE_ERROR` (BLINK). `APP_WIFI_STATE_CONNECTING` is also entered implicitly at
+> boot — the UX module's `SYS_INIT` starts ROTATE unconditionally before any state is published.
 
 > In SoftAP mode the state machine follows: ROTATE (AP enabled, no clients) → Solid ON (client joins) → ROTATE (last client leaves). The `zego_on_net_event_wifi_ap_sta_disconnected(remaining_clients)` hook triggers the revert to SOFTAP state when `remaining_clients == 0`.
 
@@ -183,3 +216,5 @@ Defined in `src/modules/network/net_event_app.c`. Declared in `src/modules/messa
 No open issues.
 
 > In SoftAP mode with multiple clients, disconnecting one client does not change the LED (still solid) until the **last** client disconnects. This is intentional — the AP is still serving traffic.
+
+> **Undetected client loss (SoftAP / P2P_GO)**: if the last remaining client disappears without a clean disconnect (power cut, crash — no deauth frame sent), the LED can stay solid ON for up to ~5 minutes before reverting to ROTATE, since the revert depends on the AP's inactivity-timeout eviction (`ap_max_inactivity`, default 300 s). See `network-spec.md` for the detection mechanism and how to lower the timeout at runtime.
