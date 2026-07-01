@@ -11,13 +11,14 @@
  *   zego_on_net_event_wifi_ap_enabled()       - SoftAP/P2P_GO AP enabled (before any client)
  *   zego_on_net_event_dhcp_bound()        - IP assigned via DHCP (STA/P2P_CLIENT)
  *   zego_on_net_event_wifi_ap_sta_connected()  - station joined SoftAP/P2P_GO
- *   zego_on_net_event_wifi_disconnect() - link lost
+ *   zego_on_net_event_wifi_disconnect(will_retry) - link lost (or STA has no
+ *       stored credentials); will_retry says whether it will reconnect on its own
  *
  * Override them here (strong definitions beat the weak no-ops in
  * zego/network) to react to network events - e.g. publish a zbus channel,
  * start an MQTT client, or kick off an HTTP request.
  *
- * APP_WIFI_STATE_CHAN is published here so app_ux can drive LED 0.
+ * APP_WIFI_STATE_CHAN is published here so app_ux can drive the LEDs.
  * Add your own zbus channels following the same ZBUS_CHAN_DEFINE pattern.
  *
  * ── How to extend ────────────────────────────────────────────────────────────
@@ -31,8 +32,6 @@
 
 #include <net_event_mgmt.h>
 #include "../messages.h"
-#include "led.h"
-
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(net_event_app, LOG_LEVEL_INF);
@@ -42,14 +41,14 @@ ZBUS_CHAN_DEFINE(APP_WIFI_STATE_CHAN, struct app_wifi_state_msg, NULL, NULL, ZBU
 		 ZBUS_MSG_INIT(.state = APP_WIFI_STATE_CONNECTING, .mode = ZEGO_WIFI_MODE_STA));
 
 /* Tracks whether a link is currently up, so zego_on_net_event_p2p_pairing(false)
- * can resolve the LED back to CONNECTED vs ROTATE when pairing ends. */
+ * can resolve the state back to CONNECTED vs CONNECTING when pairing ends. */
 static bool s_connected;
 
 /*
- * P2P pairing started/ended. Drives LED 0 BREATHE while pairing is active
- * (both roles), reverting to the resolved state when it ends. Called by the
- * zego/network P2P engine (GO: window open/close; GC: discovery start / connect
- * success or give-up).
+ * P2P pairing started/ended. Publishes PAIRING state so app_ux drives the
+ * pairing LED (CONFIG_APP_UX_PAIRING_LED_IDX) while pairing is active,
+ * reverting to CONNECTED or CONNECTING when it ends. Called by the zego/network
+ * P2P engine (GO: window open/close; GC: discovery start / connect success or give-up).
  */
 void zego_on_net_event_p2p_pairing(bool active)
 {
@@ -61,7 +60,7 @@ void zego_on_net_event_p2p_pairing(bool active)
 	};
 
 	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
-	LOG_INF("P2P pairing %s", active ? "started - LED 0 BREATHE" : "ended");
+	LOG_INF("P2P pairing %s", active ? "started" : "ended");
 }
 
 void zego_on_net_event_wifi_ap_enabled(enum zego_wifi_mode mode, const char *ip_addr,
@@ -83,11 +82,6 @@ void zego_on_net_event_wifi_ap_enabled(enum zego_wifi_mode mode, const char *ip_
 void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
 				  const char *mac_addr, const char *ssid)
 {
-
-	struct led_msg led = {.type = LED_COMMAND_ON, .led_number = 0};
-
-	zbus_chan_pub(&LED_CMD_CHAN, &led, K_NO_WAIT);
-
 	s_connected = true;
 
 	struct app_wifi_state_msg msg = {
@@ -110,9 +104,6 @@ void zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 	LOG_INF("AP client connected: total=%d", sta_count);
 
 	if (sta_count >= 1) {
-		struct led_msg led = {.type = LED_COMMAND_ON, .led_number = 0};
-
-		zbus_chan_pub(&LED_CMD_CHAN, &led, K_NO_WAIT);
 		struct app_wifi_state_msg msg = {
 			.mode = ZEGO_WIFI_MODE_SOFTAP,
 			.state = APP_WIFI_STATE_CONNECTED,
@@ -133,36 +124,17 @@ void zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 }
 
 /*
- * NOTE: zego_on_net_event_wifi_ap_sta_disconnected() may fire up to 5 minutes
- * after a P2P_CLIENT (or SoftAP client) loses power or crashes.
- *
- * Reason: when a client disappears without sending a deauth/disassoc frame
- * (power cut, battery pull, crash), the GO/AP has no immediate indication.
- * wpa_supplicant (hostapd) detects the loss via the AP inactivity timer:
- * it sends keepalive null-data frames; once all retries fail it evicts the
- * station.  The default timeout is ap_max_inactivity = 300 s (5 minutes).
- *
- * A clean client shutdown (e.g. normal reboot) sends a deauth frame and the
- * disconnect event fires immediately.
- *
- * To reduce the detection window, lower ap_max_inactivity at runtime:
- *
- *   uart:~$ wpa_cli -i wlan0 set ap_max_inactivity 30
- *
- * There is no Zephyr Kconfig for this value; it can also be set via a custom
- * wpa_supplicant config or by calling wpa_cli from application code.
+ * will_retry distinguishes "link lost but a retry is already scheduled"
+ * from "reconnection is not possible" (STA with zero stored credentials -
+ * the only false case today; P2P_GC always passes true).  LED 0 rotates in
+ * the first case and fast-blinks only in the second - see FR-105.
  */
-void zego_on_net_event_wifi_disconnect(void)
+void zego_on_net_event_wifi_disconnect(bool will_retry)
 {
-
-	struct led_msg led = {.type = LED_COMMAND_ROTATE, .led_number = 0};
-
-	zbus_chan_pub(&LED_CMD_CHAN, &led, K_NO_WAIT);
-
 	s_connected = false;
 
 	struct app_wifi_state_msg msg = {
-		.state = APP_WIFI_STATE_ERROR,
+		.state = will_retry ? APP_WIFI_STATE_CONNECTING : APP_WIFI_STATE_ERROR,
 		.mode = ZEGO_WIFI_MODE_STA,
 	};
 
@@ -170,10 +142,18 @@ void zego_on_net_event_wifi_disconnect(void)
 
 	/* TODO: Wi-Fi link lost - clean up application state here.
 	 * Example: disconnect MQTT, cancel pending requests, flush buffers. */
-	LOG_INF("TODO: Wi-Fi link lost - clean up your application state in "
-		"src/modules/network/net_event_app.c/zego_on_net_event_wifi_disconnect()");
+	LOG_INF("TODO: Wi-Fi link lost (retrying=%d) - clean up your application state in "
+		"src/modules/network/net_event_app.c/zego_on_net_event_wifi_disconnect()",
+		will_retry);
 }
 
+/*
+ * NOTE: this may fire up to ~5 minutes after a P2P_GC (or SoftAP client)
+ * loses power or crashes, since the AP only detects the loss via its
+ * inactivity timer (default 300 s) when no deauth frame was sent. A clean
+ * client shutdown fires this immediately. See network-spec.md for how to
+ * lower the timeout at runtime (wpa_cli set ap_max_inactivity).
+ */
 void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 {
 	LOG_INF("TODO: AP/P2P_GO client disconnected (now %d/3 devices connected) - add your "
@@ -184,10 +164,6 @@ void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 		remaining_clients);
 
 	if (remaining_clients == 0) {
-		struct led_msg led = {.type = LED_COMMAND_ROTATE, .led_number = 0};
-
-		zbus_chan_pub(&LED_CMD_CHAN, &led, K_NO_WAIT);
-
 		struct app_wifi_state_msg msg = {
 			.state = APP_WIFI_STATE_SOFTAP,
 			.mode = ZEGO_WIFI_MODE_SOFTAP,

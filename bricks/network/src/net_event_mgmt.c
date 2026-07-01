@@ -33,7 +33,9 @@
  *   ─────────────────
  *   For STA/P2P_GC: zego_on_net_event_dhcp_bound() is called when IP is assigned.
  *   For SoftAP/P2P_GO:  zego_on_net_event_wifi_ap_sta_connected() is called when a station joins.
- *   On link loss:       zego_on_net_event_wifi_disconnect() is called.
+ *   On link loss:       zego_on_net_event_wifi_disconnect(will_retry) is called;
+ *                       will_retry is false only for STA with zero stored
+ *                       credentials (P2P_GC always retries).
  *   All are __weak and defined as no-ops here; each app overrides them in its
  *   own net_event_app.c to publish app-specific zbus channels.
  *
@@ -159,30 +161,45 @@ static void dhcp_diag_handler(struct k_work *work)
 }
 
 /* ============================================================================
- * L3 CONNECTIVITY WATCHDOG (STA)
+ * STA RECONNECT: direct-disconnect retry + L3 DHCP-timeout watchdog
  * ============================================================================
- * A successful NET_EVENT_WIFI_CONNECT_RESULT is an L2 (802.11 association)
- * event only — it does not guarantee an IP.  Without this watchdog, a STA that
- * associates but never gets a DHCP lease (or whose lease later expires while
- * the link stays up) sits "associated, no IP" forever, because the reconnect
- * loop in wifi_ble_prov treats association as "connected" and stops retrying.
+ * STA must keep retrying a stored network after any disconnect (see
+ * network-spec.md "STA Reconnect Sequence").  Ownership is split so neither
+ * board configuration runs two competing reconnect loops:
  *
- * The watchdog is armed when STA association succeeds and when a bound lease is
- * lost, and cancelled on DHCP_BOUND and on DISCONNECT_RESULT.  If it fires it
- * issues NET_REQUEST_WIFI_DISCONNECT, which produces a DISCONNECT_RESULT and
- * re-arms the normal reconnect loop — escaping the half-connected state.
+ *   CONFIG_ZEGO_WIFI_BLE_PROV=y  -> wifi_ble_prov owns reconnect timing (its
+ *                                   own DISCONNECT_RESULT handler
+ *                                   re-associates, rotating stored SSIDs).
+ *   CONFIG_ZEGO_WIFI_BLE_PROV=n  -> zego/network owns it via l3_reconnect_work
+ *                                   below: scheduled directly from
+ *                                   NET_EVENT_WIFI_DISCONNECT_RESULT, and as
+ *                                   the escape path if the L3 watchdog fires.
  *
- * Scoped to STA only: P2P_GC has its own reconnect logic (wifi_utils.c) and
- * SoftAP/P2P_GO have no DHCP client.
+ * The L3 watchdog is a second, independent concern: a successful
+ * NET_EVENT_WIFI_CONNECT_RESULT is an L2 (802.11 association) event only — it
+ * does not guarantee an IP.  Without it, a STA that associates but never gets
+ * a DHCP lease (or whose lease later expires while the link stays up) sits
+ * "associated, no IP" forever, because reconnect loops treat association as
+ * "connected" and stop retrying.  The watchdog is armed on association and on
+ * lease loss, cancelled on DHCP_BOUND and on DISCONNECT_RESULT.  If it fires
+ * it issues NET_REQUEST_WIFI_DISCONNECT, producing a DISCONNECT_RESULT that
+ * re-arms whichever reconnect path owns STA recovery — escaping the
+ * half-connected state without a separate reschedule here.
+ *
+ * l3_reconnect_work is intentionally NOT nested inside the DHCP-timeout
+ * guard below: direct-disconnect retry must work even if a project disables
+ * CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC (an unrelated feature).
+ *
+ * Both mechanisms are scoped to STA only: P2P_GC has its own reconnect logic
+ * (wifi_utils.c) and SoftAP/P2P_GO have no DHCP client.
  */
-#if CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC > 0
-static struct k_work_delayable l3_watchdog_work;
-
 #if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
-/* When the BLE-provisioning brick is present it owns the reconnect loop
- * (its DISCONNECT_RESULT handler re-associates).  When it is absent, an
- * app-issued NET_REQUEST_WIFI_DISCONNECT does NOT auto-reconnect, so the
- * watchdog must drive the re-association itself. */
+/* Retry delays for zego/network-owned STA reconnect, logged at every
+ * reschedule so retry timing is visible on the console (mirrors the detail
+ * wifi_ble_prov's own reconnect loop already logs via log_retry_plan()). */
+#define L3_RECONNECT_DISCONNECT_DELAY_SEC 2
+#define L3_RECONNECT_RETRY_DELAY_SEC      5
+
 static struct k_work_delayable l3_reconnect_work;
 
 static void l3_reconnect_handler(struct k_work *work)
@@ -192,24 +209,29 @@ static void l3_reconnect_handler(struct k_work *work)
 	if (active_mode != ZEGO_WIFI_MODE_STA || iface == NULL || network_connected) {
 		return;
 	}
+
+	LOG_INF("STA reconnect: requesting CONNECT_STORED now");
 	/* Runs on the system workqueue — sized for the deep WPA ctrl-socket
 	 * chain that NET_REQUEST_WIFI_CONNECT_STORED needs. */
 	int rc = net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, NULL, 0);
 
 	if (rc) {
-		LOG_WRN("L3 watchdog: reconnect (CONNECT_STORED) failed (%d), retrying", rc);
-		k_work_reschedule(&l3_reconnect_work, K_SECONDS(5));
+		LOG_WRN("STA reconnect: CONNECT_STORED request failed (%d), retrying in %d s", rc,
+			L3_RECONNECT_RETRY_DELAY_SEC);
+		k_work_reschedule(&l3_reconnect_work, K_SECONDS(L3_RECONNECT_RETRY_DELAY_SEC));
 	}
 }
 #endif /* !CONFIG_ZEGO_WIFI_BLE_PROV */
+
+#if CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC > 0
+static struct k_work_delayable l3_watchdog_work;
 
 static void l3_watchdog_arm(void)
 {
 	if (active_mode != ZEGO_WIFI_MODE_STA) {
 		return;
 	}
-	k_work_reschedule(&l3_watchdog_work,
-			  K_SECONDS(CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC));
+	k_work_reschedule(&l3_watchdog_work, K_SECONDS(CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC));
 }
 
 static void l3_watchdog_cancel(void)
@@ -231,23 +253,25 @@ static void l3_watchdog_handler(struct k_work *work)
 	LOG_WRN("L3 watchdog: associated but no IP after %d s — forcing reconnect",
 		CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC);
 
-	/* Clean L2 teardown.  This produces a DISCONNECT_RESULT. */
+	/* Clean L2 teardown.  This produces a DISCONNECT_RESULT, which drives
+	 * whichever reconnect path owns STA recovery (wifi_ble_prov, or
+	 * l3_reconnect_work above). */
 	int rc = net_mgmt(NET_REQUEST_WIFI_DISCONNECT, iface, NULL, 0);
 
 	if (rc) {
 		LOG_ERR("L3 watchdog: NET_REQUEST_WIFI_DISCONNECT failed (%d)", rc);
 	}
-
-#if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
-	/* No external reconnect loop — drive re-association ourselves once the
-	 * disconnect has settled. */
-	k_work_reschedule(&l3_reconnect_work, K_SECONDS(2));
-#endif
-	/* With ble_prov present, its DISCONNECT_RESULT handler re-associates. */
 }
 #else
-static inline void l3_watchdog_arm(void) {}
-static inline void l3_watchdog_cancel(void) {}
+static inline void l3_watchdog_arm(void)
+{
+}
+static inline void l3_watchdog_cancel(void)
+{
+#if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
+	k_work_cancel_delayable(&l3_reconnect_work);
+#endif
+}
 #endif /* CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC > 0 */
 
 /* ============================================================================
@@ -349,27 +373,17 @@ void __weak zego_on_net_event_wifi_connect(enum zego_wifi_mode mode)
 }
 
 /*
- * NOTE: zego_on_net_event_wifi_ap_sta_disconnected() may fire up to 5 minutes
- * after a P2P_GC (or SoftAP client) loses power or crashes.
- *
- * Reason: when a client disappears without sending a deauth/disassoc frame
- * (power cut, battery pull, crash), the GO/AP has no immediate indication.
- * wpa_supplicant (hostapd) detects the loss via the AP inactivity timer:
- * it sends keepalive null-data frames; once all retries fail it evicts the
- * station.  The default timeout is ap_max_inactivity = 300 s (5 minutes).
- *
- * A clean client shutdown (e.g. normal reboot) sends a deauth frame and the
- * disconnect event fires immediately.
- *
- * To reduce the detection window, lower ap_max_inactivity at runtime:
- *
- *   uart:~$ wpa_cli -i wlan0 set ap_max_inactivity 30
- *
- * There is no Zephyr Kconfig for this value; it can also be set via a custom
- * wpa_supplicant config or by calling wpa_cli from application code.
+ * will_retry tells the app whether it should show a "trying to reconnect"
+ * indication or an "action needed" one.  Computed by the caller:
+ *   - STA: true if >=1 Wi-Fi credential is stored (l3_reconnect_work / the
+ *     wifi_ble_prov reconnect loop will keep retrying); false only when
+ *     zero credentials are stored - nothing to retry with.
+ *   - P2P_GC: always true - it either reconnects to its saved GO or
+ *     auto-pairs indefinitely, so it never has a "not possible" case.
  */
-void __weak zego_on_net_event_wifi_disconnect(void)
+void __weak zego_on_net_event_wifi_disconnect(bool will_retry)
 {
+	ARG_UNUSED(will_retry);
 }
 
 void __weak zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
@@ -394,6 +408,26 @@ void __weak zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 	ARG_UNUSED(sta_count);
 }
 
+/*
+ * NOTE: zego_on_net_event_wifi_ap_sta_disconnected() may fire up to 5 minutes
+ * after a P2P_GC (or SoftAP client) loses power or crashes.
+ *
+ * Reason: when a client disappears without sending a deauth/disassoc frame
+ * (power cut, battery pull, crash), the GO/AP has no immediate indication.
+ * wpa_supplicant (hostapd) detects the loss via the AP inactivity timer:
+ * it sends keepalive null-data frames; once all retries fail it evicts the
+ * station.  The default timeout is ap_max_inactivity = 300 s (5 minutes).
+ *
+ * A clean client shutdown (e.g. normal reboot) sends a deauth frame and the
+ * disconnect event fires immediately.
+ *
+ * To reduce the detection window, lower ap_max_inactivity at runtime:
+ *
+ *   uart:~$ wpa_cli -i wlan0 set ap_max_inactivity 30
+ *
+ * There is no Zephyr Kconfig for this value; it can also be set via a custom
+ * wpa_supplicant config or by calling wpa_cli from application code.
+ */
 void __weak zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 {
 	ARG_UNUSED(remaining_clients);
@@ -505,6 +539,25 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 				LOG_ERR("  Reason: Unknown %d", status->status);
 				break;
 			}
+
+			if (active_mode == ZEGO_WIFI_MODE_STA) {
+				/* WPA supplicant does NOT fire DISCONNECT_RESULT after a
+				 * failed connect attempt (only after a successful one
+				 * later drops) - schedule the retry here too, or a STA
+				 * that never associates in the first place would sit
+				 * forever with no further attempt. */
+				bool has_creds = wifi_utils_has_stored_credentials();
+
+				zego_on_net_event_wifi_disconnect(has_creds);
+#if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
+				if (has_creds) {
+					LOG_WRN("STA reconnect: retrying in %d s",
+						L3_RECONNECT_RETRY_DELAY_SEC);
+					k_work_reschedule(&l3_reconnect_work,
+							  K_SECONDS(L3_RECONNECT_RETRY_DELAY_SEC));
+				}
+#endif
+			}
 		}
 		break;
 	}
@@ -518,13 +571,36 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 			wifi_utils_get_last_ssid() ? wifi_utils_get_last_ssid() : "<unknown>");
 		network_connected = false;
 		memset(&last_bound_ip, 0, sizeof(last_bound_ip));
-		/* Link is down — the reconnect loop (wifi_ble_prov) owns recovery
-		 * now; stand the L3 watchdog down so it does not double-trigger. */
+		/* Link is down — stand the L3 watchdog down so it does not
+		 * double-trigger against whichever reconnect path takes over
+		 * below. */
 		l3_watchdog_cancel();
 		if (active_mode == ZEGO_WIFI_MODE_P2P_GC) {
 			wifi_p2p_gc_on_disconnect();
+			/* P2P_GC always retries (saved-MAC reconnect or pairing
+			 * discovery) - it never has a "not possible" case. */
+			zego_on_net_event_wifi_disconnect(true);
+		} else if (active_mode == ZEGO_WIFI_MODE_STA) {
+			bool has_creds = wifi_utils_has_stored_credentials();
+
+			/* Re-checked here rather than assumed from the prior
+			 * connection: a one-time shell 'wifi connect' that was
+			 * never saved via 'wifi cred add' also disconnects with
+			 * zero stored credentials. */
+			zego_on_net_event_wifi_disconnect(has_creds);
+#if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
+			/* With BLE prov present, its own DISCONNECT_RESULT
+			 * handler owns reconnect timing (see network-spec.md
+			 * STA Reconnect Sequence for why the two are not run
+			 * together). */
+			if (has_creds) {
+				LOG_INF("STA reconnect: scheduling retry in %d s",
+					L3_RECONNECT_DISCONNECT_DELAY_SEC);
+				k_work_reschedule(&l3_reconnect_work,
+						  K_SECONDS(L3_RECONNECT_DISCONNECT_DELAY_SEC));
+			}
+#endif
 		}
-		zego_on_net_event_wifi_disconnect();
 		break;
 	}
 	case NET_EVENT_WIFI_SCAN_DONE:
@@ -768,7 +844,8 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 		struct wifi_iface_status wstatus = {0};
 
 		if (active_mode == ZEGO_WIFI_MODE_STA && network_connected &&
-		    net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &wstatus, sizeof(wstatus)) == 0 &&
+		    net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &wstatus, sizeof(wstatus)) ==
+			    0 &&
 		    wstatus.state >= WIFI_STATE_ASSOCIATED) {
 			LOG_WRN("L3-NET_EVENT_IPV4_ADDR_DEL: lease lost while associated — "
 				"arming watchdog");
@@ -815,11 +892,12 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 
 	/* Detect lease renewal: same IP, already connected -> skip full reconnect fan-out */
 #if defined(CONFIG_NET_DHCPV4)
-	bool is_renewal = network_connected &&
-			  net_ipv4_addr_cmp(&dhcpv4->requested_ip, &last_bound_ip);
+	bool is_renewal =
+		network_connected && net_ipv4_addr_cmp(&dhcpv4->requested_ip, &last_bound_ip);
 
 	if (is_renewal) {
-		LOG_INF("L3-NET_EVENT_IPV4_DHCP_BOUND: lease renewed (same ip=%s) - skipping reconnect",
+		LOG_INF("L3-NET_EVENT_IPV4_DHCP_BOUND: lease renewed (same ip=%s) - skipping "
+			"reconnect",
 			ip);
 		return;
 	}
@@ -894,15 +972,27 @@ static void start_mode_work_handler(struct k_work *work)
 	case ZEGO_WIFI_MODE_STA: {
 		struct net_if *sta_iface = net_if_get_wifi_sta();
 
+		if (!wifi_utils_has_stored_credentials()) {
+			LOG_INF("No stored credentials — use 'wifi cred add' or BLE "
+				"provisioning to connect");
+			zego_on_net_event_wifi_disconnect(false);
+			break;
+		}
 		if (sta_iface) {
 			int rc = net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, sta_iface, NULL, 0);
 
 			if (rc) {
-				LOG_INF("No stored credentials or connect failed (%d) — "
-					"use 'wifi cred add' to provision",
-					rc);
+#if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
+				LOG_WRN("Auto-connect (CONNECT_STORED) failed (%d), retrying in "
+					"%d s",
+					rc, L3_RECONNECT_RETRY_DELAY_SEC);
+				k_work_reschedule(&l3_reconnect_work,
+						  K_SECONDS(L3_RECONNECT_RETRY_DELAY_SEC));
+#else
+				LOG_WRN("Auto-connect (CONNECT_STORED) failed (%d), retrying", rc);
+#endif
 			} else {
-				LOG_INF("Auto-connecting with stored credentials (if exists)...");
+				LOG_INF("Auto-connecting with stored credentials...");
 			}
 		}
 		break;
@@ -985,11 +1075,11 @@ int network_module_init(void)
 	 * net_mgmt_add_event_callback(&l4_event_cb); */
 
 	k_work_init_delayable(&dhcp_diag_work, dhcp_diag_handler);
-#if CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC > 0
-	k_work_init_delayable(&l3_watchdog_work, l3_watchdog_handler);
 #if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
 	k_work_init_delayable(&l3_reconnect_work, l3_reconnect_handler);
 #endif
+#if CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC > 0
+	k_work_init_delayable(&l3_watchdog_work, l3_watchdog_handler);
 #endif
 
 	LOG_INF("All network event handlers initialized");

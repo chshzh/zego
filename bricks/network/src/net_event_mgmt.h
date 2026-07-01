@@ -56,12 +56,22 @@ void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
 void zego_on_net_event_wifi_ap_sta_connected(int sta_count);
 
 /**
- * @brief Called when Wi-Fi connectivity is lost.
+ * @brief Called when Wi-Fi connectivity is lost, or when STA mode starts
+ *        with zero stored credentials.
  *
  * Weak hook — override in the application to publish app-specific zbus
- * channels.  The default implementation is a no-op.
+ * channels (e.g. to drive a "trying to reconnect" vs "action needed" LED
+ * state).  The default implementation is a no-op.
+ *
+ * @param will_retry  true if the module will keep retrying automatically and
+ *                    the link is expected to recover without user action
+ *                    (STA with >=1 stored credential; P2P_GC always - it
+ *                    either reconnects to its saved GO or auto-pairs
+ *                    indefinitely).  false only for STA with zero stored
+ *                    Wi-Fi credentials - the one case where reconnection is
+ *                    not possible.
  */
-void zego_on_net_event_wifi_disconnect(void);
+void zego_on_net_event_wifi_disconnect(bool will_retry);
 
 /**
  * @brief Called when the SoftAP or P2P_GO access point is enabled and ready
