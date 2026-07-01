@@ -80,4 +80,24 @@ config APP_UX_CONNECTED_LED_GREEN_ONLY
 	  colour channel is lit.  Use on nRF5340 Audio DK where LED 4 is the
 	  green channel of RGB2 (red = LED 3, blue = LED 5).
 
+config APP_UX_PAIRING_LED_IDX
+        int "LED index for BLE provisioning and P2P pairing BREATHE effect"
+        default 0
+        range 0 8
+        help
+          LED index that breathes during BLE provisioning and P2P pairing.
+          Default 0.  Set to 5 on nRF5340 Audio DK to breathe the blue
+          channel of RGB2 (LED 5), keeping the green (LED 4) and red (LED 3)
+          channels distinct.
+
+config APP_UX_ERROR_LED_IDX
+        int "LED index for the Wi-Fi error BLINK effect"
+        default 0
+        range 0 8
+        help
+          LED index that blinks (100 ms half-period) when the Wi-Fi state
+          transitions to APP_WIFI_STATE_ERROR.  Default 0 (RGB1 red on most
+          boards).  Set to 3 on nRF5340 Audio DK to blink the red channel
+          of RGB2 (LED 3), keeping error distinct from the ROTATE LEDs.
+
 endif # APP_UX_MODULE

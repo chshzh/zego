@@ -104,17 +104,6 @@ static void do_mode_cycle(void)
 
 /* ── LED helpers ───────────────────────────────────────────────────────── */
 
-static void led_set(enum led_msg_type type, uint16_t period_ms)
-{
-	struct led_msg msg = {
-		.type = type,
-		.led_number = 0,
-		.period_ms = period_ms,
-	};
-
-	zbus_chan_pub(&LED_CMD_CHAN, &msg, K_NO_WAIT);
-}
-
 /*
  * Send ROTATE, optionally constraining to a board-specific LED subset.
  *
@@ -180,6 +169,23 @@ static void led_connected(void)
 	}
 }
 
+/*
+ * Drive the pairing/BLE-provisioning BREATHE effect.
+ *
+ * CONFIG_APP_UX_PAIRING_LED_IDX selects the LED index (default 0).
+ * Set to 5 on nRF5340 Audio DK to breathe the blue channel of RGB2,
+ * keeping the green (connected) and red channels distinct.
+ */
+static void led_breathe_pairing(void)
+{
+	struct led_msg msg = {
+		.type = LED_COMMAND_BREATHE,
+		.led_number = CONFIG_APP_UX_PAIRING_LED_IDX,
+	};
+
+	zbus_chan_pub(&LED_CMD_CHAN, &msg, K_NO_WAIT);
+}
+
 static void apply_wifi_state_led(enum app_wifi_state state)
 {
 	switch (state) {
@@ -193,11 +199,18 @@ static void apply_wifi_state_led(enum app_wifi_state state)
 		led_rotate();
 		break;
 	case APP_WIFI_STATE_PAIRING:
-		led_set(LED_COMMAND_BREATHE, 0);
+		led_breathe_pairing();
 		break;
-	case APP_WIFI_STATE_ERROR:
-		led_set(LED_COMMAND_BLINK, 100);
+	case APP_WIFI_STATE_ERROR: {
+		struct led_msg err = {
+			.type = LED_COMMAND_BLINK,
+			.led_number = CONFIG_APP_UX_ERROR_LED_IDX,
+			.period_ms = 100,
+		};
+
+		zbus_chan_pub(&LED_CMD_CHAN, &err, K_NO_WAIT);
 		break;
+	}
 	}
 }
 
@@ -205,6 +218,12 @@ static void apply_wifi_state_led(enum app_wifi_state state)
 
 static enum app_wifi_state last_wifi_state = APP_WIFI_STATE_CONNECTING;
 static bool ble_prov_led_active;
+/*
+ * Set while a P2P pairing or BLE-prov BREATHE is in progress.
+ * Suppresses CONNECTING / ERROR / SOFTAP LED overrides that arrive during
+ * the re-pairing disconnect, until the final CONNECTED state clears it.
+ */
+static bool pairing_led_active;
 
 /*
  * Deferred LED work — runs on the system workqueue.
@@ -236,7 +255,9 @@ static void app_ux_led_work_fn(struct k_work *work)
 		/* LED module not yet initialised — will be replayed in app_ux_init */
 		return;
 	}
-	if (!ble_prov_led_active) {
+	if (ble_prov_led_active) {
+		led_breathe_pairing();
+	} else {
 		apply_wifi_state_led(pending_wifi_state);
 	}
 }
@@ -272,14 +293,13 @@ static void btn_listener_cb(const struct zbus_channel *chan)
 			break;
 		}
 #if defined(CONFIG_ZEGO_WIFI_BLE_PROV)
-		ble_prov_led_active = !ble_prov_led_active;
-		zego_wifi_ble_prov_advertise(ble_prov_led_active);
-		if (ble_prov_led_active) {
-			LOG_INF("BLE provisioning: enabled");
-			led_set(LED_COMMAND_BREATHE, 0);
-		} else {
-			LOG_INF("BLE provisioning: disabled");
-			apply_wifi_state_led(last_wifi_state);
+		{
+			static bool adv_enabled = true; /* BLE prov auto-starts at boot */
+
+			adv_enabled = !adv_enabled;
+			zego_wifi_ble_prov_advertise(adv_enabled);
+			LOG_INF("BLE provisioning advertising: %s",
+				adv_enabled ? "enabled" : "disabled");
 		}
 #else
 		LOG_INF("BLE provisioning not enabled on this board");
@@ -312,6 +332,16 @@ static void wifi_state_listener_cb(const struct zbus_channel *chan)
 		return;
 	}
 
+	/* Track pairing state; suppress LED overrides until pairing completes. */
+	if (msg->state == APP_WIFI_STATE_PAIRING) {
+		pairing_led_active = true;
+	} else if (msg->state == APP_WIFI_STATE_CONNECTED) {
+		pairing_led_active = false;
+	} else if (pairing_led_active) {
+		/* CONNECTING / ERROR during re-pairing — keep BREATHE active. */
+		return;
+	}
+
 	/*
 	 * Defer the LED command to the system workqueue (see app_ux_led_work_fn).
 	 * Do not call apply_wifi_state_led() directly here — it would invoke
@@ -324,6 +354,22 @@ static void wifi_state_listener_cb(const struct zbus_channel *chan)
 
 ZBUS_LISTENER_DEFINE(app_wifi_state_listener, wifi_state_listener_cb);
 ZBUS_CHAN_ADD_OBS(APP_WIFI_STATE_CHAN, app_wifi_state_listener, 0);
+
+/* ── BLE_PROV_CONN_CHAN listener → LED BREATHE on phone connect ─────────── */
+
+#if defined(CONFIG_ZEGO_WIFI_BLE_PROV)
+static void ble_prov_conn_listener_cb(const struct zbus_channel *chan)
+{
+	const struct ble_prov_msg *msg = zbus_chan_const_msg(chan);
+
+	ble_prov_led_active = msg->connected;
+	pending_wifi_state = last_wifi_state;
+	k_work_submit(&app_ux_led_work);
+}
+
+ZBUS_LISTENER_DEFINE(app_ble_prov_conn_listener, ble_prov_conn_listener_cb);
+ZBUS_CHAN_ADD_OBS(BLE_PROV_CONN_CHAN, app_ble_prov_conn_listener, 0);
+#endif
 
 /* ── SYS_INIT: start ROTATE at boot ───────────────────────────────────── */
 
