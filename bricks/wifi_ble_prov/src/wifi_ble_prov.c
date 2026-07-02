@@ -72,6 +72,13 @@ static bool last_prov_state = false;
  * so that all stored networks are cycled through during the reconnect loop.
  */
 static int cred_rotate_idx;
+/* Set on the first NET_EVENT_WIFI_SCAN_DONE. Mirrors zego/network's
+ * initial_scan_done: a CONNECT_RESULT failure with status=1 before the first
+ * scan completes is the normal "connect before scan" race in the supplicant
+ * state machine, and wpa_supplicant retries it automatically - see the
+ * pre-scan check below.
+ */
+static bool initial_scan_done;
 
 K_THREAD_STACK_DEFINE(adv_daemon_stack_area, ADV_DAEMON_STACK_SIZE);
 static struct k_work_q adv_daemon_work_q;
@@ -98,6 +105,12 @@ static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 				    struct net_if *iface)
 {
 	ARG_UNUSED(iface);
+
+	if (mgmt_event == NET_EVENT_WIFI_SCAN_DONE) {
+		initial_scan_done = true;
+		return;
+	}
+
 	if (!wifi_prov_state_get()) {
 		return;
 	}
@@ -132,6 +145,13 @@ static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 			/* Success - clear reconnect state */
 			wifi_reconnect_pending = false;
 			k_work_cancel_delayable(&wifi_connect_work);
+		} else if (!initial_scan_done && status && status->status == 1) {
+			/* Pre-scan race (see initial_scan_done comment above) -
+			 * wpa_supplicant is already retrying this on its own.
+			 * Scheduling our own retry here would race a second
+			 * NET_REQUEST_WIFI_CONNECT against that automatic retry. */
+			LOG_DBG("WiFi connect pre-scan retry (status=1), letting supplicant "
+				"retry on its own");
 		} else {
 			/* Failed connect (timeout, auth error, etc.).
 			 * WPA supplicant does not fire DISCONNECT_RESULT after a
@@ -571,7 +591,8 @@ static int wifi_ble_prov_init(void)
 
 	net_mgmt_init_event_callback(&wifi_mgmt_cb, wifi_mgmt_event_handler,
 				     NET_EVENT_WIFI_DISCONNECT_RESULT |
-					     NET_EVENT_WIFI_CONNECT_RESULT);
+					     NET_EVENT_WIFI_CONNECT_RESULT |
+					     NET_EVENT_WIFI_SCAN_DONE);
 	net_mgmt_add_event_callback(&wifi_mgmt_cb);
 #ifdef CONFIG_WIFI_PROV_ADV_DATA_UPDATE
 	k_work_schedule_for_queue(&adv_daemon_work_q, &update_adv_data_work,

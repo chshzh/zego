@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/wifi_ble_prov` |
-| Version | 2026-06-14-00-21 |
+| Version | 2026-07-01-16-45 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -20,6 +20,7 @@
 | 2026-06-05-09-31 | Added Supported Hardware section; documented nRF5340 Audio DK + nRF7002EK + BLE network-core constraint |
 | 2026-06-11-13-52 | Updated hook name references: `zego_network_on_wifi_connected`→`zego_on_net_event_dhcp_bound`, `zego_network_on_wifi_disconnected`→`zego_on_net_event_wifi_disconnect` |
 | 2026-06-14-00-21 | `wifi_ble_prov_init()` now checks `zego_wifi_get_mode()` at SYS_INIT and skips the entire BLE provisioning stack when not in STA mode; prevents BLE GATT notification spam in P2P / SoftAP modes |
+| 2026-07-01-16-45 | Fixed a reconnect race on boards with `CONFIG_ZEGO_WIFI_BLE_PROV=y`: `wifi_mgmt_event_handler()`'s `CONNECT_RESULT` failure branch previously scheduled its own `wifi_connect_work` retry even for the routine "connect before scan" race (`status=1` before the first scan completes), which wpa_supplicant already retries on its own - the extra retry could fire a second `NET_REQUEST_WIFI_CONNECT` while the automatic one was still in flight. Now tracks `initial_scan_done` (via `NET_EVENT_WIFI_SCAN_DONE`, mirroring `zego/network`) and skips scheduling its own retry for that pre-scan case, documented below and in the Callbacks table. |
 
 ---
 
@@ -98,7 +99,7 @@ BLE runs on the network core via `hci_ipc` - set `SB_CONFIG_NETCORE_HCI_IPC=y` i
 | `connected()` / `disconnected()` | `BT_CONN_CB_DEFINE(conn_callbacks)` | Track active BT connection; trigger adv param update on disconnect |
 | `auth_cancel()` | `bt_conn_auth_cb_register(&auth_cb_display)` | Log BT pairing cancel |
 | `pairing_complete()` / `pairing_failed()` | `bt_conn_auth_info_cb_register(...)` | Log pairing result; disconnect on failure |
-| `wifi_mgmt_event_handler()` | `net_mgmt_init_event_callback(...)` | Trigger reconnect on `WIFI_DISCONNECT_RESULT`; clear retry on `WIFI_CONNECT_RESULT` success |
+| `wifi_mgmt_event_handler()` | `net_mgmt_init_event_callback(...)` | Trigger reconnect on `WIFI_DISCONNECT_RESULT`; clear retry on `WIFI_CONNECT_RESULT` success; track `WIFI_SCAN_DONE` to skip its own retry on the pre-scan `CONNECT_RESULT` race |
 
 ---
 
@@ -154,13 +155,23 @@ Advertisement data is refreshed on the `adv_daemon_work_q` via `update_adv_data_
 
 ## Credential Reconnect Loop
 
-On `WIFI_DISCONNECT_RESULT` (when provisioner is not the intentional cause):
+On `WIFI_DISCONNECT_RESULT` (when provisioner is not the intentional cause), or on a failed
+`WIFI_CONNECT_RESULT` (wpa_supplicant does not fire `DISCONNECT_RESULT` after a failed connect
+attempt, so a failure needs its own trigger too):
 
 1. Schedule `wifi_connect_work` after `WIFI_RECONNECT_DELAY_SEC` (5 s).
 2. On work handler: attempt `connect_stored_rotating()` - cycles through all stored SSIDs
    in round-robin order using `wifi_credentials_for_each_ssid()`.
 3. If still disconnected: reschedule after `WIFI_RECONNECT_RETRY_SEC` (180 s).
 4. Log the full retry schedule at reconnect start (shows T+Ns for each SSID in rotation order).
+
+**Exception - pre-scan race**: a `CONNECT_RESULT` failure with `status=1` before the first
+`NET_EVENT_WIFI_SCAN_DONE` is the normal "connect before scan" race in the supplicant state
+machine (also handled the same way in `zego/network`'s `l2_wifi_conn_event_handler`).
+wpa_supplicant retries this automatically on its own once the scan completes, so
+`wifi_mgmt_event_handler()` does **not** schedule its own `wifi_connect_work` retry for it -
+doing so would race a second `NET_REQUEST_WIFI_CONNECT` against wpa_supplicant's own retry
+that is already in flight.
 
 On `WIFI_CONNECT_RESULT` success: cancel `wifi_connect_work`; clear `wifi_reconnect_pending`.
 
