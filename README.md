@@ -46,6 +46,7 @@ Capabilities are composed by enabling Kconfig symbols — no code copying.
 | network | `zego/bricks/network/` | — (weak-hook API) | [network-spec.md](bricks/network/docs/network-spec.md) |
 | wifi_ble_prov | `zego/bricks/wifi_ble_prov/` | — | [wifi-ble-prov-spec.md](bricks/wifi_ble_prov/docs/wifi-ble-prov-spec.md) |
 | memonitor | `zego/bricks/memonitor/` | `MEMONITOR_CHAN` (out) | [memonitor-spec.md](bricks/memonitor/docs/memonitor-spec.md) |
+| ux | `zego/bricks/ux/` | `ZEGO_UX_WIFI_STATE_CHAN` (in) · weak-hook gesture API | [ux-spec.md](bricks/ux/docs/ux-spec.md) |
 
 See each spec for the full API, Kconfig reference, and hardware test guide.
 

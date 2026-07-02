@@ -17,6 +17,7 @@
 
 | Version | Summary of changes |
 |---|---|
+| 2026-07-02-00-00 | `ux` moved to a zego brick (`zego/bricks/ux/`, `CONFIG_ZEGO_UX`); gesture actions are now `__weak` overridable hooks; module dependency diagram updated (`app_ux` → `zego/ux`). See `zego/bricks/ux/docs/ux-spec.md`. |
 | 2026-06-04-17-09 | Initial spec |
 | 2026-06-05-09-38 | Added nRF5340 Audio DK + nRF7002EK to Board Differences table; updated BLE prov note |
 | 2026-06-09-17-25 | Updated to PRD v2026-06-09-17-25: fixed Board Differences — nRF5340 Audio DK ROTATE is RGB2 only [3–5], not RGB1 |
@@ -270,7 +271,7 @@ actual zego directory (e.g. `../../zego/modules/button`).
   │  your application module  │
   └───────────────────────────┘
 
-  zego/button ──BUTTON_CHAN──► app_ux (ux.c) ──► zego/led (LED_CMD_CHAN)
+  zego/button ──BUTTON_CHAN──► zego/ux (weak-hook gestures) ──► zego/led (LED_CMD_CHAN)
                                      └─ double-click in P2P mode ──► zego/network wifi_p2p_start_pairing()
   zego/led    ◄──LED_CMD_CHAN── (add your own publisher)
   zego/wifi_ble_prov ──► (saves creds via settings → triggers STA connect)

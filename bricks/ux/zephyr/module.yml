@@ -1,0 +1,4 @@
+name: zego_ux
+build:
+  cmake: .
+  kconfig: Kconfig

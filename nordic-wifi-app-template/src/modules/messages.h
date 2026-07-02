@@ -10,42 +10,18 @@
  * Define all app-level channels here so every module sees the same
  * declarations.  Each channel must be DEFINED (ZBUS_CHAN_DEFINE) in exactly
  * one .c file.
+ *
+ * The Wi-Fi connectivity state channel used to drive LED 0
+ * (previously APP_WIFI_STATE_CHAN) is now owned by the zego/ux brick as
+ * ZEGO_UX_WIFI_STATE_CHAN — see zego/bricks/ux/src/ux.h. net_event_mgmt_app.c
+ * publishes to it directly; no app-level declaration is needed for it.
+ *
+ * Add your own app-specific channels below following the same pattern.
  */
 
 #ifndef APP_MESSAGES_H
 #define APP_MESSAGES_H
 
 #include <zephyr/zbus/zbus.h>
-#include <wifi.h> /* enum zego_wifi_mode */
-
-/* ==========================================================================
- * APP_WIFI_STATE_CHAN — Wi-Fi connectivity state
- *
- * Publisher:  net_event_app.c (defined there via ZBUS_CHAN_DEFINE)
- * Subscriber: app_ux module (LED 0 feedback)
- * ==========================================================================
- */
-
-/** @brief Application-level Wi-Fi state used to drive LED 0. */
-enum app_wifi_state {
-	/** Boot / connecting — ROTATE on LED 0. */
-	APP_WIFI_STATE_CONNECTING = 0,
-	/** STA or P2P link established (IP assigned / peer joined). */
-	APP_WIFI_STATE_CONNECTED,
-	/** SoftAP active — first client connected. */
-	APP_WIFI_STATE_SOFTAP,
-	/** P2P pairing in progress (GO window open or GC discovering/joining) — BREATHE. */
-	APP_WIFI_STATE_PAIRING,
-	/** Link lost or fatal error. */
-	APP_WIFI_STATE_ERROR,
-};
-
-/** @brief Message published on APP_WIFI_STATE_CHAN. */
-struct app_wifi_state_msg {
-	enum app_wifi_state state;
-	enum zego_wifi_mode mode;
-};
-
-ZBUS_CHAN_DECLARE(APP_WIFI_STATE_CHAN);
 
 #endif /* APP_MESSAGES_H */

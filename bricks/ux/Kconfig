@@ -1,8 +1,11 @@
+#
 # Copyright (c) 2026 Nordic Semiconductor ASA
+#
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
 
-config APP_UX_MODULE
-	bool "Application UX module (button gestures + LED Wi-Fi feedback)"
+config ZEGO_UX
+	bool "Zego UX module (button gestures + LED Wi-Fi feedback)"
 	depends on ZEGO_BUTTON && ZEGO_LED && ZEGO_WIFI && REBOOT && SETTINGS
 	default n
 	help
@@ -22,9 +25,15 @@ config APP_UX_MODULE
 	    BLE prov active   → BREATHE (triggered by double-click)
 	    Error / disconn.  → Fast BLINK (100 ms half-period)
 
-if APP_UX_MODULE
+	  Each gesture action (single click / double-click / long press) is a
+	  __weak function (zego_ux_on_*) — override with a strong definition in
+	  the application to replace the default action while keeping the LED
+	  state machine and button-index filtering unchanged.  See
+	  zego/bricks/ux/docs/ux-spec.md for the weak-hook API.
 
-config APP_UX_INIT_PRIORITY
+if ZEGO_UX
+
+config ZEGO_UX_INIT_PRIORITY
 	int "UX module SYS_INIT priority"
 	default 95
 	help
@@ -32,7 +41,7 @@ config APP_UX_INIT_PRIORITY
 	  ZEGO_BUTTON_INIT_PRIORITY (90) so LED and button are ready before
 	  the UX module starts ROTATE and registers observers.
 
-config APP_UX_BUTTON_IDX
+config ZEGO_UX_BUTTON_IDX
 	int "Button index that carries the UX gestures"
 	default 0
 	range 0 8
@@ -42,27 +51,27 @@ config APP_UX_BUTTON_IDX
 	  Default 0 (BUTTON0 / SW0).  Set to 4 on the nRF5340 Audio DK to use
 	  BTN5 instead of VOL- (idx 0), leaving VOL- free for the application.
 
-config APP_UX_ROTATE_FIRST_LED
+config ZEGO_UX_ROTATE_FIRST_LED
 	int "First LED index in the Wi-Fi ROTATE sequence"
 	default 0
 	range 0 8
 	help
 	  Index of the first LED included in the Wi-Fi connecting/softap ROTATE
 	  effect.  Consecutive indices from this value are used; count is set by
-	  APP_UX_ROTATE_COUNT.  Leave both at 0 to let the LED module use its
+	  ZEGO_UX_ROTATE_COUNT.  Leave both at 0 to let the LED module use its
 	  own ROTATE_NUM_LEDS default (indices 0..ROTATE_NUM_LEDS-1).
 
-config APP_UX_ROTATE_COUNT
+config ZEGO_UX_ROTATE_COUNT
 	int "Number of LEDs in the Wi-Fi ROTATE sequence"
 	default 0
 	range 0 9
 	help
-	  How many consecutive LEDs (starting from APP_UX_ROTATE_FIRST_LED) to
+	  How many consecutive LEDs (starting from ZEGO_UX_ROTATE_FIRST_LED) to
 	  include in the rotate sweep.  0 means fall back to the LED module
 	  default (CONFIG_ZEGO_LED_ROTATE_NUM_LEDS consecutive LEDs from 0).
 	  Example — rotate RGB2 only on nRF5340 Audio DK: FIRST_LED=3, COUNT=3.
 
-config APP_UX_CONNECTED_LED
+config ZEGO_UX_CONNECTED_LED
 	int "LED index turned ON when Wi-Fi is connected"
 	default 0
 	range 0 8
@@ -71,7 +80,7 @@ config APP_UX_CONNECTED_LED
 	  Default 0 (all boards).  Set to 4 on nRF5340 Audio DK to light the
 	  green channel of RGB2.
 
-config APP_UX_CONNECTED_LED_GREEN_ONLY
+config ZEGO_UX_CONNECTED_LED_GREEN_ONLY
 	bool "Turn off adjacent LEDs for a pure-colour connected indicator"
 	default n
 	help
@@ -80,24 +89,28 @@ config APP_UX_CONNECTED_LED_GREEN_ONLY
 	  colour channel is lit.  Use on nRF5340 Audio DK where LED 4 is the
 	  green channel of RGB2 (red = LED 3, blue = LED 5).
 
-config APP_UX_PAIRING_LED_IDX
-        int "LED index for BLE provisioning and P2P pairing BREATHE effect"
-        default 0
-        range 0 8
-        help
-          LED index that breathes during BLE provisioning and P2P pairing.
-          Default 0.  Set to 5 on nRF5340 Audio DK to breathe the blue
-          channel of RGB2 (LED 5), keeping the green (LED 4) and red (LED 3)
-          channels distinct.
+config ZEGO_UX_PAIRING_LED_IDX
+	int "LED index for BLE provisioning and P2P pairing BREATHE effect"
+	default 0
+	range 0 8
+	help
+	  LED index that breathes during BLE provisioning and P2P pairing.
+	  Default 0.  Set to 5 on nRF5340 Audio DK to breathe the blue
+	  channel of RGB2 (LED 5), keeping the green (LED 4) and red (LED 3)
+	  channels distinct.
 
-config APP_UX_ERROR_LED_IDX
-        int "LED index for the Wi-Fi error BLINK effect"
-        default 0
-        range 0 8
-        help
-          LED index that blinks (100 ms half-period) when the Wi-Fi state
-          transitions to APP_WIFI_STATE_ERROR.  Default 0 (RGB1 red on most
-          boards).  Set to 3 on nRF5340 Audio DK to blink the red channel
-          of RGB2 (LED 3), keeping error distinct from the ROTATE LEDs.
+config ZEGO_UX_ERROR_LED_IDX
+	int "LED index for the Wi-Fi error BLINK effect"
+	default 0
+	range 0 8
+	help
+	  LED index that blinks (100 ms half-period) when the Wi-Fi state
+	  transitions to ZEGO_UX_WIFI_STATE_ERROR.  Default 0 (RGB1 red on most
+	  boards).  Set to 3 on nRF5340 Audio DK to blink the red channel
+	  of RGB2 (LED 3), keeping error distinct from the ROTATE LEDs.
 
-endif # APP_UX_MODULE
+module = ZEGO_UX
+module-str = zego_ux
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # ZEGO_UX

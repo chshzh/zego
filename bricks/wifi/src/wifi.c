@@ -246,6 +246,11 @@ void zego_banner_app_extra(void)
 #if CONFIG_ZEGO_LED
 	LOG_INF("  " CLR_BLU "led" CLR_RST "               (zego)");
 #endif
+
+#if CONFIG_ZEGO_UX
+	LOG_INF("  " CLR_BLU "ux" CLR_RST "               (zego)");
+#endif
+
 	LOG_INF("  " CLR_BLU "wifi" CLR_RST "              (zego)");
 
 #if CONFIG_ZEGO_NETWORK
