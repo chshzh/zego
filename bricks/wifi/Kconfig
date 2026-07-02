@@ -5,7 +5,8 @@
 
 config ZEGO_WIFI
         bool "Zego Wi-Fi module (mode selector + banner)"
-        depends on NETWORKING && ZBUS
+        select NETWORKING
+        select ZBUS
         help
           Provides:
             - Startup banner: app name, version, PRD, specs, build date, board, MAC.

@@ -11,17 +11,12 @@
 # ---------------------------------------------------------------------------
 # WiFi driver (nRF70)
 # ---------------------------------------------------------------------------
-config WIFI
-	default y if ZEGO_NETWORK
-
-config WIFI_NRF70
-	default y if ZEGO_NETWORK
+# WIFI / WIFI_NRF70: selected unconditionally by ZEGO_NETWORK (see Kconfig).
 
 # ---------------------------------------------------------------------------
 # WPA supplicant
 # ---------------------------------------------------------------------------
-config WIFI_NM_WPA_SUPPLICANT
-	default y if ZEGO_NETWORK
+# WIFI_NM_WPA_SUPPLICANT: selected unconditionally by ZEGO_NETWORK (see Kconfig).
 
 config WIFI_NM_WPA_SUPPLICANT_THREAD_STACK_SIZE
 	default 8192 if ZEGO_NETWORK
@@ -59,15 +54,12 @@ config NRF70_SR_COEX_RF_SWITCH
 # ---------------------------------------------------------------------------
 # L2 WiFi connectivity (connection manager)
 # ---------------------------------------------------------------------------
-config NET_CONNECTION_MANAGER
-	default y if ZEGO_NETWORK
+# NET_CONNECTION_MANAGER / L2_WIFI_CONNECTIVITY: selected unconditionally by
+# ZEGO_NETWORK (see Kconfig).
 
 # HWM 4572 B (88% of 5168!) x 1.5 = 6858 -> 7168 -- INCREASED for safety
 config NET_CONNECTION_MANAGER_MONITOR_STACK_SIZE
 	default 7168 if ZEGO_NETWORK
-
-config L2_WIFI_CONNECTIVITY
-	default y if ZEGO_NETWORK
 
 config L2_WIFI_CONNECTIVITY_AUTO_CONNECT
 	default y if ZEGO_NETWORK
@@ -78,9 +70,7 @@ config L2_WIFI_CONNECTIVITY_AUTO_DOWN
 # ---------------------------------------------------------------------------
 # WiFi credentials (persistent storage via ZMS)
 # ---------------------------------------------------------------------------
-config WIFI_CREDENTIALS
-	default y if ZEGO_NETWORK
-
+# WIFI_CREDENTIALS: selected unconditionally by ZEGO_NETWORK (see Kconfig).
 # WIFI_CREDENTIALS_BACKEND_SETTINGS is a choice symbol - set in prj.conf.
 
 # ---------------------------------------------------------------------------
@@ -89,23 +79,14 @@ config WIFI_CREDENTIALS
 config NETWORKING
 	default y if ZEGO_NETWORK
 
-config NET_IPV4
-	default y if ZEGO_NETWORK
+# NET_IPV4 / NET_UDP / NET_TCP / NET_DHCPV4: selected unconditionally by
+# ZEGO_NETWORK (see Kconfig).
 
 config NET_IPV6
 	default n
 
-config NET_UDP
-	default y if ZEGO_NETWORK
-
-config NET_TCP
-	default y if ZEGO_NETWORK
-
 config NET_TCP_TIME_WAIT_DELAY
 	default 1000 if ZEGO_NETWORK
-
-config NET_DHCPV4
-	default y if ZEGO_NETWORK
 
 # ---------------------------------------------------------------------------
 # Network buffers
@@ -145,8 +126,7 @@ config NET_MAX_CONN
 # ---------------------------------------------------------------------------
 # Sockets
 # ---------------------------------------------------------------------------
-config NET_SOCKETS
-	default y if ZEGO_NETWORK
+# NET_SOCKETS: selected unconditionally by ZEGO_NETWORK (see Kconfig).
 
 config NET_SOCKETS_POLL_MAX
 	default 20 if ZEGO_NETWORK
@@ -155,8 +135,7 @@ config NET_SOCKETS_POLL_MAX
 # DNS resolution
 # Allow concurrent lookups from https_client, mqtt_client, memfault, etc.
 # ---------------------------------------------------------------------------
-config DNS_RESOLVER
-	default y if ZEGO_NETWORK
+# DNS_RESOLVER: selected unconditionally by ZEGO_NETWORK (see Kconfig).
 
 config DNS_RESOLVER_ADDITIONAL_BUF_CTR
 	default 2 if ZEGO_NETWORK

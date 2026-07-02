@@ -8,6 +8,18 @@ config ZEGO_NETWORK
 	bool "Shared network/Wi-Fi event management module"
 	default n
 	depends on ZEGO_WIFI
+	select WIFI
+	select WIFI_NRF70
+	select WIFI_NM_WPA_SUPPLICANT
+	select NET_CONNECTION_MANAGER
+	select L2_WIFI_CONNECTIVITY
+	select WIFI_CREDENTIALS
+	select NET_IPV4
+	select NET_SOCKETS
+	select NET_UDP
+	select NET_TCP
+	select NET_DHCPV4
+	select DNS_RESOLVER
 	help
 	  Shared Zephyr module providing a unified Wi-Fi / network event
 	  management layer for zego-based applications.  Handles interface
