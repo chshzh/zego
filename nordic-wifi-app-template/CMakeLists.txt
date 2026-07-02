@@ -39,5 +39,5 @@ target_include_directories(app PUBLIC ${ZEPHYR_BASE}/subsys/net/ip)
 # zego/wifi/CMakeLists.txt via target_compile_definitions.
 target_sources(app PRIVATE
   src/main.c
-  src/modules/network/net_event_app.c
+  src/modules/network/net_event_mgmt_app.c
 )

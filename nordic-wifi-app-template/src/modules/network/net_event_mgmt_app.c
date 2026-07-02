@@ -4,7 +4,7 @@
  */
 
 /*
- * net_event_app.c - application-side Wi-Fi event hooks.
+ * net_event_mgmt_app.c - application-side Wi-Fi event hooks.
  *
  * zego/network fires weak callbacks when connectivity changes:
  *
@@ -18,8 +18,9 @@
  * zego/network) to react to network events - e.g. publish a zbus channel,
  * start an MQTT client, or kick off an HTTP request.
  *
- * APP_WIFI_STATE_CHAN is published here so app_ux can drive the LEDs.
- * Add your own zbus channels following the same ZBUS_CHAN_DEFINE pattern.
+ * ZEGO_UX_WIFI_STATE_CHAN (owned by the zego/ux brick) is published here so
+ * zego/ux can drive the LEDs. Add your own zbus channels in messages.h
+ * following the same ZBUS_CHAN_DEFINE pattern.
  *
  * ── How to extend ────────────────────────────────────────────────────────────
  *
@@ -31,52 +32,48 @@
  */
 
 #include <net_event_mgmt.h>
-#include "../messages.h"
+#include <ux.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(net_event_app, LOG_LEVEL_INF);
-
-/* Define APP_WIFI_STATE_CHAN here - declared in messages.h. */
-ZBUS_CHAN_DEFINE(APP_WIFI_STATE_CHAN, struct app_wifi_state_msg, NULL, NULL, ZBUS_OBSERVERS_EMPTY,
-		 ZBUS_MSG_INIT(.state = APP_WIFI_STATE_CONNECTING, .mode = ZEGO_WIFI_MODE_STA));
 
 /* Tracks whether a link is currently up, so zego_on_net_event_p2p_pairing(false)
  * can resolve the state back to CONNECTED vs CONNECTING when pairing ends. */
 static bool s_connected;
 
 /*
- * P2P pairing started/ended. Publishes PAIRING state so app_ux drives the
- * pairing LED (CONFIG_APP_UX_PAIRING_LED_IDX) while pairing is active,
+ * P2P pairing started/ended. Publishes PAIRING state so zego/ux drives the
+ * pairing LED (CONFIG_ZEGO_UX_PAIRING_LED_IDX) while pairing is active,
  * reverting to CONNECTED or CONNECTING when it ends. Called by the zego/network
  * P2P engine (GO: window open/close; GC: discovery start / connect success or give-up).
  */
 void zego_on_net_event_p2p_pairing(bool active)
 {
-	struct app_wifi_state_msg msg = {
+	struct zego_ux_wifi_state_msg msg = {
 		.mode = zego_wifi_get_mode(),
-		.state = active ? APP_WIFI_STATE_PAIRING
-				: (s_connected ? APP_WIFI_STATE_CONNECTED
-					       : APP_WIFI_STATE_CONNECTING),
+		.state = active ? ZEGO_UX_WIFI_STATE_PAIRING
+				: (s_connected ? ZEGO_UX_WIFI_STATE_CONNECTED
+					       : ZEGO_UX_WIFI_STATE_CONNECTING),
 	};
 
-	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+	zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 	LOG_INF("P2P pairing %s", active ? "started" : "ended");
 }
 
 void zego_on_net_event_wifi_ap_enabled(enum zego_wifi_mode mode, const char *ip_addr,
 				       const char *ssid)
 {
-	struct app_wifi_state_msg msg = {
+	struct zego_ux_wifi_state_msg msg = {
 		.mode = mode,
-		.state = APP_WIFI_STATE_SOFTAP,
+		.state = ZEGO_UX_WIFI_STATE_SOFTAP,
 	};
 
-	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+	zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 
 	/* TODO: AP is up, no client connected yet.
 	 * Add application logic here - e.g. start mDNS, advertise a service. */
 	LOG_INF("TODO: AP is up, no client connected yet - add your application logic in "
-		"src/modules/network/net_event_app.c/zego_on_net_event_wifi_ap_enabled()");
+		"src/modules/network/net_event_mgmt_app.c/zego_on_net_event_wifi_ap_enabled()");
 }
 
 void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
@@ -84,18 +81,18 @@ void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
 {
 	s_connected = true;
 
-	struct app_wifi_state_msg msg = {
+	struct zego_ux_wifi_state_msg msg = {
 		.mode = mode,
-		.state = APP_WIFI_STATE_CONNECTED,
+		.state = ZEGO_UX_WIFI_STATE_CONNECTED,
 	};
 
-	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+	zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 
 	/* TODO: Device has an IP address - start your application here.
 	 * ip_addr, mac_addr, ssid are available as function arguments.
 	 * Example: connect to MQTT broker, start HTTP client, send telemetry. */
 	LOG_INF("TODO: Device has IP %s (mac=%s ssid=%s) - start your application in "
-		"src/modules/network/net_event_app.c/zego_on_net_event_dhcp_bound()",
+		"src/modules/network/net_event_mgmt_app.c/zego_on_net_event_dhcp_bound()",
 		ip_addr, mac_addr, ssid);
 }
 
@@ -104,12 +101,12 @@ void zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 	LOG_INF("AP client connected: total=%d", sta_count);
 
 	if (sta_count >= 1) {
-		struct app_wifi_state_msg msg = {
+		struct zego_ux_wifi_state_msg msg = {
 			.mode = ZEGO_WIFI_MODE_SOFTAP,
-			.state = APP_WIFI_STATE_CONNECTED,
+			.state = ZEGO_UX_WIFI_STATE_CONNECTED,
 		};
 
-		zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+		zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 
 		/* TODO: First (or additional) client connected to SoftAP/P2P_GO.
 		 * sta_count is the total number of connected stations (max 3).
@@ -117,7 +114,7 @@ void zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 		LOG_INF("TODO: AP/P2P_GO client connected (now %d/3 devices connected) - add your "
 			"application "
 			"logic in "
-			"src/modules/network/net_event_app.c/"
+			"src/modules/network/net_event_mgmt_app.c/"
 			"zego_on_net_event_wifi_ap_sta_connected()",
 			sta_count);
 	}
@@ -133,17 +130,17 @@ void zego_on_net_event_wifi_disconnect(bool will_retry)
 {
 	s_connected = false;
 
-	struct app_wifi_state_msg msg = {
-		.state = will_retry ? APP_WIFI_STATE_CONNECTING : APP_WIFI_STATE_ERROR,
+	struct zego_ux_wifi_state_msg msg = {
+		.state = will_retry ? ZEGO_UX_WIFI_STATE_CONNECTING : ZEGO_UX_WIFI_STATE_ERROR,
 		.mode = ZEGO_WIFI_MODE_STA,
 	};
 
-	zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+	zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 
 	/* TODO: Wi-Fi link lost - clean up application state here.
 	 * Example: disconnect MQTT, cancel pending requests, flush buffers. */
 	LOG_INF("TODO: Wi-Fi link lost (retrying=%d) - clean up your application state in "
-		"src/modules/network/net_event_app.c/zego_on_net_event_wifi_disconnect()",
+		"src/modules/network/net_event_mgmt_app.c/zego_on_net_event_wifi_disconnect()",
 		will_retry);
 }
 
@@ -159,17 +156,17 @@ void zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 	LOG_INF("TODO: AP/P2P_GO client disconnected (now %d/3 devices connected) - add your "
 		"application "
 		"logic in "
-		"src/modules/network/net_event_app.c/"
+		"src/modules/network/net_event_mgmt_app.c/"
 		"zego_on_net_event_wifi_ap_sta_disconnected()",
 		remaining_clients);
 
 	if (remaining_clients == 0) {
-		struct app_wifi_state_msg msg = {
-			.state = APP_WIFI_STATE_SOFTAP,
+		struct zego_ux_wifi_state_msg msg = {
+			.state = ZEGO_UX_WIFI_STATE_SOFTAP,
 			.mode = ZEGO_WIFI_MODE_SOFTAP,
 		};
 
-		zbus_chan_pub(&APP_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+		zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 
 		/* TODO: Last client left the SoftAP/P2P_GO - no stations connected.
 		 * Example: stop provisioning server, re-arm WPS, update cloud status. */

@@ -7,7 +7,7 @@
 
 ### Introduction
 
-`nordic-wifi-app-template` is the minimal, production-ready starting point for new NCS Wi-Fi applications targeting nRF7x development kits. It is aimed at embedded developers who need a verified connectivity foundation — all four Wi-Fi modes, three STA provisioning methods, persistent mode storage, and button/LED channels — without any application logic on top. Clone the template, fill in `net_event_app.c` to react to connectivity events, and the rest is already working.
+`nordic-wifi-app-template` is the minimal, production-ready starting point for new NCS Wi-Fi applications targeting nRF7x development kits. It is aimed at embedded developers who need a verified connectivity foundation — all four Wi-Fi modes, three STA provisioning methods, persistent mode storage, and button/LED channels — without any application logic on top. Clone the template, fill in `net_event_mgmt_app.c` to react to connectivity events, and the rest is already working.
 
 ### Supported hardware
 
@@ -28,7 +28,7 @@
 - **Automatic P2P pairing and reconnection, no configured MAC** — in P2P modes, the GO opens a ~2-min WPS PBC window on double-click, and the GC auto-starts pairing discovery at boot whenever it has no saved GO (no button press required) and keeps retrying until it joins one, saving the GO's MAC to NVS. Once paired, the GC reconnects automatically on disconnect and after power cycle, retrying indefinitely; a double-click always available to (re-)pair with a different GO.
 - **Resilient Wi-Fi reconnection** — STA keeps retrying stored networks after any disconnect, on every board, independent of BLE provisioning; P2P_GC keeps retrying its saved GO or pairing search indefinitely. Neither gives up on its own.
 - **Startup banner** — prints firmware version, board, MAC address, active mode, and per-mode connection instructions at every boot.
-- **Single customisation point** — `src/modules/network/net_event_app.c` with inline guide and TODO-annotated patterns for publishing your own Zbus channel on connect/disconnect.
+- **Single customisation point** — `src/modules/network/net_event_mgmt_app.c` with inline guide and TODO-annotated patterns for publishing your own Zbus channel on connect/disconnect.
 - **Live memory monitoring via [zego/memonitor](../bricks/memonitor)** — samples all `k_heap` instances and thread stack HWMs every 5 s; publishes `MEMONITOR_CHAN` zbus event on each sample; ZView live view available over JLink when `ZEGO_MEMONITOR_ZVIEW=y`.
 
 ### Target Users
@@ -127,7 +127,7 @@ LED effects by board — organized by **effect** since which physical LED(s) lig
 
 **3. Application logic**
 
-Once Wi-Fi connects, the template logs the event from `net_event_app.c`:
+Once Wi-Fi connects, the template logs the event from `net_event_mgmt_app.c`:
 
 ```
 Wi-Fi connected: mode=STA ip=192.168.1.42 mac=AA:BB:CC:DD:EE:FF ssid=MyNetwork
@@ -163,10 +163,8 @@ nordic-wifi-app-template/
 │   ├── main.c                        ← boot banner, SYS_INIT registration
 │   └── modules/
 │       ├── messages.h                ← Zbus channel and message type definitions
-│       ├── network/
-│       │   └── net_event_app.c       ← customisation point: Wi-Fi connect/disconnect hooks
-│       └── ux/
-│           └── ux.c                  ← button gesture detection and LED state machine
+│       └── network/
+│           └── net_event_mgmt_app.c   ← customisation point: Wi-Fi connect/disconnect hooks
 └── sysbuild/
     └── hci_ipc/                      ← netcore config for nRF5340 dual-core boards
 ```
@@ -179,6 +177,7 @@ External zego bricks (referenced via `EXTRA_ZEPHYR_MODULES` in `CMakeLists.txt`)
 ../bricks/button/        ← GPIO debounce, BUTTON_CHAN publish
 ../bricks/led/           ← LED_CMD_CHAN subscriber, ROTATE/BLINK/BREATHE effects
 ../bricks/wifi_ble_prov/ ← BLE provisioning server (nRF54LM20DK; optional overlay on others)
+../bricks/ux/            ← Button gesture detection + LED state machine; weak-hook gesture API
 ```
 
 ### Workspace Setup
@@ -305,7 +304,7 @@ The tag format is `v<ncs-version>.<build>` (e.g. `v3.3.0.1`). Major/minor/patch 
 - **NVS erase resets everything.** `--erase` (nRF7002DK / nRF5340 Audio DK) and `--recover` (nRF54LM20DK) wipe NVS — the device wakes in the default STA mode, any saved P2P_GC GO pairing is forgotten, and Wi-Fi credentials must be re-entered.
 - **nRF5340 Audio DK LED ROTATE** uses RGB2 (channels idx 3–5); idx 5 Blue BREATHE indicates BLE provisioning or P2P pairing active. RGB1 (idx 0–2) and the mono LEDs stay available for application use.
 - **nRF5340 Audio DK DTS overlay** (`boards/nrf5340_audio_dk_nrf5340_cpuapp.overlay`) maps the nRF7002EK SPI bus to the Audio DK's Arduino header — this is required; the nRF54LM20DK shield handles its own pinout without an overlay.
-- **Customisation entry point** is `src/modules/network/net_event_app.c`. Override `zego_on_net_event_dhcp_bound()` and `zego_on_net_event_wifi_disconnect()` — the file contains inline TODO comments and a 4-step example for publishing a Zbus channel.
+- **Customisation entry point** is `src/modules/network/net_event_mgmt_app.c`. Override `zego_on_net_event_dhcp_bound()` and `zego_on_net_event_wifi_disconnect()` — the file contains inline TODO comments and a 4-step example for publishing a Zbus channel.
 - **Heap monitor** logs the high-water mark periodically (interval configurable via `CONFIG_APP_HEAP_MONITOR_INTERVAL_S`). Watch for steady growth as an early sign of leaks.
 - **P2P pairing (button-driven or automatic, no configured MAC):** pairing uses WPS PBC (no PIN to enter). Double-click Button 0 on the GO to open a ~2-min PBC window. The GC either auto-starts pairing discovery at boot (when it has no saved GO) or (re-)starts it on a double-click; either way it keeps retrying until it discovers and joins the pairing GO. The GC saves the GO's MAC to NVS and reconnects automatically thereafter (on disconnect and across power cycles, retrying indefinitely) until a new pairing overwrites it.
   - **Manual (advanced):** `wifi p2p find` → `wifi p2p peer` → `wifi p2p connect <GO-MAC> pbc --join` on the GC, with the GO's PBC window open.
