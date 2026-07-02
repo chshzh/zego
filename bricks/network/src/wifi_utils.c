@@ -216,7 +216,17 @@ int wifi_set_reg_domain(void)
 	}
 
 	regd.oper = WIFI_MGMT_SET;
-	strncpy(regd.country_code, CONFIG_ZEGO_WIIF_SOFTAP_REG_DOMAIN, (WIFI_COUNTRY_CODE_LEN + 1));
+	/* country_code[] is exactly WIFI_COUNTRY_CODE_LEN bytes with no NUL
+	 * terminator (ISO 3166-1 alpha-2, e.g. "US"); +1 here wrote one byte
+	 * past the array into the adjacent num_channels field. strncpy() is
+	 * intentionally not used: the source and dest are the same length so
+	 * strncpy would never write a NUL, which -Wstringop-truncation flags
+	 * as a (here, harmless) truncation. memcpy() says the same thing
+	 * without the warning. */
+	BUILD_ASSERT(sizeof(CONFIG_ZEGO_WIIF_SOFTAP_REG_DOMAIN) - 1 == WIFI_COUNTRY_CODE_LEN,
+		     "CONFIG_ZEGO_WIIF_SOFTAP_REG_DOMAIN must be exactly "
+		     "WIFI_COUNTRY_CODE_LEN characters");
+	memcpy(regd.country_code, CONFIG_ZEGO_WIIF_SOFTAP_REG_DOMAIN, WIFI_COUNTRY_CODE_LEN);
 
 	ret = net_mgmt(NET_REQUEST_WIFI_REG_DOMAIN, iface, &regd, sizeof(regd));
 	if (ret) {
