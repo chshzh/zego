@@ -36,8 +36,12 @@
  *   On link loss:       zego_on_net_event_wifi_disconnect(will_retry) is called;
  *                       will_retry is false only for STA with zero stored
  *                       credentials (P2P_GC always retries).
- *   All are __weak and defined as no-ops here; each app overrides them in its
- *   own net_event_app.c to publish app-specific zbus channels.
+ *   All are __weak; if CONFIG_ZEGO_UX=y this file's default implementations
+ *   publish ZEGO_UX_WIFI_STATE_CHAN so zego/ux drives LED 0 out of the box,
+ *   otherwise they are plain no-ops.  Each app may still override any of them
+ *   with a strong definition in its own net_event_app.c to publish additional
+ *   app-specific zbus channels (replacing the default UX publish - see
+ *   nordic-wifi-app-template/src/modules/network/net_event_app.c).
  *
  *   DHCP client lifecycle (STA / P2P_GC)
  *   ─────────────────────────────────────────
@@ -69,6 +73,10 @@
 #include <wifi.h>
 #include "net_event_mgmt.h"
 #include "wifi_utils.h"
+
+#if IS_ENABLED(CONFIG_ZEGO_UX)
+#include <ux.h>
+#endif
 
 LOG_MODULE_REGISTER(zego_net_event_mgmt, CONFIG_ZEGO_NETWORK_LOG_LEVEL);
 
@@ -401,29 +409,67 @@ void __weak zego_on_net_event_wifi_connect(enum zego_wifi_mode mode)
  */
 void __weak zego_on_net_event_wifi_disconnect(bool will_retry)
 {
+#if IS_ENABLED(CONFIG_ZEGO_UX)
+	struct zego_ux_wifi_state_msg msg = {
+		.state = will_retry ? ZEGO_UX_WIFI_STATE_CONNECTING : ZEGO_UX_WIFI_STATE_ERROR,
+		.mode = ZEGO_WIFI_MODE_STA,
+	};
+
+	zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+#else
 	ARG_UNUSED(will_retry);
+#endif
 }
 
 void __weak zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
 					 const char *mac_addr, const char *ssid)
 {
-	ARG_UNUSED(mode);
 	ARG_UNUSED(ip_addr);
 	ARG_UNUSED(mac_addr);
 	ARG_UNUSED(ssid);
+#if IS_ENABLED(CONFIG_ZEGO_UX)
+	struct zego_ux_wifi_state_msg msg = {
+		.mode = mode,
+		.state = ZEGO_UX_WIFI_STATE_CONNECTED,
+	};
+
+	zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+#else
+	ARG_UNUSED(mode);
+#endif
 }
 
 void __weak zego_on_net_event_wifi_ap_enabled(enum zego_wifi_mode mode, const char *ip_addr,
 					      const char *ssid)
 {
-	ARG_UNUSED(mode);
 	ARG_UNUSED(ip_addr);
 	ARG_UNUSED(ssid);
+#if IS_ENABLED(CONFIG_ZEGO_UX)
+	struct zego_ux_wifi_state_msg msg = {
+		.mode = mode,
+		.state = ZEGO_UX_WIFI_STATE_SOFTAP,
+	};
+
+	zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+#else
+	ARG_UNUSED(mode);
+#endif
 }
 
 void __weak zego_on_net_event_wifi_ap_sta_connected(int sta_count)
 {
+#if IS_ENABLED(CONFIG_ZEGO_UX)
+	if (sta_count >= 1) {
+		struct zego_ux_wifi_state_msg msg = {
+			.mode = ZEGO_WIFI_MODE_SOFTAP,
+			.state = ZEGO_UX_WIFI_STATE_CONNECTED,
+		};
+
+		zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+	}
+#else
 	ARG_UNUSED(sta_count);
+#endif
 }
 
 /*
@@ -448,12 +494,38 @@ void __weak zego_on_net_event_wifi_ap_sta_connected(int sta_count)
  */
 void __weak zego_on_net_event_wifi_ap_sta_disconnected(int remaining_clients)
 {
+#if IS_ENABLED(CONFIG_ZEGO_UX)
+	if (remaining_clients == 0) {
+		struct zego_ux_wifi_state_msg msg = {
+			.state = ZEGO_UX_WIFI_STATE_SOFTAP,
+			.mode = ZEGO_WIFI_MODE_SOFTAP,
+		};
+
+		zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+	}
+#else
 	ARG_UNUSED(remaining_clients);
+#endif
 }
 
+/*
+ * Resolves back to CONNECTED vs CONNECTING when pairing ends, based on
+ * network_connected (set by the L3 DHCP-bound / disconnect handlers below).
+ */
 void __weak zego_on_net_event_p2p_pairing(bool active)
 {
+#if IS_ENABLED(CONFIG_ZEGO_UX)
+	struct zego_ux_wifi_state_msg msg = {
+		.mode = zego_wifi_get_mode(),
+		.state = active ? ZEGO_UX_WIFI_STATE_PAIRING
+				: (network_connected ? ZEGO_UX_WIFI_STATE_CONNECTED
+						     : ZEGO_UX_WIFI_STATE_CONNECTING),
+	};
+
+	zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+#else
 	ARG_UNUSED(active);
+#endif
 }
 
 /* ============================================================================
