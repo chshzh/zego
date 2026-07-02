@@ -12,12 +12,12 @@
 #endif
 
 /*
- * net_event_mgmt.c — unified Wi-Fi / network event management (zego/network)
+ * net_event_mgmt.c - unified Wi-Fi / network event management (zego/network)
  *
  *   SYS_INIT priority ordering
  *   ───────────────────────────
- *   0  wifi_mode_selector_init  — reads NVS, publishes WIFI_MODE_CHAN
- *   5  network_module_init      — registers all event callbacks (this file)
+ *   0  wifi_mode_selector_init  - reads NVS, publishes WIFI_MODE_CHAN
+ *   5  network_module_init      - registers all event callbacks (this file)
  *
  *   Boot sequence
  *   ─────────────
@@ -142,7 +142,7 @@ static K_SEM_DEFINE(station_connected_sem, 0, 1); /* SoftAP: first STA joined  *
  * DEFERRED DHCP STOP (P2P_GC)
  * ============================================================================
  * net_dhcpv4_stop() must NOT be called from inside the NET_EVENT_IPV4_DHCP_BOUND
- * callback — doing so re-enters the DHCP state machine while it is still
+ * callback - doing so re-enters the DHCP state machine while it is still
  * processing the bound event and causes an MPU fault.  This work item defers
  * the stop to the system workqueue, which runs after the callback returns.
  */
@@ -176,14 +176,14 @@ static void dhcp_diag_handler(struct k_work *work)
  *                                   the escape path if the L3 watchdog fires.
  *
  * The L3 watchdog is a second, independent concern: a successful
- * NET_EVENT_WIFI_CONNECT_RESULT is an L2 (802.11 association) event only — it
+ * NET_EVENT_WIFI_CONNECT_RESULT is an L2 (802.11 association) event only - it
  * does not guarantee an IP.  Without it, a STA that associates but never gets
  * a DHCP lease (or whose lease later expires while the link stays up) sits
  * "associated, no IP" forever, because reconnect loops treat association as
  * "connected" and stop retrying.  The watchdog is armed on association and on
  * lease loss, cancelled on DHCP_BOUND and on DISCONNECT_RESULT.  If it fires
  * it issues NET_REQUEST_WIFI_DISCONNECT, producing a DISCONNECT_RESULT that
- * re-arms whichever reconnect path owns STA recovery — escaping the
+ * re-arms whichever reconnect path owns STA recovery - escaping the
  * half-connected state without a separate reschedule here.
  *
  * l3_reconnect_work is intentionally NOT nested inside the DHCP-timeout
@@ -211,7 +211,7 @@ static void l3_reconnect_handler(struct k_work *work)
 	}
 
 	LOG_INF("STA reconnect: requesting CONNECT_STORED now");
-	/* Runs on the system workqueue — sized for the deep WPA ctrl-socket
+	/* Runs on the system workqueue - sized for the deep WPA ctrl-socket
 	 * chain that NET_REQUEST_WIFI_CONNECT_STORED needs. */
 	int rc = net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, NULL, 0);
 
@@ -250,7 +250,7 @@ static void l3_watchdog_handler(struct k_work *work)
 		return;
 	}
 
-	LOG_WRN("L3 watchdog: associated but no IP after %d s — forcing reconnect",
+	LOG_WRN("L3 watchdog: associated but no IP after %d s - forcing reconnect",
 		CONFIG_ZEGO_NETWORK_STA_DHCP_TIMEOUT_SEC);
 
 	/* Clean L2 teardown.  This produces a DISCONNECT_RESULT, which drives
@@ -295,7 +295,7 @@ static struct net_mgmt_event_callback ipv4_event_cb;
  * Runs on the system workqueue (CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE), which is
  * sized for the deep WPA ctrl-socket chain (wpa_cli_cmd → z_wpa_ctrl_request
  * → zvfs_select). Never call NET_REQUEST_WIFI_CONNECT_STORED directly from
- * a SYS_INIT function — the main-thread stack is too small for that path.
+ * a SYS_INIT function - the main-thread stack is too small for that path.
  */
 static void start_mode_work_handler(struct k_work *work);
 static K_WORK_DEFINE(start_mode_work, start_mode_work_handler);
@@ -360,6 +360,24 @@ static void iface_mac_to_str(struct net_if *iface, char out[18])
 	}
 
 	mac_to_str((const uint8_t *)link_addr->addr, out);
+}
+
+/* Shared by the STA/P2P_GC DHCP-bound path and the P2P_GO ready-with-IP log:
+ * both need "who am I / what network am I on" text for a status line.
+ * ssid_out is set to an empty string if the iface status query fails or the
+ * SSID has not propagated yet (e.g. right after P2P_GO group creation). */
+static void iface_get_mac_ssid(struct net_if *iface, char mac_out[18], char *ssid_out,
+			       size_t ssid_out_len)
+{
+	struct wifi_iface_status wstatus = {0};
+
+	iface_mac_to_str(iface, mac_out);
+
+	ssid_out[0] = '\0';
+	if (net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &wstatus, sizeof(wstatus)) == 0 &&
+	    wstatus.ssid_len > 0) {
+		snprintf(ssid_out, ssid_out_len, "%.*s", wstatus.ssid_len, (char *)wstatus.ssid);
+	}
 }
 
 /* ============================================================================
@@ -469,7 +487,7 @@ static void l2_iface_event_handler(struct net_mgmt_event_callback *cb, uint64_t 
 }
 
 /* ============================================================================
- * L2: WIFI CONNECT RESULT HANDLER  (STA / P2P GO and CLIENT — connection attempt results)
+ * L2: WIFI CONNECT RESULT HANDLER  (STA / P2P GO and CLIENT - connection attempt results)
  * ============================================================================
  */
 
@@ -488,10 +506,40 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 
 				if (ret < 0) {
 					LOG_WRN("P2P_GO: DHCP server start failed (%d)", ret);
+				} else {
+					wifi_print_status();
+
+					/* SSID is negotiated by WPS and may not have
+					 * propagated to iface status yet at group-creation
+					 * time; fall back to "<pending>" rather than block. */
+					char mac[18];
+					char ssid[WIFI_SSID_MAX_LEN + 1];
+
+					iface_get_mac_ssid(iface, mac, ssid, sizeof(ssid));
+
+					LOG_INF("P2P_GO: ready with IP %s (mac=%s ssid=%s)",
+						CONFIG_NET_CONFIG_MY_IPV4_ADDR, mac,
+						ssid[0] ? ssid : "<pending>");
 				}
 			} else if (active_mode == ZEGO_WIFI_MODE_P2P_GC) {
 				wifi_p2p_gc_on_connect_result(true);
-				/* Restart DHCP like STA mode — wait for DHCP_BOUND to get
+
+				/* net_config_init pre-assigns CONFIG_NET_CONFIG_MY_IPV4_ADDR
+				 * ("192.168.7.1") as NET_ADDR_OVERRIDABLE at boot, in every
+				 * mode. A DK-based GO uses that exact same address as its
+				 * own gateway/DHCP-server IP (wifi_setup_dhcp_server()), so
+				 * pairing GC-to-DK-GO leaves the GC holding the SAME address
+				 * as the peer it's about to DHCP from - DHCP never binds
+				 * because the interface already "owns" the address it needs
+				 * to reach. Remove it here so the lease (DK GO: 192.168.7.x;
+				 * phone GO: its own subnet) can bind cleanly. No-op if it
+				 * was already replaced by a prior lease. */
+				struct in_addr cfg_ip;
+
+				zsock_inet_pton(AF_INET, CONFIG_NET_CONFIG_MY_IPV4_ADDR, &cfg_ip);
+				net_if_ipv4_addr_rm(iface, &cfg_ip);
+
+				/* Restart DHCP like STA mode - wait for DHCP_BOUND to get
 				 * the GO-assigned IP (phone: e.g. 192.168.49.x; DK GO:
 				 * 192.168.7.x). */
 				LOG_INF("P2P_GC: restarting DHCP on %s",
@@ -503,7 +551,7 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 					net_if_get_device(iface) ? net_if_get_device(iface)->name
 								 : "?");
 				net_dhcpv4_restart(iface);
-				/* Associated at L2 — arm the watchdog; it is
+				/* Associated at L2 - arm the watchdog; it is
 				 * cancelled when DHCP binds. */
 				l3_watchdog_arm();
 			}
@@ -532,7 +580,7 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 				LOG_ERR("  Reason: Association timeout");
 				break;
 			case -ETIMEDOUT:
-				LOG_ERR("  Reason: Timed out — check credentials / AP "
+				LOG_ERR("  Reason: Timed out - check credentials / AP "
 					"availability");
 				break;
 			default:
@@ -571,7 +619,7 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 			wifi_utils_get_last_ssid() ? wifi_utils_get_last_ssid() : "<unknown>");
 		network_connected = false;
 		memset(&last_bound_ip, 0, sizeof(last_bound_ip));
-		/* Link is down — stand the L3 watchdog down so it does not
+		/* Link is down - stand the L3 watchdog down so it does not
 		 * double-trigger against whichever reconnect path takes over
 		 * below. */
 		l3_watchdog_cancel();
@@ -665,7 +713,7 @@ static void l2_p2p_event_handler(struct net_mgmt_event_callback *cb, uint64_t mg
  *     - Typically only one P2P client connects at a time
  *
  * The is_p2p_go flag inside NET_EVENT_WIFI_AP_STA_CONNECTED performs the
- * branching — common bookkeeping (station table, semaphore, MAC logging)
+ * branching - common bookkeeping (station table, semaphore, MAC logging)
  * runs unconditionally for both modes.
  */
 
@@ -827,7 +875,7 @@ static void l3_wpa_supp_event_handler(struct net_mgmt_event_callback *cb, uint64
 }
 
 /* ============================================================================
- * L3: DHCP BOUND HANDLER  (STA / P2P_GC — invokes wifi_connected callback)
+ * L3: DHCP BOUND HANDLER  (STA / P2P_GC - invokes wifi_connected callback)
  * ============================================================================
  */
 
@@ -837,7 +885,7 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 	if (mgmt_event == NET_EVENT_IPV4_ADDR_DEL) {
 		/* DHCP lease lost (expired / renewal failed) or address otherwise
 		 * removed.  If the Wi-Fi link is STILL associated, this is a lease
-		 * loss while connected — a "have link, no IP" zombie that no L2
+		 * loss while connected - a "have link, no IP" zombie that no L2
 		 * event will recover.  Re-arm the watchdog to force a reconnect.
 		 * If the link is already down, the DISCONNECT_RESULT path owns
 		 * recovery, so ignore it here. */
@@ -847,7 +895,7 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 		    net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &wstatus, sizeof(wstatus)) ==
 			    0 &&
 		    wstatus.state >= WIFI_STATE_ASSOCIATED) {
-			LOG_WRN("L3-NET_EVENT_IPV4_ADDR_DEL: lease lost while associated — "
+			LOG_WRN("L3-NET_EVENT_IPV4_ADDR_DEL: lease lost while associated - "
 				"arming watchdog");
 			network_connected = false;
 			memset(&last_bound_ip, 0, sizeof(last_bound_ip));
@@ -860,7 +908,7 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 		return;
 	}
 
-	/* Got a lease (new or renewed) — stand the L3 watchdog down. */
+	/* Got a lease (new or renewed) - stand the L3 watchdog down. */
 	l3_watchdog_cancel();
 
 #if defined(CONFIG_NET_DHCPV4)
@@ -880,15 +928,11 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 	char mask[] = "0.0.0.0";
 #endif
 
-	/* Re-query SSID at DHCP time — the iface status is fully settled here,
+	/* Re-query at DHCP time - the iface status is fully settled here,
 	 * resolving the race where ssid_len == 0 at L4_CONNECTED time. */
-	struct wifi_iface_status wstatus = {0};
+	char mac[18];
 
-	if (net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &wstatus, sizeof(wstatus)) == 0 &&
-	    wstatus.ssid_len > 0) {
-		snprintf(sta_ssid, sizeof(sta_ssid), "%.*s", wstatus.ssid_len,
-			 (char *)wstatus.ssid);
-	}
+	iface_get_mac_ssid(iface, mac, sta_ssid, sizeof(sta_ssid));
 
 	/* Detect lease renewal: same IP, already connected -> skip full reconnect fan-out */
 #if defined(CONFIG_NET_DHCPV4)
@@ -909,7 +953,7 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 
 	if (active_mode != ZEGO_WIFI_MODE_STA && active_mode != ZEGO_WIFI_MODE_P2P_GO &&
 	    active_mode != ZEGO_WIFI_MODE_P2P_GC) {
-		LOG_DBG("DHCP bound in mode %s — ignoring", zego_mode_to_str(active_mode));
+		LOG_DBG("DHCP bound in mode %s - ignoring", zego_mode_to_str(active_mode));
 		return;
 	}
 
@@ -917,7 +961,7 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 	if (active_mode == ZEGO_WIFI_MODE_P2P_GC) {
 		/* Do NOT stop DHCP here.  net_dhcpv4_stop() removes the bound IPv4
 		 * address (net_if_ipv4_addr_rm in the BOUND state), which leaves the
-		 * P2P client with no IP — it can still send the initial AUDIO_START
+		 * P2P client with no IP - it can still send the initial AUDIO_START
 		 * command (sent before the stop) but then silently drops all inbound
 		 * audio from the GO.  Keep the DHCP lease active (renews like STA) so
 		 * 192.168.7.2 stays assigned and the client keeps receiving. */
@@ -927,16 +971,13 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 
 	bool is_p2p_gc =
 		(active_mode == ZEGO_WIFI_MODE_P2P_GC) || (strncmp(sta_ssid, "DIRECT-", 7) == 0);
-	char mac[18];
-
-	iface_mac_to_str(iface, mac);
 
 	zego_on_net_event_dhcp_bound(is_p2p_gc ? ZEGO_WIFI_MODE_P2P_GC : ZEGO_WIFI_MODE_STA, ip,
 				     mac, sta_ssid);
 }
 
 /* ============================================================================
- * L4: CONNECT / DISCONNECT HANDLER  (commented out — see L4_CONN_MASK note)
+ * L4: CONNECT / DISCONNECT HANDLER  (commented out - see L4_CONN_MASK note)
  * ============================================================================
  */
 /*
@@ -973,7 +1014,7 @@ static void start_mode_work_handler(struct k_work *work)
 		struct net_if *sta_iface = net_if_get_wifi_sta();
 
 		if (!wifi_utils_has_stored_credentials()) {
-			LOG_INF("No stored credentials — use 'wifi cred add' or BLE "
+			LOG_INF("No stored credentials - use 'wifi cred add' or BLE "
 				"provisioning to connect");
 			zego_on_net_event_wifi_disconnect(false);
 			break;
@@ -1059,7 +1100,7 @@ int network_module_init(void)
 	net_mgmt_init_event_callback(&wpa_event_cb, l3_wpa_supp_event_handler, L3_WPA_SUPP_MASK);
 	net_mgmt_add_event_callback(&wpa_event_cb);
 
-	/* L2: P2P peer discovery (CLIENT only — fires NET_EVENT_WIFI_P2P_DEVICE_FOUND) */
+	/* L2: P2P peer discovery (CLIENT only - fires NET_EVENT_WIFI_P2P_DEVICE_FOUND) */
 #if IS_ENABLED(CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P)
 	net_mgmt_init_event_callback(&p2p_event_cb, l2_p2p_event_handler,
 				     NET_EVENT_WIFI_P2P_DEVICE_FOUND);
