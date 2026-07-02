@@ -258,7 +258,7 @@ static void s_on_entry(void *obj)
 	enum led_msg_type cause = (sm->event == LED_EVENT_CMD) ? sm->cmd.type : LED_COMMAND_ON;
 
 	publish_state(sm->led_number, true, cause);
-	LOG_INF("SOLID-ON effect started (LED %d)", sm->led_number);
+	LOG_INF("SOLID-ON effect started (LED idx %d)", sm->led_number);
 }
 
 static enum smf_state_result s_on_run(void *obj)
@@ -300,7 +300,7 @@ static void s_blink_entry(void *obj)
 	led_hw_set(sm->led_number, false);
 	publish_state(sm->led_number, false, LED_COMMAND_BLINK);
 	k_work_schedule(&sm->effect_work, K_MSEC(sm->effect_period_ms));
-	LOG_INF("BLINK effect started (LED %d, period %u ms)", sm->led_number,
+	LOG_INF("BLINK effect started (LED idx %d, period %u ms)", sm->led_number,
 		(unsigned)sm->effect_period_ms);
 }
 
@@ -381,12 +381,12 @@ static void s_breathe_entry(void *obj)
 
 	if (led_hw_has_brightness(sm->led_number)) {
 		k_work_schedule(&sm->effect_work, K_MSEC(CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS));
-		LOG_INF("BREATHE effect started (LED %d, HW PWM, ramp %u ms, %u steps x %u "
+		LOG_INF("BREATHE effect started (LED idx %d, HW PWM, ramp %u ms, %u steps x %u "
 			"ms/step)",
 			sm->led_number, (unsigned)sm->effect_period_ms, steps, (unsigned)pwm_ms);
 	} else {
 		k_work_schedule(&sm->effect_work, K_MSEC(CONFIG_ZEGO_LED_BREATHE_PWM_PERIOD_MS));
-		LOG_INF("BREATHE effect started (LED %d, SW PWM, ramp %u ms, %u steps x %u "
+		LOG_INF("BREATHE effect started (LED idx %d, SW PWM, ramp %u ms, %u steps x %u "
 			"ms/step)",
 			sm->led_number, (unsigned)sm->effect_period_ms, steps, (unsigned)pwm_ms);
 	}

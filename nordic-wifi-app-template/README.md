@@ -119,9 +119,9 @@ LED effects by board — organized by **effect** since which physical LED(s) lig
 | Effect | nRF54LM20DK + nRF7002EB2 | nRF7002DK | nRF5340 Audio DK + nRF7002EK | When it happens |
 |--------|--------------------------|-----------|-------------------------------|------------------|
 | ROTATE | All 4 LEDs (idx 0–3) chase | Both LEDs (idx 0–1) chase | RGB2, all 3 channels chase (idx 3–5) | Boot / connecting; SoftAP or P2P_GO active with no clients yet; any automatic STA or P2P_GC reconnect / pairing-discovery retry in progress (started automatically or via double-click) — these retries never give up on their own |
-| Solid ON | LED0 (idx 0) | LED1 (idx 0) | RGB2 Green only (idx 4); Red/Blue (idx 3, 5) held OFF | STA or P2P link connected; first SoftAP/P2P_GO client joins (stays solid until the last client leaves) |
+| SOLID-ON | LED0 (idx 0) | LED1 (idx 0) | RGB2 Green only (idx 4); Red/Blue (idx 3, 5) held OFF | STA or P2P link connected; first SoftAP/P2P_GO client joins (stays solid until the last client leaves) |
 | BREATHE | LED0 (idx 0) | LED1 (idx 0) | RGB2 Blue only (idx 5) | BLE provisioning active, or P2P pairing in progress (GO window open, or GC discovering/joining) — reverts to the normal state when pairing completes or a client connects |
-| Fast BLINK (100 ms half-period) | LED0 (idx 0) | LED1 (idx 0) | RGB2 Red only (idx 3) | **The only case where reconnection is not possible**: STA with zero stored Wi-Fi networks. P2P_GC never shows this effect — it always keeps retrying |
+| BLINK-FAST (100 ms half-period) | LED0 (idx 0) | LED1 (idx 0) | RGB2 Red only (idx 3) | **The only case where reconnection is not possible**: STA with zero stored Wi-Fi networks. P2P_GC never shows this effect — it always keeps retrying |
 
 > RGB1 and the mono LEDs on the nRF5340 Audio DK remain off throughout, keeping RGB2 the dedicated Wi-Fi state indicator.
 
