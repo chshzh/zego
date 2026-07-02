@@ -13,11 +13,9 @@ config ZEGO_NETWORK
 	select WIFI_NM_WPA_SUPPLICANT
 	select NET_CONNECTION_MANAGER
 	select L2_WIFI_CONNECTIVITY
-	select WIFI_CREDENTIALS
 	select NET_IPV4
 	select NET_SOCKETS
 	select NET_UDP
-	select NET_TCP
 	select NET_DHCPV4
 	select DNS_RESOLVER
 	help
@@ -28,6 +26,37 @@ config ZEGO_NETWORK
 	  hooks for app-specific zbus channel publishing.
 
 if ZEGO_NETWORK
+
+# ---------------------------------------------------------------------------
+# Transport protocols
+# ---------------------------------------------------------------------------
+
+config ZEGO_NETWORK_TCP
+	bool "Enable TCP support"
+	default y
+	select NET_TCP
+	help
+	  Enables the Zephyr TCP/IP stack (CONFIG_NET_TCP).  Disable for
+	  UDP-only applications (e.g. audio streaming) to save flash — the
+	  TCP stack costs several KB of code.  Leave enabled for apps that
+	  need HTTP(S)/TLS (e.g. cloud uploads, web dashboards).
+
+config ZEGO_NETWORK_WIFI_CREDENTIALS
+	bool "Enable persistent Wi-Fi credential storage (wifi_credentials)"
+	default y
+	select WIFI_CREDENTIALS
+	help
+	  Enables the Zephyr wifi_credentials subsystem, used by zego/network to
+	  persist STA credentials ('wifi cred add') and auto-reconnect via
+	  NET_REQUEST_WIFI_CONNECT_STORED on boot, link loss, and (without
+	  CONFIG_ZEGO_WIFI_BLE_PROV) the STA reconnect watchdog.
+
+	  Disable to save flash/RAM if the app only needs the plain
+	  'wifi connect <ssid> <psk>' shell command for one-off connections -
+	  Wi-Fi still comes up, it just is not remembered across reboots and
+	  is not auto-retried by zego/network (net_event_mgmt.c falls back to a
+	  no-op in this case). Note: CONFIG_ZEGO_WIFI_BLE_PROV depends on
+	  WIFI_CREDENTIALS and is force-disabled along with this option.
 
 # ---------------------------------------------------------------------------
 # SoftAP / P2P GO configuration

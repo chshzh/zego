@@ -70,7 +70,9 @@ config L2_WIFI_CONNECTIVITY_AUTO_DOWN
 # ---------------------------------------------------------------------------
 # WiFi credentials (persistent storage via ZMS)
 # ---------------------------------------------------------------------------
-# WIFI_CREDENTIALS: selected unconditionally by ZEGO_NETWORK (see Kconfig).
+# WIFI_CREDENTIALS: selected by CONFIG_ZEGO_NETWORK_WIFI_CREDENTIALS (see
+# Kconfig), default y. Set CONFIG_ZEGO_NETWORK_WIFI_CREDENTIALS=n in prj.conf
+# to disable it (also disables CONFIG_ZEGO_WIFI_BLE_PROV, which depends on it).
 # WIFI_CREDENTIALS_BACKEND_SETTINGS is a choice symbol - set in prj.conf.
 
 # ---------------------------------------------------------------------------

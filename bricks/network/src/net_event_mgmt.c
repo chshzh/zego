@@ -218,6 +218,7 @@ static void l3_reconnect_handler(struct k_work *work)
 		return;
 	}
 
+#if IS_ENABLED(CONFIG_WIFI_CREDENTIALS_CONNECT_STORED)
 	LOG_INF("STA reconnect: requesting CONNECT_STORED now");
 	/* Runs on the system workqueue - sized for the deep WPA ctrl-socket
 	 * chain that NET_REQUEST_WIFI_CONNECT_STORED needs. */
@@ -228,6 +229,10 @@ static void l3_reconnect_handler(struct k_work *work)
 			L3_RECONNECT_RETRY_DELAY_SEC);
 		k_work_reschedule(&l3_reconnect_work, K_SECONDS(L3_RECONNECT_RETRY_DELAY_SEC));
 	}
+#else
+	LOG_DBG("STA reconnect: CONFIG_WIFI_CREDENTIALS_CONNECT_STORED=n - no stored network to "
+		"retry; use the 'wifi connect' shell command");
+#endif
 }
 #endif /* !CONFIG_ZEGO_WIFI_BLE_PROV */
 
@@ -1085,6 +1090,7 @@ static void start_mode_work_handler(struct k_work *work)
 	case ZEGO_WIFI_MODE_STA: {
 		struct net_if *sta_iface = net_if_get_wifi_sta();
 
+#if IS_ENABLED(CONFIG_WIFI_CREDENTIALS_CONNECT_STORED)
 		if (!wifi_utils_has_stored_credentials()) {
 			LOG_INF("No stored credentials - use 'wifi cred add' or BLE "
 				"provisioning to connect");
@@ -1108,6 +1114,12 @@ static void start_mode_work_handler(struct k_work *work)
 				LOG_INF("Auto-connecting with stored credentials...");
 			}
 		}
+#else
+		ARG_UNUSED(sta_iface);
+		LOG_INF("CONFIG_WIFI_CREDENTIALS_CONNECT_STORED=n - no auto-connect; use the "
+			"'wifi connect <ssid> <psk>' shell command to bring STA up manually");
+		zego_on_net_event_wifi_disconnect(false);
+#endif
 		break;
 	}
 	case ZEGO_WIFI_MODE_P2P_GO:
