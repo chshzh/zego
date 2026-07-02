@@ -12,6 +12,7 @@ config ZEGO_WIFI_BLE_PROV
 	select BT_WIFI_PROV
 	select WIFI_PROV_CORE
 	select NANOPB
+	select REBOOT
 	help
 	  BLE-based Wi-Fi credential provisioning using the nRF Wi-Fi Provisioner
 	  app (Android / iOS).
@@ -22,6 +23,9 @@ config ZEGO_WIFI_BLE_PROV
 	    - SYS_INIT APPLICATION priority 95: BT init + Wi-Fi provisioning service.
 	    - Automatic credential-based reconnect after provisioning.
 	    - Rotating retry across all stored networks on disconnect.
+	    - DHCP-bind watchdog that reboots to recover from a known
+	      wifi_prov_core disconnect+connect race (see
+	      CONFIG_ZEGO_WIFI_BLE_PROV_DHCP_WATCHDOG_SEC).
 
 	  Enable in prj.conf:  CONFIG_ZEGO_WIFI_BLE_PROV=y
 
@@ -33,6 +37,25 @@ config ZEGO_WIFI_BLE_PROV_ADV_DAEMON_STACK_SIZE
 	help
 	  Stack size for the ble_adv_daemon_wq work queue thread that drives
 	  BLE advertising parameter and data updates during Wi-Fi provisioning.
+
+config ZEGO_WIFI_BLE_PROV_DHCP_WATCHDOG_SEC
+	int "Reboot if DHCP doesn't bind within N seconds of a connect (0 = disabled)"
+	default 25
+	range 0 300
+	help
+	  Nordic's wifi_prov_core library issues NET_REQUEST_WIFI_DISCONNECT
+	  immediately followed by NET_REQUEST_WIFI_CONNECT when new Wi-Fi
+	  credentials are provisioned over BLE, with no wait for the
+	  disconnect to actually complete.  On some nRF70 + host combinations
+	  this wedges wpa_supplicant's control interface: the interface
+	  reports STA associated (wifi status / CONNECT_RESULT) but the
+	  control-socket transport itself is jammed, so DHCP never binds and
+	  no further Wi-Fi command (disconnect/connect/status) can recover it
+	  - only a reboot clears the wedge.
+
+	  When this watchdog fires (DHCP still unbound N seconds after a
+	  Wi-Fi connect observed by this module), the device performs a warm
+	  reboot to recover.  Set to 0 to disable.
 
 module = ZEGO_WIFI_BLE_PROV
 module-str = zego_wifi_ble_prov

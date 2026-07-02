@@ -11,6 +11,7 @@
 #include <string.h>
 #include <errno.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/reboot.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/conn.h>
@@ -20,6 +21,7 @@
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/wifi_credentials.h>
 #include <zephyr/net/net_mgmt.h>
+#include <zephyr/net/net_event.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/zbus/zbus.h>
@@ -80,6 +82,28 @@ static int cred_rotate_idx;
  */
 static bool initial_scan_done;
 
+/*
+ * DHCP-bind watchdog: see CONFIG_ZEGO_WIFI_BLE_PROV_DHCP_WATCHDOG_SEC.  Armed
+ * on a successful NET_EVENT_WIFI_CONNECT_RESULT observed by this module,
+ * cancelled on NET_EVENT_IPV4_DHCP_BOUND or NET_EVENT_WIFI_DISCONNECT_RESULT.
+ * If it fires, DHCP never bound - most likely wpa_supplicant's control
+ * interface is wedged by the wifi_prov_core disconnect+connect race (no
+ * further Wi-Fi command can recover that state), so the only proven recovery
+ * is a warm reboot.
+ */
+static struct k_work_delayable dhcp_bind_watchdog_work;
+
+static void dhcp_bind_watchdog_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	LOG_ERR("DHCP did not bind within %d s of a Wi-Fi connect - wpa_supplicant control "
+		"interface is likely wedged (known wifi_prov_core disconnect+connect race). "
+		"Rebooting to recover.",
+		CONFIG_ZEGO_WIFI_BLE_PROV_DHCP_WATCHDOG_SEC);
+	sys_reboot(SYS_REBOOT_WARM);
+}
+
 K_THREAD_STACK_DEFINE(adv_daemon_stack_area, ADV_DAEMON_STACK_SIZE);
 static struct k_work_q adv_daemon_work_q;
 
@@ -101,6 +125,30 @@ static struct k_work_delayable update_adv_data_work;
 /* forward declaration */
 static void log_retry_plan(void);
 
+/*
+ * Separate callback for NET_EVENT_IPV4_DHCP_BOUND: this is an L3 event, while
+ * NET_EVENT_WIFI_* (below) are L2 events. net_mgmt's dispatch matches a
+ * callback's registered mask by layer (see NET_MGMT_GET_LAYER in
+ * subsys/net/ip/net_mgmt.c) - OR-ing an L2 event and an L3 event into one
+ * mask corrupts that layer field, so the callback silently stops matching
+ * ANY event, on ANY layer. Each layer needs its own callback/mask.
+ */
+static struct net_mgmt_event_callback dhcp_bound_cb;
+
+static void dhcp_bound_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
+				     struct net_if *iface)
+{
+	ARG_UNUSED(cb);
+	ARG_UNUSED(iface);
+
+	if (mgmt_event != NET_EVENT_IPV4_DHCP_BOUND) {
+		return;
+	}
+
+	/* DHCP succeeded - the control interface is not wedged. */
+	k_work_cancel_delayable(&dhcp_bind_watchdog_work);
+}
+
 static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
 				    struct net_if *iface)
 {
@@ -111,12 +159,35 @@ static void wifi_mgmt_event_handler(struct net_mgmt_event_callback *cb, uint64_t
 		return;
 	}
 
+	/*
+	 * The DHCP-bind watchdog must arm/disarm on every CONNECT_RESULT /
+	 * DISCONNECT_RESULT regardless of wifi_prov_state_get(): Nordic's
+	 * wifi_prov_core clears its "provisioning in progress" state as soon as
+	 * it has issued the disconnect+connect request - well before the
+	 * (possibly wedged) CONNECT_RESULT for that request actually arrives.
+	 * Gating arm/cancel behind wifi_prov_state_get() below would silently
+	 * never arm the watchdog for the exact race it exists to catch.
+	 */
+	if (mgmt_event == NET_EVENT_WIFI_CONNECT_RESULT) {
+		const struct wifi_status *status = (const struct wifi_status *)cb->info;
+
+		if (status && status->status == 0 &&
+		    CONFIG_ZEGO_WIFI_BLE_PROV_DHCP_WATCHDOG_SEC > 0) {
+			k_work_reschedule(&dhcp_bind_watchdog_work,
+					  K_SECONDS(CONFIG_ZEGO_WIFI_BLE_PROV_DHCP_WATCHDOG_SEC));
+		}
+	} else if (mgmt_event == NET_EVENT_WIFI_DISCONNECT_RESULT) {
+		/* Link is down - no DHCP to wait for right now. */
+		k_work_cancel_delayable(&dhcp_bind_watchdog_work);
+	}
+
 	if (!wifi_prov_state_get()) {
 		return;
 	}
 	switch (mgmt_event) {
 	case NET_EVENT_WIFI_DISCONNECT_RESULT: {
 		const struct wifi_status *status = (const struct wifi_status *)cb->info;
+
 		/*
 		 * Only defer to the provisioner when it is actively running
 		 * (e.g. it called NET_REQUEST_WIFI_DISCONNECT before a scan).
@@ -551,6 +622,7 @@ static int wifi_ble_prov_init(void)
 	k_work_init_delayable(&wifi_connect_work, wifi_connect_work_handler);
 	k_work_init_delayable(&update_adv_param_work, update_adv_param_task);
 	k_work_init_delayable(&update_adv_data_work, update_adv_data_task);
+	k_work_init_delayable(&dhcp_bind_watchdog_work, dhcp_bind_watchdog_handler);
 
 	bt_conn_auth_cb_register(&auth_cb_display);
 	bt_conn_auth_info_cb_register(&auth_info_cb_display);
@@ -594,6 +666,10 @@ static int wifi_ble_prov_init(void)
 					     NET_EVENT_WIFI_CONNECT_RESULT |
 					     NET_EVENT_WIFI_SCAN_DONE);
 	net_mgmt_add_event_callback(&wifi_mgmt_cb);
+
+	net_mgmt_init_event_callback(&dhcp_bound_cb, dhcp_bound_event_handler,
+				     NET_EVENT_IPV4_DHCP_BOUND);
+	net_mgmt_add_event_callback(&dhcp_bound_cb);
 #ifdef CONFIG_WIFI_PROV_ADV_DATA_UPDATE
 	k_work_schedule_for_queue(&adv_daemon_work_q, &update_adv_data_work,
 				  K_SECONDS(ADV_DATA_UPDATE_INTERVAL));
