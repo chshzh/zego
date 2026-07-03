@@ -584,7 +584,12 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 				if (ret < 0) {
 					LOG_WRN("P2P_GO: DHCP server start failed (%d)", ret);
 				} else {
-					wifi_print_status();
+					/* wifi_print_status() (NET_REQUEST_WIFI_IFACE_STATUS)
+					 * is skipped here - on P2P_GO it has been observed
+					 * to hang/crash the device (RSSI -9999, "Invalid
+					 * mfp mapping" in the log, followed by a reboot
+					 * loop). STA/P2P_GC still print status normally
+					 * from the DHCP-bound handler below. */
 
 					/* SSID is negotiated by WPS and may not have
 					 * propagated to iface status yet at group-creation
@@ -1044,7 +1049,10 @@ static void l3_ipv4_event_handler(struct net_mgmt_event_callback *cb, uint64_t m
 		 * 192.168.7.2 stays assigned and the client keeps receiving. */
 		k_work_cancel_delayable(&dhcp_diag_work);
 	}
-	wifi_print_status();
+	/* Skipped for P2P_GO - see the CONNECT_RESULT handler above for why. */
+	if (active_mode != ZEGO_WIFI_MODE_P2P_GO) {
+		wifi_print_status();
+	}
 
 	bool is_p2p_gc =
 		(active_mode == ZEGO_WIFI_MODE_P2P_GC) || (strncmp(sta_ssid, "DIRECT-", 7) == 0);
