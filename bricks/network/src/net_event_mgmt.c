@@ -169,6 +169,38 @@ static void dhcp_diag_handler(struct k_work *work)
 }
 
 /* ============================================================================
+ * DEFERRED STA DHCP RESTART
+ * ============================================================================
+ * On nRF54LM20DK + nRF7002EB2 (slower SPI bus), calling net_dhcpv4_restart()
+ * synchronously from the NET_EVENT_WIFI_CONNECT_RESULT callback - i.e. in the
+ * same instant the L2 association completes - has been observed to wedge the
+ * WPA supplicant control interface: the very next synchronous Wi-Fi command
+ * (e.g. a SIGNAL_POLL triggered by a GET_STATUS query arriving over BLE
+ * during provisioning) times out after 15 s and never recovers, so DHCP never
+ * binds. Nordic's own wifi/provisioning/ble sample does not hit this because
+ * it never calls net_dhcpv4_restart() itself - it relies on net_config's
+ * generic L4-triggered DHCP handling instead, which is not driven off the L2
+ * CONNECT_RESULT event. Deferring the restart by a short delay keeps it off
+ * the net_mgmt event thread and out of the instant the association completes,
+ * avoiding that collision. */
+#define STA_DHCP_RESTART_DELAY_MSEC 300
+
+static struct k_work_delayable sta_dhcp_restart_work;
+
+static void sta_dhcp_restart_handler(struct k_work *work)
+{
+	struct net_if *iface = net_if_get_wifi_sta();
+
+	if (active_mode != ZEGO_WIFI_MODE_STA || iface == NULL) {
+		return;
+	}
+
+	LOG_INF("STA: restarting DHCP on %s",
+		net_if_get_device(iface) ? net_if_get_device(iface)->name : "?");
+	net_dhcpv4_restart(iface);
+}
+
+/* ============================================================================
  * STA RECONNECT: direct-disconnect retry + L3 DHCP-timeout watchdog
  * ============================================================================
  * STA must keep retrying a stored network after any disconnect (see
@@ -629,10 +661,9 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 								 : "?");
 				net_dhcpv4_restart(iface);
 			} else if (active_mode == ZEGO_WIFI_MODE_STA) {
-				LOG_INF("STA: restarting DHCP on %s",
-					net_if_get_device(iface) ? net_if_get_device(iface)->name
-								 : "?");
-				net_dhcpv4_restart(iface);
+				/* Deferred - see sta_dhcp_restart_work comment above. */
+				k_work_reschedule(&sta_dhcp_restart_work,
+						   K_MSEC(STA_DHCP_RESTART_DELAY_MSEC));
 				/* Associated at L2 - arm the watchdog; it is
 				 * cancelled when DHCP binds. */
 				l3_watchdog_arm();
@@ -1208,6 +1239,7 @@ int network_module_init(void)
 	 * net_mgmt_add_event_callback(&l4_event_cb); */
 
 	k_work_init_delayable(&dhcp_diag_work, dhcp_diag_handler);
+	k_work_init_delayable(&sta_dhcp_restart_work, sta_dhcp_restart_handler);
 #if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
 	k_work_init_delayable(&l3_reconnect_work, l3_reconnect_handler);
 #endif
