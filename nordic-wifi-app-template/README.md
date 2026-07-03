@@ -318,7 +318,7 @@ The tag format is `v<ncs-version>.<build>` (e.g. `v3.3.0.1`). Major/minor/patch 
     -e build_nrf54lm20dk/nordic-wifi-app-template/zephyr/zephyr.elf \
     -r jlink \
     -t nRF54LM20A_M33 \
-    -s 1051869687
+    -s 1051839157
   ```
 
   **nRF7002DK:**
