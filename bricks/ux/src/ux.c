@@ -12,8 +12,10 @@
  *   SINGLE_CLICK  Print current Wi-Fi mode to UART log.
  *   DOUBLE_CLICK  Toggle BLE provisioning LED (BREATHE ↔ last Wi-Fi state),
  *                 or trigger P2P pairing in P2P_GO/P2P_GC modes.
- *   LONG_PRESS    Cycle Wi-Fi mode STA → SoftAP → P2P_GO → P2P_GC → STA,
- *                 save to NVS via settings, reboot.
+ *   LONG_PRESS    Cycle Wi-Fi mode among this build's enabled modes (see
+ *                 ZEGO_WIFI_MODE_*_ENABLED in zego/bricks/wifi/Kconfig;
+ *                 default STA → SoftAP → P2P_GO → P2P_GC → STA), save to
+ *                 NVS via settings, reboot.
  *
  * LED 0 state machine driven by ZEGO_UX_WIFI_STATE_CHAN:
  *   CONNECTING  →  ROTATE  (starts at boot via SYS_INIT)
@@ -52,11 +54,23 @@ ZBUS_CHAN_DEFINE(ZEGO_UX_WIFI_STATE_CHAN, struct zego_ux_wifi_state_msg, NULL, N
 
 /* ── Wi-Fi mode cycle ──────────────────────────────────────────────────── */
 
+/* Only cycle through modes this build actually exposes (mirrors the
+ * ZEGO_WIFI_MODE_*_ENABLED symbols in zego/bricks/wifi/Kconfig) — e.g. a
+ * STA+P2P_GO-only build must not long-press its way into a SoftAP that was
+ * never compiled in. */
 static const enum zego_wifi_mode mode_cycle[] = {
+#if defined(CONFIG_ZEGO_WIFI_MODE_STA_ENABLED)
 	ZEGO_WIFI_MODE_STA,
+#endif
+#if defined(CONFIG_ZEGO_WIFI_MODE_SOFTAP_ENABLED)
 	ZEGO_WIFI_MODE_SOFTAP,
+#endif
+#if defined(CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED)
 	ZEGO_WIFI_MODE_P2P_GO,
+#endif
+#if defined(CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED)
 	ZEGO_WIFI_MODE_P2P_GC,
+#endif
 };
 
 static const char *mode_name(enum zego_wifi_mode m)
