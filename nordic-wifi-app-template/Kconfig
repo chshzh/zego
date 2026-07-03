@@ -23,11 +23,6 @@ config APP_WIFI_PASSWORD
 # button, led, and ux Kconfig registered via EXTRA_ZEPHYR_MODULES
 # (zego/button, zego/led, zego/ux).
 
-# Silence the v3.3.0 "Deprecated symbol MBEDTLS_LEGACY_CRYPTO_C" Kconfig
-# warning. MBEDTLS_LEGACY_CRYPTO_C is needed for the WPA supplicant RSA path.
-config MBEDTLS_LEGACY_CRYPTO_C_SILENCE_DEPRECATION
-	default y if MBEDTLS_LEGACY_CRYPTO_C
-
 endmenu
 
 source "Kconfig.zephyr"

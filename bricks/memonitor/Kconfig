@@ -112,12 +112,18 @@ config ZEGO_MEMONITOR_LOG_LEVEL
 	help
 	  0=OFF  1=ERR  2=WRN  3=INF  4=DBG
 
-# When MBEDTLS_ENABLE_HEAP is active the memonitor samples the mbedTLS heap
-# and exposes zview_mbedtls_stats for ZView.  MBEDTLS_MEMORY_DEBUG is required
-# to read cur/peak usage via mbedtls_memory_buffer_alloc_cur_get() /
-# _max_get().  Select it automatically so no board conf entry is needed.
+# When MBEDTLS_ENABLE_HEAP is active the memonitor would like to sample the
+# mbedTLS heap via mbedtls_memory_buffer_alloc_cur_get()/_max_get() and expose
+# zview_mbedtls_stats for ZView. As of NCS v3.4.0, nrf_security's PSA-only
+# config generation (psa_crypto_want_config.cmake) never forwards
+# CONFIG_MBEDTLS_MEMORY_DEBUG into the generated crypto config header, so the
+# underlying MBEDTLS_MEMORY_DEBUG C macro is never defined and those functions
+# don't exist in the built library (link/declaration failure). The v3.3.0
+# workaround (routing through the legacy crypto config path) no longer exists
+# — Mbed TLS 4.1.0 removed it entirely. Left default n until Nordic exposes a
+# forwarding path; the mbedtls_heap row is simply omitted from ZView.
 config MBEDTLS_MEMORY_DEBUG
 	bool
-	default y if MBEDTLS_ENABLE_HEAP
+	default n
 
 endif # ZEGO_MEMONITOR
