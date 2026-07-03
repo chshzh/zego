@@ -248,7 +248,7 @@ void zego_banner_app_extra(void)
 #endif
 
 #if CONFIG_ZEGO_UX
-	LOG_INF("  " CLR_BLU "ux" CLR_RST "               (zego)");
+	LOG_INF("  " CLR_BLU "ux" CLR_RST "                (zego)");
 #endif
 
 	LOG_INF("  " CLR_BLU "wifi" CLR_RST "              (zego)");
