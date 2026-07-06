@@ -120,6 +120,23 @@ cd <workspace-dir>
 west update
 ```
 
+### Vendored SDK patches
+
+`west update` checks out a plain, unpatched `nrf` module — it will silently
+drop any local edits made under `nrf/`. This repo carries small vendored
+patches to fix upstream gaps; reapply them after every `west update`:
+
+```sh
+cd nrf
+git apply ../zego/patches/nrf_security/0001-forward-mbedtls-memory-debug.patch
+```
+
+See [`patches/nrf_security/README.md`](patches/nrf_security/README.md) for
+what each patch does and why. CI (`validation.yml` / `release.yml`) applies
+these automatically after its own `west update` step — a fresh, unpatched
+`nrf` checkout that skips this step will fail to build once
+`CONFIG_MBEDTLS_MEMORY_DEBUG` is auto-selected by `bricks/memonitor`.
+
 ---
 
 ## Integration
