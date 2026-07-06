@@ -26,6 +26,7 @@
 | 2026-06-29-21-44 | Updated to PRD v2026-06-29-21-44: P2P pairing UX — added NVS settings key `net/p2p_gc_go_mac` (learned GO MAC, network brick's own `"net"` subtree) to the Wi-Fi mode selector section; module map and weak-hook mode column P2P_CLIENT→P2P_GC; noted UX→network `wifi_p2p_start_pairing()` call. |
 | 2026-06-30-13-04 | Updated to PRD v2026-06-30-13-00: added 7th weak hook `zego_on_net_event_p2p_pairing(bool)` (drives `APP_WIFI_STATE_PAIRING` → LED BREATHE on both roles); noted board-configurable UX gesture button (`CONFIG_APP_UX_BUTTON_IDX`, =4 on Audio DK). Debug-session reconcile: P2P WPS method is PBC; `CONFIG_WIFI_NM_WPA_SUPPLICANT_GLOBAL_HEAP=y` (system heap) required for the P2P_GO WPS Registrar. |
 | 2026-07-01-10-54 | Updated to PRD v2026-07-01-10-50: `zego_on_net_event_wifi_disconnect()` gains a `bool will_retry` parameter (§3.1); clarified the SoftAP TODO log format's "/3" is SoftAP-specific and does not apply to P2P_GO's client count; added §5 note on P2P_GC auto-pairing at boot. See `network-spec.md` and `ux-module.md` for the full disconnection-handling and LED-trigger changes. |
+| 2026-07-03-13-55 | Startup banner moved from `zego/wifi` to `zego/bricks/ux` (`zego_wifi_print_banner()` → `zego_ux_print_banner()`), called from `main()`. `zego/wifi` now provides only the Wi-Fi mode selector. See `zego/bricks/ux/docs/ux-spec.md`. |
 
 ---
 
@@ -42,7 +43,7 @@ themselves via `SYS_INIT` and communicate exclusively through Zbus channels.
 /* src/main.c — the entire application thread */
 int main(void)
 {
-    zego_wifi_print_banner();
+    zego_ux_print_banner();
     return 0;
 }
 ```
@@ -55,10 +56,11 @@ All feature modules are provided by the `zego/` shared library. The template reg
 
 | Module dir | Kconfig symbol | Provides |
 |---|---|---|
-| `zego/wifi` | `CONFIG_ZEGO_WIFI` | Startup banner, Wi-Fi mode selector, `zego_wifi_mode` shell command, NVS persistence |
+| `zego/wifi` | `CONFIG_ZEGO_WIFI` | Wi-Fi mode selector, `zego_wifi_mode` shell command, NVS persistence |
 | `zego/network` | `CONFIG_ZEGO_NETWORK` | Wi-Fi event management (STA / SoftAP / P2P_GO / P2P_GC), P2P button pairing + NVS-saved GO MAC, DHCP, net mgmt callbacks, weak-hook API |
 | `zego/button` | `CONFIG_ZEGO_BUTTON` | GPIO button driver, gesture detection, `BUTTON_CHAN` publisher |
 | `zego/led` | `CONFIG_ZEGO_LED` | Per-LED state machine, `LED_CMD_CHAN` subscriber |
+| `zego/ux` | `CONFIG_ZEGO_UX` | Button gestures, LED Wi-Fi feedback, startup banner (`zego_ux_print_banner()`) |
 | `zego/wifi_ble_prov` | `CONFIG_ZEGO_WIFI_BLE_PROV` | BLE GATT provisioning service (nRF Wi-Fi Provisioner compatible) |
 
 Plus one in-tree application file:
@@ -147,13 +149,13 @@ Modules initialise in priority order. Lower numbers run first.
 
 | Priority | Module | Action |
 |---|---|---|
-| 41 | `zego/wifi` | Read NVS for saved Wi-Fi mode; publish `WIFI_MODE_CHAN`; print startup banner |
+| 41 | `zego/wifi` | Read NVS for saved Wi-Fi mode; publish `WIFI_MODE_CHAN` |
 | 42 | `zego/network` | Subscribe to `WIFI_MODE_CHAN`; launch selected Wi-Fi path (STA / SoftAP / P2P) |
 | 45 | `zego/button` | Register GPIO interrupt callbacks; start `BUTTON_CHAN` publisher |
 | 45 | `zego/led` | Subscribe to `LED_CMD_CHAN`; initialise LED GPIO |
 | 45 | `zego/wifi_ble_prov` | Start BLE stack; register GATT provisioning service (if `CONFIG_ZEGO_WIFI_BLE_PROV=y`) |
 
-`main()` runs after all `SYS_INIT` callbacks complete. It calls `zego_wifi_print_banner()` to emit the connectivity instructions, then returns (Zephyr keeps the system alive).
+`main()` runs after all `SYS_INIT` callbacks complete. It calls `zego_ux_print_banner()` to emit the startup banner and connectivity instructions, then returns (Zephyr keeps the system alive).
 
 ---
 
@@ -253,8 +255,7 @@ actual zego directory (e.g. `../../zego/modules/button`).
                      │ read/write
           ┌──────────▼──────────────┐
           │       zego/wifi         │◄── uart: zego_wifi_mode command
-          │  (mode selector +       │
-          │   startup banner)       │
+          │    (mode selector)      │
           └──────────┬──────────────┘
                      │ WIFI_MODE_CHAN
           ┌──────────▼──────────────────────────────────────┐

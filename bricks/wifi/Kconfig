@@ -4,20 +4,18 @@
 #
 
 config ZEGO_WIFI
-        bool "Zego Wi-Fi module (mode selector + banner)"
+        bool "Zego Wi-Fi module (mode selector)"
         select NETWORKING
         select ZBUS
         help
           Provides:
-            - Startup banner: app name, version, PRD, specs, build date, board, MAC.
             - WIFI_MODE_CHAN: zbus channel published at SYS_INIT APPLICATION priority 0.
             - zego_wifi_get_mode(): returns the active Wi-Fi mode.
-            - zego_banner_wifi_info(): mode string + per-mode connection instructions.
-            - zego_banner_app_extra(): Kconfig-conditional compiled-module list.
-            - zego_wifi_print_banner(): called from each app's main().
           When NRF70_AP_MODE or NRF70_P2P_MODE is enabled, ZEGO_WIFI_MODE_SELECTOR
           is auto-enabled to persist the active mode in NVS.  STA-only builds skip
           NVS entirely — WIFI_MODE_CHAN is published as STA directly from wifi.c.
+          The startup banner previously provided here now lives in zego/bricks/ux
+          — see zego_ux_print_banner() (CONFIG_ZEGO_UX).
 
 config ZEGO_WIFI_MODE_SELECTOR
 	bool

@@ -91,6 +91,26 @@ void zego_ux_on_double_click(void);
  */
 void zego_ux_on_long_press(void);
 
+/* ── Startup banner ───────────────────────────────────────────────────── */
+
+/**
+ * @brief Print the startup banner (version, board, MAC, compiled zego
+ *        modules, Wi-Fi mode, connection instructions).
+ *
+ * Call once from the application's main() after SYS_INIT has run.
+ */
+void zego_ux_print_banner(void);
+
+/**
+ * @brief Application-specific compiled-module list — override point.
+ *
+ * Default (ux.c): no-op. Override with a strong definition in the
+ * application to print its own (non-zego) compiled modules as part of the
+ * banner. When overridden, start with a "====" separator line to match the
+ * other banner sections.
+ */
+void banner_compiled_app_modules(void);
+
 #ifdef __cplusplus
 }
 #endif

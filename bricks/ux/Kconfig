@@ -5,11 +5,16 @@
 #
 
 config ZEGO_UX
-	bool "Zego UX module (button gestures + LED Wi-Fi feedback)"
+	bool "Zego UX module (button gestures + LED Wi-Fi feedback + startup banner)"
 	depends on ZEGO_BUTTON && ZEGO_LED && ZEGO_WIFI && REBOOT && SETTINGS
 	default n
 	help
-	  Provides out-of-box UX for Button 0 and LED 0.
+	  Provides out-of-box UX for Button 0 and LED 0, plus the application's
+	  startup banner (zego_ux_print_banner(), called once from main()):
+	  app name, version, PRD, specs, build date, board, MAC, compiled zego
+	  modules, and Wi-Fi mode + connection instructions. The compiled-module
+	  list has a __weak override point (banner_compiled_app_modules()) for
+	  the application's own (non-zego) modules.
 
 	  Button 0 gestures:
 	    Single click  — print current Wi-Fi mode to UART log

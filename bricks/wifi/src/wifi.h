@@ -7,9 +7,10 @@
  * @file wifi.h
  * @brief Zego wifi module public API.
  *
- * Provides the Wi-Fi mode enum, the WIFI_MODE_CHAN zbus channel, the mode
- * accessor used by network modules, and the banner print function called
- * from each application's main().
+ * Provides the Wi-Fi mode enum, the WIFI_MODE_CHAN zbus channel, and the
+ * mode accessor used by network modules.  The startup banner previously
+ * declared here has moved to zego/bricks/ux — see zego_ux_print_banner()
+ * in ux.h.
  *
  * Enable with CONFIG_ZEGO_WIFI=y.
  *
@@ -57,13 +58,5 @@ ZBUS_CHAN_DECLARE(WIFI_MODE_CHAN);
  * Safe to call from any context after SYS_INIT APPLICATION priority 0.
  */
 enum zego_wifi_mode zego_wifi_get_mode(void);
-
-/**
- * @brief Print the startup banner (version, board, MAC, Wi-Fi mode,
- *        connection instructions, compiled-module list).
- *
- * Call once from each application's main() after SYS_INIT has run.
- */
-void zego_wifi_print_banner(void);
 
 #endif /* ZEGO_WIFI_H_ */

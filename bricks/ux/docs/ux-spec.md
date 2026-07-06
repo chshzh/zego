@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Module | `zego/ux` |
-| Version | 2026-07-02-00-00 |
+| Version | 2026-07-03-13-55 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Target Board(s) | nRF54LM20DK + nRF7002EB2, nRF7002DK, nRF5340 Audio DK + nRF7002EK |
@@ -17,6 +17,7 @@
 
 | Version | Summary of changes |
 |---|---|
+| 2026-07-03-13-55 | **Startup banner moved here from `zego/wifi`.** `zego_wifi_print_banner()` → `zego_ux_print_banner()`, called once from the application's `main()`. Internally split into `banner_fw_info()`, `banner_compiled_zego_modules()`, `banner_compiled_app_modules()` (new `__weak` override point, no-op default, for the application's own non-zego modules), and `banner_wifi_modes_instructions()` (formerly `zego/wifi`'s `zego_banner_wifi_info()`). `zego/wifi` no longer has any banner code. See §9. |
 | 2026-07-02-00-00 | **Moved from `nordic-wifi-app-template/src/modules/ux/` to `zego/bricks/ux/` as a first-class zego brick.** `CONFIG_APP_UX_*` Kconfig symbols renamed to `CONFIG_ZEGO_UX_*`. The module now owns its own zbus channel `ZEGO_UX_WIFI_STATE_CHAN` (`struct zego_ux_wifi_state_msg`, `enum zego_ux_wifi_state`) instead of depending on the app-level `APP_WIFI_STATE_CHAN` / `messages.h` — apps publish to this channel from their `zego/network` weak-hook overrides (see `net_event_app.c`). The three Button 0 gesture actions (single click, double-click, long press) are now `__weak` functions (`zego_ux_on_single_click()`, `zego_ux_on_double_click()`, `zego_ux_on_long_press()`) with the previous behaviour kept as the default — apps can override any one of them with a strong definition to fully replace that gesture's action, following the same weak-hook pattern as `zego/network`'s `zego_on_net_event_*()` callbacks. No behavioural change for existing app-template consumers. |
 | 2026-07-01-10-54 | Updated to PRD v2026-07-01-10-50: (1) `APP_WIFI_STATE_ERROR` (fast BLINK) is now driven by `zego_on_net_event_wifi_disconnect(false)` specifically — the STA-zero-stored-credentials case — instead of firing on every disconnect; a disconnect that will auto-retry now publishes `APP_WIFI_STATE_CONNECTING` (`zego_on_net_event_wifi_disconnect(true)`) so LED 0 ROTATEs instead. P2P_GC never reaches `ERROR` since it always retries. (2) P2P pairing BREATHE now also covers auto-started pairing (no saved GO at boot), not just the double-click-triggered case — no state-machine change, since both paths already published the same `APP_WIFI_STATE_PAIRING`. (3) Restructured §4 from a single state-keyed table into a state→effect table plus a new effect→per-board-LED-index table (with exact Kconfig symbols), replacing the prose board-difference notes, for easier scanning given how differently the nRF5340 Audio DK maps effects to physical LEDs. |
 | 2026-06-04-18-00 | Initial spec — Button 0 gestures, LED 0 Wi-Fi state feedback |
@@ -229,4 +230,49 @@ Publish Wi-Fi state transitions from wherever the app tracks connectivity (typic
 /* ... */
 struct zego_ux_wifi_state_msg msg = { .state = ZEGO_UX_WIFI_STATE_CONNECTED, .mode = mode };
 zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+```
+
+---
+
+## 9. Startup Banner
+
+`zego_ux_print_banner()` is called once from the application's `main()` after `SYS_INIT` has
+run. It flushes pending log messages (`log_process()` + 50 ms settle), then prints four
+sections in order, each opening with its own `"===="` separator (the final section also
+closes the banner with one):
+
+| Function | Content |
+|---|---|
+| `banner_fw_info()` | App name (`ZEGO_BANNER_APP_NAME`, injected by `zego/wifi`'s `CMakeLists.txt`), `APP_VERSION_STRING`, `CONFIG_ZEGO_APP_PRD_VERSION`, `CONFIG_ZEGO_APP_SPECS_VERSION`, build date, board name, MAC address. |
+| `banner_compiled_zego_modules()` | Header `ZEGO(<version>):` where `<version>` is `ZEGO_MODULES_VERSION` — the `zego` project's pinned `revision:` in `west.yml`, extracted by `zego/wifi`'s `CMakeLists.txt` — followed by the zego bricks compiled into this image (button, led, ux, wifi, network, wifi_ble_prov, memonitor), gated by each brick's `CONFIG_ZEGO_*` symbol. |
+| `banner_compiled_app_modules()` | `__weak`, no-op default — override with a strong definition in the application to list its own (non-zego) compiled modules. Must open with its own `"===="` line when overridden. |
+| `banner_wifi_modes_instructions()` | Current Wi-Fi mode, `zego_wifi_mode` shell hint, and per-mode connection instructions (shell connect, Wi-Fi credentials, BLE provisioning, P2P pairing) — moved unchanged from `zego/wifi`'s former `zego_banner_wifi_info()`. |
+
+```c
+/* src/main.c */
+#include <ux.h>
+
+int main(void)
+{
+	zego_ux_print_banner();
+	k_sleep(K_FOREVER);
+	return 0;
+}
+```
+
+Example override — add an application-specific module list:
+
+```c
+/* application file, not part of the brick */
+#include <ux.h>
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_REGISTER(app_banner_override, LOG_LEVEL_INF);
+
+void banner_compiled_app_modules(void)
+{
+	LOG_INF("==============================================");
+	LOG_INF("app_http");
+	LOG_INF("app_mqtt");
+}
 ```
