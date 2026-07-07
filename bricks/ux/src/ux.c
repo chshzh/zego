@@ -611,7 +611,8 @@ static void banner_wifi_modes_instructions(void)
 #if CONFIG_NRF70_AP_MODE
 	case ZEGO_WIFI_MODE_SOFTAP:
 #if defined(CONFIG_APP_WIFI_SSID)
-		LOG_INF(CLR_PRP "Connect to AP SSID='%s' Password='%s'" CLR_RST,
+		LOG_INF("----------------------------------------------");
+		LOG_INF(CLR_PRP "  Connect to AP SSID='%s' Password='%s'" CLR_RST,
 			CONFIG_APP_WIFI_SSID, CONFIG_APP_WIFI_PASSWORD);
 #else
 		LOG_INF("SoftAP: connect to the configured SSID.");
@@ -620,47 +621,24 @@ static void banner_wifi_modes_instructions(void)
 #endif /* CONFIG_NRF70_AP_MODE */
 
 #if CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED
-	case ZEGO_WIFI_MODE_P2P_GO: {
-		struct net_if *_iface = net_if_get_first_wifi();
-		struct net_linkaddr *_mac = _iface ? net_if_get_link_addr(_iface) : NULL;
-		char mac_str[18] = "XX:XX:XX:XX:XX:XX";
-
-		if (_mac && _mac->len >= 6) {
-			snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-				 _mac->addr[0], _mac->addr[1], _mac->addr[2], _mac->addr[3],
-				 _mac->addr[4], _mac->addr[5]);
-		}
-		LOG_INF(CLR_PRP "P2P_GO: GO MAC %s" CLR_RST, mac_str);
-		LOG_INF(CLR_PRP "  [ DK as P2P_GC ]" CLR_RST);
-		LOG_INF(CLR_PRP
-			"  Double-click Button 0 here to open the PBC pairing window," CLR_RST);
+	case ZEGO_WIFI_MODE_P2P_GO:
+		LOG_INF(CLR_PRP "  Accept P2P_GC DK to join automatically after paring." CLR_RST);
+		LOG_INF(CLR_PRP "  Double-click Button 0 to open the PBC pairing window," CLR_RST);
 		LOG_INF(CLR_PRP "  then double-click Button 0 on the P2P_GC DK." CLR_RST);
-		LOG_INF(CLR_PRP "  Manual (on the GC): wifi p2p connect %s pbc --join" CLR_RST,
-			mac_str);
-		LOG_INF(CLR_PRP "  [ Phone as P2P_GC ]" CLR_RST);
-		LOG_INF(CLR_PRP
-			"  Double-click Button 0 here to open the PBC pairing window," CLR_RST);
-		LOG_INF(CLR_PRP "  then on the phone: Wi-Fi -> Wi-Fi Direct -> select this DK -> "
-				"Connect" CLR_RST);
 		break;
-	}
 #endif /* CONFIG_ZEGO_WIFI_MODE_P2P_GO_ENABLED */
 
 #if CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED
 	case ZEGO_WIFI_MODE_P2P_GC:
-		LOG_INF(CLR_PRP
-			"P2P_GC mode: double-click Button 0 to pair with a P2P_GO DK" CLR_RST);
-		LOG_INF(CLR_PRP "  (GO's pairing window must be open - double-click Button 0 on GO "
-				"first)." CLR_RST);
-		LOG_INF(CLR_PRP
-			"  Once paired, the GO MAC is saved to NVS and the GC reconnects" CLR_RST);
-		LOG_INF(CLR_PRP "  automatically after reboot." CLR_RST);
-		LOG_INF(CLR_PRP "  Manual (DK GO): wifi p2p find -> wifi p2p peer -> wifi p2p "
+		LOG_INF(CLR_PRP "  Auto-reconnects to a paired P2P_GO DK; manual connect to any "
+				"GO also works." CLR_RST);
+		LOG_INF(CLR_PRP "  Double-click Button 0 to pair with a P2P_GO DK" CLR_RST);
+		LOG_INF(CLR_PRP "  Once paired, the GO MAC is saved to NVS and the GC can "
+				"reconnect automatically after reboot." CLR_RST);
+		LOG_INF(CLR_PRP " Manual (DK GO): wifi p2p find -> wifi p2p peer -> wifi p2p "
 				"connect <GO MAC> pbc --join" CLR_RST);
-		LOG_INF(CLR_PRP "  Manual (Phone GO): wifi p2p find -> wifi p2p peer (find phone "
-				"MAC) ->" CLR_RST);
-		LOG_INF(CLR_PRP
-			"    wifi p2p connect <phone MAC> pbc -g 0 -> accept on phone" CLR_RST);
+		LOG_INF(CLR_PRP " Manual (phone GO): wifi p2p find -> wifi p2p peer -> wifi p2p "
+				"connect <phone MAC> pbc -g 0" CLR_RST);
 		break;
 #endif /* CONFIG_ZEGO_WIFI_MODE_P2P_GC_ENABLED */
 
