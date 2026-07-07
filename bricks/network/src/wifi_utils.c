@@ -769,6 +769,19 @@ static uint8_t pairing_find_cycles; /* empty discovery cycles so far (log only) 
 /* Size of the local peer-query buffer used after P2P_FIND completes. */
 #define P2P_PAIR_MAX_CANDIDATES 5
 
+/* Nordic Wi-Fi OUI - nRF7002/nRF54LM20 factory MACs start with this prefix.
+ * Auto-pair only ever issues 'pbc --join', which requires the peer to already
+ * be a running P2P_GO; only a Nordic DK in this fleet can be one. Filtering
+ * the auto-pair candidate list to this OUI keeps a nearby phone or other P2P
+ * device (printers, etc.) from ever being picked as the auto-pair target.
+ * Connecting to a phone is still possible manually - see README.md. */
+static const uint8_t NORDIC_OUI[3] = {0xF4, 0xCE, 0x36};
+
+static bool p2p_mac_is_nordic(const uint8_t mac[6])
+{
+	return memcmp(mac, NORDIC_OUI, sizeof(NORDIC_OUI)) == 0;
+}
+
 /* ---- NVS persistence of the learned GO MAC (settings subtree "net") ----
  * A separate subtree from the wifi mode selector's "app" handler: two static
  * handlers cannot share one subtree name. */
@@ -926,26 +939,31 @@ static void p2p_gc_do_connect(struct k_work *work)
 		 * config_methods (WPS PBC capability) is not reliably parsed either -
 		 * it reflects the peer's general device capabilities, not whether it
 		 * currently has WPS PBC armed, so it does not identify the target GO.
-		 * Instead, just pick the strongest-RSSI peer: the intent of the
-		 * button-press pairing gesture is to join whichever GO is nearest. */
+		 * Instead, restrict candidates to the Nordic OUI (see NORDIC_OUI
+		 * above) and pick the strongest-RSSI one among those: the intent of
+		 * the button-press pairing gesture is to join whichever DK GO is
+		 * nearest, and only a Nordic DK can be a joinable GO for --join. */
 		LOG_INF("P2P_GC: peer table has %d entries, selecting GO", qparams.peer_count);
 
-		int best_any = -1;     /* strongest RSSI overall */
+		int best_any = -1;     /* strongest RSSI among Nordic-OUI peers */
 		int saved_go_idx = -1; /* index of the saved GO in the peer table */
 
 		for (int i = 0; i < qparams.peer_count; i++) {
 			bool has_pbc = (peer_buf[i].config_methods & 0x0080) != 0;
 			bool is_saved =
 				have_saved_go && memcmp(peer_buf[i].mac, saved_go_mac, 6) == 0;
+			bool is_nordic = p2p_mac_is_nordic(peer_buf[i].mac);
 
-			LOG_INF("P2P_GC:   [%d] %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d PBC=%d%s", i,
-				peer_buf[i].mac[0], peer_buf[i].mac[1], peer_buf[i].mac[2],
+			LOG_INF("P2P_GC:   [%d] %02X:%02X:%02X:%02X:%02X:%02X RSSI=%d PBC=%d%s%s",
+				i, peer_buf[i].mac[0], peer_buf[i].mac[1], peer_buf[i].mac[2],
 				peer_buf[i].mac[3], peer_buf[i].mac[4], peer_buf[i].mac[5],
-				peer_buf[i].rssi, has_pbc, is_saved ? " (saved GO)" : "");
+				peer_buf[i].rssi, has_pbc, is_saved ? " (saved GO)" : "",
+				is_nordic ? "" : " (non-Nordic, skipped)");
 			if (is_saved) {
 				saved_go_idx = i;
 			}
-			if (best_any < 0 || peer_buf[i].rssi > peer_buf[best_any].rssi) {
+			if (is_nordic &&
+			    (best_any < 0 || peer_buf[i].rssi > peer_buf[best_any].rssi)) {
 				best_any = i;
 			}
 		}
@@ -1134,9 +1152,9 @@ int wifi_run_p2p_gc_mode(void)
 			saved_go_mac[4], saved_go_mac[5], P2P_GC_CONNECT_TIMEOUT_S);
 		k_work_schedule_for_queue(&p2p_cli_workq, &p2p_gc_retry_work, K_NO_WAIT);
 	} else {
-		LOG_INF("P2P_GC: no saved GO - starting pairing discovery "
-			"(retries until a GO is found; double-click Button 0 works too)");
-		p2p_gc_start_pairing_internal();
+		/* No saved GO: stay idle until a pairing double-click - do not
+		 * auto-start discovery at boot (see p2p_gc_do_connect() idle log). */
+		LOG_INF("P2P_GC: no saved GO - double-click Button 0 to pair");
 	}
 
 	return 0;

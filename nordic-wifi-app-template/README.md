@@ -79,14 +79,15 @@ P2P_GO: double-click Button 0 to open the PBC pairing window for a P2P_GC device
 
 The firmware then starts the Wi-Fi subsystem and LED 0 begins ROTATING. Connection-mode instructions:
 
-- **P2P_GO**: device starts its own Wi-Fi Direct group automatically. To pair a P2P_GC device, **double-click Button 0** on the GO — this opens a ~2-minute WPS PBC pairing window. (Only other DKs running P2P_GC mode can join; phones acting as P2P clients are not supported; the GO expects exactly one P2P_GC client at a time.)
+- **P2P_GO**: device creates its own Wi-Fi Direct group at boot and keeps WPS PBC continuously armed (re-armed every 5 min and after any client disconnects), so it stays connectable at all times — double-clicking Button 0 only opens a ~2-minute LED pairing cue, it does not gate whether a peer can join. (Only other DKs running P2P_GC mode can join directly; a phone cannot connect by initiating from its own Wi-Fi Direct screen — the nRF7x WPS Registrar does not support phone-initiated joins. To connect a phone, put the DK in P2P_GC mode and pair with the phone acting as P2P_GO instead. The GO expects exactly one P2P_GC client at a time.)
 - **STA**: run `wifi connect -s <SSID> -p <pass> -k 1` in the UART shell; on success the terminal logs `Wi-Fi connected: mode=STA ip=192.168.x.x`. If the connection later drops, the device automatically keeps retrying the stored network — no button press needed.
 - **SoftAP**: phone connects to the hotspot advertised by the device; device IP is `192.168.7.1`.
-- **P2P_GC**: joins a P2P_GO's group; no GO MAC is configured at build time.
-  - **Auto-pair**: with no saved GO, the device automatically starts pairing discovery at boot and keeps retrying until it joins one — no button press required.
-  - **Pair (manual/re-pair)**: double-click Button 0 on the GO (opens its pairing window), then double-click Button 0 on the GC to (re-)start discovery. The GC joins the pairing GO via WPS PBC (`pbc --join`), gets static IP `192.168.7.2/24`, and saves the GO's MAC to NVS.
-  - **Reconnect**: after pairing, the GC reconnects to the saved GO automatically on disconnect and after a power cycle, retrying indefinitely — no button press needed. A new double-click pairing overwrites the saved GO.
-  - **Manual (advanced)**: run `wifi p2p find`, then `wifi p2p peer` to list discovered peers, then `wifi p2p connect <GO-MAC> pbc --join`.
+- **P2P_GC**: joins a P2P_GO's group; no GO MAC is configured at build time. Auto-pair/reconnect (below) only ever targets **Nordic-OUI MACs** (`F4:CE:36:xx:xx:xx` — nRF7002/nRF54LM20 factory MACs): the firmware filters the discovered-peer list to this OUI before picking the strongest-RSSI candidate, since `pbc --join` only works against an already-running DK P2P_GO. This is enforced in code (`wifi_utils.c`), not just a naming convention — a phone or any other nearby P2P device (printers, etc.) can never be picked as the auto-pair target.
+  - **DK as P2P_GO — Auto-pair**: with no saved GO, the device automatically starts pairing discovery at boot and keeps retrying until it joins a Nordic-OUI peer — no button press required.
+  - **DK as P2P_GO — Pair (manual/re-pair)**: double-click Button 0 on the GO (opens its pairing window), then double-click Button 0 on the GC to (re-)start discovery. The GC joins the pairing GO via WPS PBC (`pbc --join`), gets static IP `192.168.7.2/24`, and saves the GO's MAC to NVS.
+  - **DK as P2P_GO — Reconnect**: after pairing, the GC reconnects to the saved GO automatically on disconnect and after a power cycle, retrying indefinitely — no button press needed. A new double-click pairing overwrites the saved GO.
+  - **DK as P2P_GO — Manual (advanced)**: run `wifi p2p find`, then `wifi p2p peer` to list discovered peers (GO MAC starts with `F4:CE`), then `wifi p2p connect <GO-MAC> pbc --join`.
+  - **Phone as P2P_GO**: not covered by auto-pair (filtered out by the Nordic-OUI check above) — connect manually. Put the phone in Wi-Fi Direct host/GO mode first, then run `wifi p2p find` and `wifi p2p peer` and look for a MAC that does **not** start with `F4:CE`, then `wifi p2p connect <phone-MAC> pbc -g 0` and accept the invitation on the phone.
 
 Switch mode with `zego_wifi_mode [sta|softap|p2p_go|p2p_gc]` — the device reboots into the new mode and persists the setting.
 
