@@ -201,6 +201,31 @@ static void sta_dhcp_restart_handler(struct k_work *work)
 }
 
 /* ============================================================================
+ * DEFERRED P2P_GC DHCP RESTART
+ * ============================================================================
+ * Same failure mode as sta_dhcp_restart_work above: the P2P_GC CONNECT_RESULT
+ * handler used to call net_dhcpv4_restart() synchronously in the net_mgmt
+ * callback, which raced with other synchronous WPA ctrl-interface commands at
+ * the instant L2 association completes and could wedge it - DHCP then never
+ * binds (no NET_EVENT_IPV4_DHCP_BOUND), leaving the GC associated but without
+ * an IP until the next reboot/reconnect happens not to race. Defer it the
+ * same way. */
+static struct k_work_delayable p2p_gc_dhcp_restart_work;
+
+static void p2p_gc_dhcp_restart_handler(struct k_work *work)
+{
+	struct net_if *iface = net_if_get_first_wifi();
+
+	if (active_mode != ZEGO_WIFI_MODE_P2P_GC || iface == NULL) {
+		return;
+	}
+
+	LOG_INF("P2P_GC: restarting DHCP on %s",
+		net_if_get_device(iface) ? net_if_get_device(iface)->name : "?");
+	net_dhcpv4_restart(iface);
+}
+
+/* ============================================================================
  * STA RECONNECT: direct-disconnect retry + L3 DHCP-timeout watchdog
  * ============================================================================
  * STA must keep retrying a stored network after any disconnect (see
@@ -653,17 +678,15 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 				zsock_inet_pton(AF_INET, CONFIG_NET_CONFIG_MY_IPV4_ADDR, &cfg_ip);
 				net_if_ipv4_addr_rm(iface, &cfg_ip);
 
-				/* Restart DHCP like STA mode - wait for DHCP_BOUND to get
-				 * the GO-assigned IP (phone: e.g. 192.168.49.x; DK GO:
-				 * 192.168.7.x). */
-				LOG_INF("P2P_GC: restarting DHCP on %s",
-					net_if_get_device(iface) ? net_if_get_device(iface)->name
-								 : "?");
-				net_dhcpv4_restart(iface);
+				/* Deferred - see p2p_gc_dhcp_restart_work comment above.
+				 * Wait for DHCP_BOUND to get the GO-assigned IP (phone:
+				 * e.g. 192.168.49.x; DK GO: 192.168.7.x). */
+				k_work_reschedule(&p2p_gc_dhcp_restart_work,
+						  K_MSEC(STA_DHCP_RESTART_DELAY_MSEC));
 			} else if (active_mode == ZEGO_WIFI_MODE_STA) {
 				/* Deferred - see sta_dhcp_restart_work comment above. */
 				k_work_reschedule(&sta_dhcp_restart_work,
-						   K_MSEC(STA_DHCP_RESTART_DELAY_MSEC));
+						  K_MSEC(STA_DHCP_RESTART_DELAY_MSEC));
 				/* Associated at L2 - arm the watchdog; it is
 				 * cancelled when DHCP binds. */
 				l3_watchdog_arm();
@@ -677,20 +700,17 @@ static void l2_wifi_conn_event_handler(struct net_mgmt_event_callback *cb, uint6
 			LOG_ERR("L2-NET_EVENT_WIFI_CONNECT_RESULT: failed: status=%d",
 				status->status);
 			switch (status->status) {
-			case 1:
+			case WIFI_STATUS_CONN_FAIL:
 				LOG_ERR("  Reason: Generic failure");
 				break;
-			case 2:
-				LOG_ERR("  Reason: Authentication timeout");
+			case WIFI_STATUS_CONN_WRONG_PASSWORD:
+				LOG_ERR("  Reason: Wrong password");
 				break;
-			case 3:
-				LOG_ERR("  Reason: Authentication failed");
+			case WIFI_STATUS_CONN_TIMEOUT:
+				LOG_ERR("  Reason: Connection timed out");
 				break;
-			case 15:
+			case WIFI_STATUS_CONN_AP_NOT_FOUND:
 				LOG_ERR("  Reason: AP not found");
-				break;
-			case 16:
-				LOG_ERR("  Reason: Association timeout");
 				break;
 			case -ETIMEDOUT:
 				LOG_ERR("  Reason: Timed out - check credentials / AP "
@@ -1240,6 +1260,7 @@ int network_module_init(void)
 
 	k_work_init_delayable(&dhcp_diag_work, dhcp_diag_handler);
 	k_work_init_delayable(&sta_dhcp_restart_work, sta_dhcp_restart_handler);
+	k_work_init_delayable(&p2p_gc_dhcp_restart_work, p2p_gc_dhcp_restart_handler);
 #if !IS_ENABLED(CONFIG_ZEGO_WIFI_BLE_PROV)
 	k_work_init_delayable(&l3_reconnect_work, l3_reconnect_handler);
 #endif
