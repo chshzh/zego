@@ -565,7 +565,7 @@ static void banner_wifi_modes_instructions(void)
 
 	switch (mode) {
 	case ZEGO_WIFI_MODE_STA:
-		LOG_INF("Connect using any available option for the current Wi-Fi Mode:");
+		LOG_INF("Connect using below method:");
 
 #if CONFIG_NET_L2_WIFI_SHELL
 		LOG_INF("----------------------------------------------");
