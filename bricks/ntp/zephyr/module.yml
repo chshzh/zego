@@ -1,0 +1,5 @@
+name: zego_ntp
+
+build:
+  cmake: .
+  kconfig: Kconfig

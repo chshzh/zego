@@ -1,0 +1,58 @@
+#
+# Copyright (c) 2026 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+config ZEGO_NTP
+	bool "NTP time synchronization"
+	select SNTP
+	depends on ZBUS && NETWORKING
+	default n
+	help
+	  Queries an SNTP server and sets CLOCK_REALTIME once network
+	  connectivity is established. When CONFIG_LOG_TIMESTAMP_USE_REALTIME=y
+	  is also set, Zephyr log output shows real-world wall-clock timestamps.
+
+	  The module has no zbus channel of its own; instead it declares
+	  ZEGO_NTP_NET_CHAN, which the application publishes to - typically
+	  from its zego/network weak-hook overrides (net_event_app.c) -
+	  following the same decoupling pattern used by zego/ux.
+
+if ZEGO_NTP
+
+config ZEGO_NTP_SERVER
+	string "SNTP server hostname"
+	default "pool.ntp.org"
+	help
+	  Hostname of the SNTP server used for time synchronization.
+
+config ZEGO_NTP_TIMEOUT_MS
+	int "SNTP query timeout (ms)"
+	default 5000
+	range 1000 30000
+	help
+	  Maximum time to wait for an SNTP response, in milliseconds.
+
+config ZEGO_NTP_RETRY_INTERVAL_SEC
+	int "Retry interval on failure (s)"
+	default 30
+	range 5 3600
+	help
+	  How long to wait before retrying a failed SNTP query.
+
+config ZEGO_NTP_RESYNC_INTERVAL_SEC
+	int "Periodic re-sync interval after a successful sync (s)"
+	default 10800
+	range 60 86400
+	help
+	  How often to re-sync after a successful query to compensate for
+	  crystal oscillator drift. At 40 ppm, the clock drifts ~0.5 s over
+	  ~3.5 hours, so the default of 10800 s (3 h) keeps drift under 0.5 s.
+	  Set to 0 to disable periodic re-sync (sync once per connection only).
+
+module = ZEGO_NTP
+module-str = zego_ntp
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # ZEGO_NTP
