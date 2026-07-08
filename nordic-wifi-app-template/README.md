@@ -179,6 +179,7 @@ External zego bricks (referenced via `EXTRA_ZEPHYR_MODULES` in `CMakeLists.txt`)
 ../bricks/led/           ← LED_CMD_CHAN subscriber, ROTATE/BLINK/BREATHE effects
 ../bricks/wifi_ble_prov/ ← BLE provisioning server (nRF54LM20DK; optional overlay on others)
 ../bricks/ux/            ← Button gesture detection + LED state machine; weak-hook gesture API
+../bricks/ntp/           ← SNTP time synchronization; real-world timestamps via CLOCK_REALTIME
 ```
 
 ### Workspace Setup

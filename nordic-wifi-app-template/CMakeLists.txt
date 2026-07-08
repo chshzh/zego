@@ -16,6 +16,7 @@ get_filename_component(ZEGO_NETWORK_DIR      ${CMAKE_CURRENT_SOURCE_DIR}/../bric
 get_filename_component(ZEGO_WIFI_BLE_PROV_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../bricks/wifi_ble_prov REALPATH)
 get_filename_component(ZEGO_MEMONITOR_DIR    ${CMAKE_CURRENT_SOURCE_DIR}/../bricks/memonitor    REALPATH)
 get_filename_component(ZEGO_UX_DIR            ${CMAKE_CURRENT_SOURCE_DIR}/../bricks/ux           REALPATH)
+get_filename_component(ZEGO_NTP_DIR           ${CMAKE_CURRENT_SOURCE_DIR}/../bricks/ntp          REALPATH)
 list(APPEND EXTRA_ZEPHYR_MODULES
   ${ZEGO_BUTTON_DIR}
   ${ZEGO_LED_DIR}
@@ -24,6 +25,7 @@ list(APPEND EXTRA_ZEPHYR_MODULES
   ${ZEGO_WIFI_BLE_PROV_DIR}
   ${ZEGO_MEMONITOR_DIR}
   ${ZEGO_UX_DIR}
+  ${ZEGO_NTP_DIR}
 )
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})

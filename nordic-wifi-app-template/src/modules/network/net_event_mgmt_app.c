@@ -19,8 +19,10 @@
  * start an MQTT client, or kick off an HTTP request.
  *
  * ZEGO_UX_WIFI_STATE_CHAN (owned by the zego/ux brick) is published here so
- * zego/ux can drive the LEDs. Add your own zbus channels in messages.h
- * following the same ZBUS_CHAN_DEFINE pattern.
+ * zego/ux can drive the LEDs. ZEGO_NTP_NET_CHAN (owned by the zego/ntp brick,
+ * only when CONFIG_ZEGO_NTP=y) is published here so zego/ntp knows when to
+ * query its SNTP server. Add your own zbus channels in messages.h following
+ * the same ZBUS_CHAN_DEFINE pattern.
  *
  * ── How to extend ────────────────────────────────────────────────────────────
  *
@@ -33,6 +35,9 @@
 
 #include <net_event_mgmt.h>
 #include <ux.h>
+#if defined(CONFIG_ZEGO_NTP)
+#include <ntp.h>
+#endif
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(net_event_app, LOG_LEVEL_INF);
@@ -88,6 +93,12 @@ void zego_on_net_event_dhcp_bound(enum zego_wifi_mode mode, const char *ip_addr,
 
 	zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
 
+#if defined(CONFIG_ZEGO_NTP)
+	struct zego_ntp_net_msg ntp_msg = { .connected = true };
+
+	zbus_chan_pub(&ZEGO_NTP_NET_CHAN, &ntp_msg, K_NO_WAIT);
+#endif
+
 	/* TODO: Device has an IP address - start your application here.
 	 * ip_addr, mac_addr, ssid are available as function arguments.
 	 * Example: connect to MQTT broker, start HTTP client, send telemetry. */
@@ -136,6 +147,12 @@ void zego_on_net_event_wifi_disconnect(bool will_retry)
 	};
 
 	zbus_chan_pub(&ZEGO_UX_WIFI_STATE_CHAN, &msg, K_NO_WAIT);
+
+#if defined(CONFIG_ZEGO_NTP)
+	struct zego_ntp_net_msg ntp_msg = { .connected = false };
+
+	zbus_chan_pub(&ZEGO_NTP_NET_CHAN, &ntp_msg, K_NO_WAIT);
+#endif
 
 	/* TODO: Wi-Fi link lost - clean up application state here.
 	 * Example: disconnect MQTT, cancel pending requests, flush buffers. */
