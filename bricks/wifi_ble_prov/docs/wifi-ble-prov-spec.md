@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | Module | `zego/wifi_ble_prov` |
-| Version | 2026-07-01-16-45 |
+| Version | 2026-07-08-00-00 |
 | PRD Version | N/A (standalone library module) |
 | NCS Version | v3.3.0 |
 | Status | Stable |
@@ -16,6 +16,7 @@
 
 | Version | Summary of changes |
 |---|---|
+| 2026-07-08-00-00 | `WIFI_RECONNECT_DELAY_SEC`/`WIFI_RECONNECT_RETRY_SEC` are no longer hardcoded `#define`s - now `CONFIG_ZEGO_WIFI_BLE_PROV_RECONNECT_DELAY_SEC` (default 5) and `CONFIG_ZEGO_WIFI_BLE_PROV_RECONNECT_RETRY_SEC` (default 60, was a hardcoded 180) Kconfig options, so apps with multiple stored credentials can shorten the rotation interval without patching this shared brick. |
 | 2026-06-04-17-10 | Initial spec - reverse-designed from source |
 | 2026-06-05-09-31 | Added Supported Hardware section; documented nRF5340 Audio DK + nRF7002EK + BLE network-core constraint |
 | 2026-06-11-13-52 | Updated hook name references: `zego_network_on_wifi_connected`→`zego_on_net_event_dhcp_bound`, `zego_network_on_wifi_disconnected`→`zego_on_net_event_wifi_disconnect` |
@@ -159,10 +160,15 @@ On `WIFI_DISCONNECT_RESULT` (when provisioner is not the intentional cause), or 
 `WIFI_CONNECT_RESULT` (wpa_supplicant does not fire `DISCONNECT_RESULT` after a failed connect
 attempt, so a failure needs its own trigger too):
 
-1. Schedule `wifi_connect_work` after `WIFI_RECONNECT_DELAY_SEC` (5 s).
+1. Schedule `wifi_connect_work` after `CONFIG_ZEGO_WIFI_BLE_PROV_RECONNECT_DELAY_SEC` (default 5 s).
 2. On work handler: attempt `connect_stored_rotating()` - cycles through all stored SSIDs
    in round-robin order using `wifi_credentials_for_each_ssid()`.
-3. If still disconnected: reschedule after `WIFI_RECONNECT_RETRY_SEC` (180 s).
+3. If still disconnected: reschedule after `CONFIG_ZEGO_WIFI_BLE_PROV_RECONNECT_RETRY_SEC`
+   (default 60 s). With N stored credentials, worst-case time to reach the one actually in
+   range is roughly `RECONNECT_DELAY_SEC + (N-1) * RECONNECT_RETRY_SEC` - lower the retry
+   interval in an app's `prj.conf` if faster multi-AP failover matters more than minimizing
+   retry/scan traffic (a single attempt typically resolves in 15-20 s, so don't go much
+   below that or rotations will overlap an attempt still in flight).
 4. Log the full retry schedule at reconnect start (shows T+Ns for each SSID in rotation order).
 
 **Exception - pre-scan race**: a `CONNECT_RESULT` failure with `status=1` before the first

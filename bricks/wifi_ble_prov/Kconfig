@@ -57,6 +57,32 @@ config ZEGO_WIFI_BLE_PROV_DHCP_WATCHDOG_SEC
 	  Wi-Fi connect observed by this module), the device performs a warm
 	  reboot to recover.  Set to 0 to disable.
 
+config ZEGO_WIFI_BLE_PROV_RECONNECT_DELAY_SEC
+	int "Delay before the first reconnect attempt after a disconnect (seconds)"
+	default 5
+	range 1 300
+	help
+	  How long to wait after a disconnect before the first
+	  connect_stored_rotating() attempt.
+
+config ZEGO_WIFI_BLE_PROV_RECONNECT_RETRY_SEC
+	int "Interval between rotating-credential reconnect attempts (seconds)"
+	default 60
+	range 5 600
+	help
+	  Interval between successive connect_stored_rotating() attempts while
+	  still disconnected. Each attempt tries the next stored credential in
+	  rotation, so with N stored credentials the worst-case time to reach
+	  the one that is actually in range is roughly
+	  ZEGO_WIFI_BLE_PROV_RECONNECT_DELAY_SEC + (N-1) * this value.
+
+	  The 60 s default balances avoiding excessive AP/scan traffic against
+	  reasonably fast failover across stored networks. Lower it further if
+	  faster multi-AP failover matters more than minimizing retry traffic
+	  - a single connect attempt (scan + auth + failure/timeout) typically
+	  resolves within 15-20 s, so values much below that risk overlapping
+	  the next rotation with an attempt still in flight.
+
 module = ZEGO_WIFI_BLE_PROV
 module-str = zego_wifi_ble_prov
 source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
