@@ -10,15 +10,15 @@ channel definitions. Applications declare which bricks they need; the build syst
 wires them automatically — no code copying, no manual glue.
 
 ```
-┌─────────────────────────────────────────────┐
-│              Application                    │
-│  (prj.conf: CONFIG_ZEGO_BUTTON=y, etc.)     │
-├──────────┬──────────┬──────────┬────────────┤
-│  button  │   led    │   wifi   │  network   │  ← zego bricks
-│  module  │  module  │  module  │   module   │
-├──────────┴──────────┴──────────┴────────────┤
-│          Zephyr kernel + zbus               │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                                   Application                                    │
+│                      (prj.conf: CONFIG_ZEGO_BUTTON=y, etc.)                      │
+├────────┬────────┬────────┬─────────┬───────────────┬───────────┬────────┬────────┤
+│ button │  led   │  wifi  │ network │ wifi_ble_prov │ memonitor │   ux   │  ntp   │  ← zego bricks
+│ module │ module │ module │ module  │    module     │  module   │ module │ module │
+├────────┴────────┴────────┴─────────┴───────────────┴───────────┴────────┴────────┤
+│                               Zephyr kernel + zbus                               │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Design principles
@@ -47,8 +47,32 @@ Capabilities are composed by enabling Kconfig symbols — no code copying.
 | wifi_ble_prov | `zego/bricks/wifi_ble_prov/` | — | [wifi-ble-prov-spec.md](bricks/wifi_ble_prov/docs/wifi-ble-prov-spec.md) |
 | memonitor | `zego/bricks/memonitor/` | `MEMONITOR_CHAN` (out) | [memonitor-spec.md](bricks/memonitor/docs/memonitor-spec.md) |
 | ux | `zego/bricks/ux/` | `ZEGO_UX_WIFI_STATE_CHAN` (in) · weak-hook gesture API | [ux-spec.md](bricks/ux/docs/ux-spec.md) |
+| ntp | `zego/bricks/ntp/` | `ZEGO_NTP_NET_CHAN` (in) | [ntp-spec.md](bricks/ntp/docs/ntp-spec.md) |
 
 See each spec for the full API, Kconfig reference, and hardware test guide.
+
+### Brick zbus channel map
+
+Most bricks never call each other directly — they only exchange typed messages over
+zbus channels (🟨). `network` has no channel of its own; instead it fires `__weak`
+callback hooks that the application overrides to publish onto app-level or brick-owned
+channels (dashed arrows), which is how `ux` and `ntp` learn about connectivity changes.
+
+```
+button ──publishes──► BUTTON_CHAN ──consumed by──► ux
+ux     ──publishes──► LED_CMD_CHAN ──consumed by──► led ──publishes──► LED_STATE_CHAN
+wifi   ──publishes──► WIFI_MODE_CHAN ──consumed by──► network
+
+network ──fires __weak hooks──► application (net_event_*.c overrides)
+                                    │
+                                    ├──publishes──► ZEGO_UX_WIFI_STATE_CHAN ──► ux
+                                    └──publishes──► ZEGO_NTP_NET_CHAN (CONFIG_ZEGO_NTP=y) ──► ntp
+
+wifi_ble_prov ──publishes──► BLE_PROV_CONN_CHAN ──consumed by──► ux
+
+memonitor ──publishes──► MEMONITOR_CHAN  (periodic sampler, no upstream brick input;
+                                          consumed by application-level metrics/dashboard code)
+```
 
 ---
 
