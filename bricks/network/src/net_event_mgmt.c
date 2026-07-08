@@ -182,7 +182,20 @@ static void dhcp_diag_handler(struct k_work *work)
  * generic L4-triggered DHCP handling instead, which is not driven off the L2
  * CONNECT_RESULT event. Deferring the restart by a short delay keeps it off
  * the net_mgmt event thread and out of the instant the association completes,
- * avoiding that collision. */
+ * avoiding that collision.
+ *
+ * The handler is unconditionally scheduled at CONNECT_RESULT time (DHCP
+ * cannot have bound yet at that instant - it always binds after L2
+ * association completes), but it re-checks for a bound IPv4 address when it
+ * actually RUNS, 300 ms later. A normal DHCP bind completes well within that
+ * window (observed ~15 ms after CONNECT_RESULT), so by the time the handler
+ * fires the client is not stuck in backoff and forcing a restart here only
+ * produces a spurious ADDR_DEL/DHCP_BOUND cycle: the ADDR_DEL handler cannot
+ * distinguish this self-inflicted stop from a genuine lease loss, so it
+ * clears the renewal-dedup state (network_connected/last_bound_ip), causing
+ * the subsequent same-IP DHCP_BOUND to run the full app-level connect
+ * fan-out a second time (observed to double-fire WIFI_STA_CONNECTED and
+ * race two concurrent Memfault FOTA checks, one failing with -EALREADY). */
 #define STA_DHCP_RESTART_DELAY_MSEC 300
 
 static struct k_work_delayable sta_dhcp_restart_work;
@@ -192,6 +205,14 @@ static void sta_dhcp_restart_handler(struct k_work *work)
 	struct net_if *iface = net_if_get_wifi_sta();
 
 	if (active_mode != ZEGO_WIFI_MODE_STA || iface == NULL) {
+		return;
+	}
+
+	if (net_if_ipv4_get_global_addr(iface, NET_ADDR_ANY_STATE)) {
+		/* DHCP already bound on its own during the delay window - see
+		 * comment above sta_dhcp_restart_work for why forcing a restart
+		 * here would be both unnecessary and harmful. */
+		LOG_INF("STA: DHCP already bound, skipping restart");
 		return;
 	}
 
