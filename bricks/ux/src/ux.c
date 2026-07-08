@@ -479,21 +479,21 @@ static void banner_compiled_zego_modules(void)
 	LOG_INF("==============================================");
 	LOG_INF("ZEGO(" CLR_GRN "%s" CLR_RST "):", ZEGO_MODULES_VERSION);
 #if CONFIG_ZEGO_BUTTON
-	LOG_INF("  " CLR_BLU "button" CLR_RST);
+	LOG_INF("" CLR_BLU "button" CLR_RST);
 #endif
 #if CONFIG_ZEGO_LED
-	LOG_INF("  " CLR_BLU "led" CLR_RST);
+	LOG_INF("" CLR_BLU "led" CLR_RST);
 #endif
-	LOG_INF("  " CLR_BLU "ux" CLR_RST);
-	LOG_INF("  " CLR_BLU "wifi" CLR_RST);
+	LOG_INF("" CLR_BLU "ux" CLR_RST);
+	LOG_INF("" CLR_BLU "wifi" CLR_RST);
 #if CONFIG_ZEGO_NETWORK
-	LOG_INF("  " CLR_BLU "network" CLR_RST);
+	LOG_INF("" CLR_BLU "network" CLR_RST);
 #endif
 #if CONFIG_ZEGO_WIFI_BLE_PROV
-	LOG_INF("  " CLR_BLU "wifi_ble_prov" CLR_RST);
+	LOG_INF("" CLR_BLU "wifi_ble_prov" CLR_RST);
 #endif
 #if CONFIG_ZEGO_MEMONITOR
-	LOG_INF("  " CLR_BLU "memonitor" CLR_RST);
+	LOG_INF("" CLR_BLU "memonitor" CLR_RST);
 #endif
 }
 
